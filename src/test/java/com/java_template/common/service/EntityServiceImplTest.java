@@ -236,6 +236,69 @@ class EntityServiceImplTest {
     }
 
     // ========================================
+    // TYPED EXCEPTIONS AT THE PUBLIC BOUNDARY (spec §4.4): never a CompletionException
+    // ========================================
+
+    private static CyodaRetryableException busy() {
+        return new CyodaRetryableException("TOO_MANY_JOINED_REQUESTS", "busy");
+    }
+
+    @Test
+    @DisplayName("read: getById surfaces the repository's typed exception unwrapped")
+    void getByIdSurfacesTheTypedExceptionUnwrapped() {
+        CyodaRetryableException busy = busy();
+        when(repository.findById(any(CyodaCallContext.class), eq(testEntityId), isNull()))
+                .thenReturn(CompletableFuture.failedFuture(busy));
+
+        assertSame(busy, assertThrows(CyodaRetryableException.class,
+                () -> entityService.getById(testEntityId, createTestModelSpec(), TestEntity.class)));
+    }
+
+    @Test
+    @DisplayName("search: search surfaces the repository's typed exception unwrapped")
+    void searchSurfacesTheTypedExceptionUnwrapped() {
+        CyodaRetryableException busy = busy();
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
+                .thenReturn(CompletableFuture.failedFuture(busy));
+
+        assertSame(busy, assertThrows(CyodaRetryableException.class, () -> entityService.search(createTestModelSpec(),
+                new GroupConditionDto().operator(GroupConditionDto.OperatorEnum.AND).conditions(List.of()), TestEntity.class)));
+    }
+
+    @Test
+    @DisplayName("write: save surfaces the repository's typed exception unwrapped")
+    void saveSurfacesTheTypedExceptionUnwrapped() {
+        CyodaRetryableException busy = busy();
+        Collection<TestEntity> entities = List.of(testEntity);
+        when(repository.saveAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(entities), any(), any()))
+                .thenReturn(CompletableFuture.failedFuture(busy));
+
+        assertSame(busy, assertThrows(CyodaRetryableException.class, () -> entityService.save(entities)));
+    }
+
+    @Test
+    @DisplayName("transition: update surfaces the repository's typed exception unwrapped")
+    void updateSurfacesTheTypedExceptionUnwrapped() {
+        CyodaCalloutEndedException ended = new CyodaCalloutEndedException("CALLOUT_SUPERSEDED", "superseded");
+        when(repository.update(any(CyodaCallContext.class), eq(testEntityId), any(), eq(TRANSITION_ACTIVATE)))
+                .thenReturn(CompletableFuture.failedFuture(ended));
+
+        assertSame(ended, assertThrows(CyodaCalloutEndedException.class,
+                () -> entityService.update(testEntityId, testEntity, TRANSITION_ACTIVATE)));
+    }
+
+    @Test
+    @DisplayName("metadata: getEntityChangesMetadata surfaces the repository's typed exception unwrapped")
+    void changesMetadataSurfacesTheTypedExceptionUnwrapped() {
+        CyodaRetryableException busy = busy();
+        when(repository.getEntityChangesMetadata(any(CyodaCallContext.class), eq(testEntityId), isNull()))
+                .thenReturn(CompletableFuture.failedFuture(busy));
+
+        assertSame(busy, assertThrows(CyodaRetryableException.class,
+                () -> entityService.getEntityChangesMetadata(testEntityId)));
+    }
+
+    // ========================================
     // SUCCESSFUL REPOSITORY INTERACTIONS
     // ========================================
 

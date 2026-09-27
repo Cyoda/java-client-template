@@ -54,6 +54,14 @@ import java.util.stream.Stream;
  * - Passing a bare null literal is ambiguous between the two overloads; cast it, e.g. (OffsetDateTime) null,
  *   or call the overload without pointInTime.
  *
+ * ERRORS:
+ * - Failures are thrown as the typed Cyoda exceptions (com.java_template.common.exception), never wrapped in a
+ *   CompletionException, so they can be caught directly: CyodaCalloutEndedException (stop working on this
+ *   request), CyodaRetryableException, CyodaCommitInJoinedTransactionException (use CalloutScope.unjoined),
+ *   CyodaJoinedResponseTooLargeException (page the read), CyodaAccessDeniedException, and otherwise
+ *   CyodaOperationException / CyodaHttpException carrying the cyoda error code. Local argument refusals are
+ *   IllegalArgumentException or IllegalStateException, as described below.
+ *
  * INSIDE A PROCESSOR OR CRITERION (an open CalloutScope):
  * - Calls join the callout's transaction and see its uncommitted writes.
  * - Search (findAll, search, findByBusinessId, findByCompositeKey and the streams) runs as ONE direct search,

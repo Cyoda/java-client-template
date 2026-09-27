@@ -8,6 +8,7 @@ import com.java_template.common.call.CyodaCallContexts;
 import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.exception.WorkflowExportException;
+import com.java_template.common.util.Futures;
 import com.java_template.common.util.HttpUtils;
 import org.cyoda.cloud.api.event.common.ModelSpec;
 import org.jetbrains.annotations.NotNull;
@@ -61,7 +62,7 @@ public class WorkflowServiceImpl implements WorkflowService {
             logger.debug("Using export endpoint: {}", exportPath);
 
             // Make HTTP GET request to Cyoda API
-            ObjectNode response = httpUtils.sendGetRequest(ctx, config.getCyodaApiUrl(), exportPath).join();
+            ObjectNode response = Futures.joinUnwrapped(httpUtils.sendGetRequest(ctx, config.getCyodaApiUrl(), exportPath));
             int statusCode = response.get("status").asInt();
 
             // Check response status
@@ -106,7 +107,7 @@ public class WorkflowServiceImpl implements WorkflowService {
         body.put("importMode", importMode);
         body.set("workflows", workflows);
         String path = String.format("model/%s/%d/workflow/import", modelSpec.getName(), modelSpec.getVersion());
-        return httpUtils.sendPostRequest(ctx, config.getCyodaApiUrl(), path, body).join();
+        return Futures.joinUnwrapped(httpUtils.sendPostRequest(ctx, config.getCyodaApiUrl(), path, body));
     }
 
 }

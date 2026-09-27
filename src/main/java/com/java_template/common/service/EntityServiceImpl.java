@@ -10,6 +10,7 @@ import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.repository.CrudRepository;
 import com.java_template.common.repository.SearchAndRetrievalParams;
+import com.java_template.common.util.Futures;
 import com.java_template.common.workflow.CyodaEntity;
 import org.cyoda.cloud.api.common.model.*;
 import org.cyoda.cloud.api.event.common.DataPayload;
@@ -26,7 +27,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
 import java.util.*;
-import java.util.concurrent.CompletionException;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -39,6 +39,9 @@ import java.util.stream.StreamSupport;
  * including the later pages of a stream (spec §4.2). Inside a callout scope, the entity written by
  * create/update/save/updateAll is reloaded as the joined transaction's latest view, without a point in
  * time (spec clarification 3).
+ *
+ * <p>Every repository future is joined with {@link Futures#joinUnwrapped}, so failures leave the public
+ * methods as the typed Cyoda exceptions (spec §4.4), never wrapped in a CompletionException.
  */
 @Service
 public class EntityServiceImpl implements EntityService {
@@ -94,7 +97,7 @@ public class EntityServiceImpl implements EntityService {
             final Class<T> entityClass,
             @Nullable final OffsetDateTime pointInTime
     ) {
-        DataPayload payload = repository.findById(ctx, entityId, pointInTime).join();
+        DataPayload payload = Futures.joinUnwrapped(repository.findById(ctx, entityId, pointInTime));
         return EntityWithMetadata.fromDataPayload(payload, entityClass, objectMapper);
     }
 
@@ -159,17 +162,9 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final String businessIdField,
             @NotNull final Class<T> entityClass
     ) {
-        // null means "no match" only: not-found is an empty result, and every failure propagates.
-        try {
-            return findByBusinessId(callContexts.current(), modelSpec, businessId, businessIdField, entityClass, null);
-        } catch (CompletionException e) {
-            throw unwrap(e);
-        }
-    }
-
-    /** The repository's own exception (e.g. a CyodaRetryableException), as-is, rather than the join() wrapper. */
-    private static RuntimeException unwrap(final CompletionException e) {
-        return e.getCause() instanceof RuntimeException cause ? cause : e;
+        // null means "no match" only: not-found is an empty result, and every failure propagates
+        // (already unwrapped from CompletionException by Futures.joinUnwrapped).
+        return findByBusinessId(callContexts.current(), modelSpec, businessId, businessIdField, entityClass, null);
     }
 
     @Override
@@ -226,12 +221,9 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final Map<String, java.util.function.Function<T, Object>> businessIdExtractors,
             @NotNull final Class<T> entityClass
     ) {
-        // null means "no match" only: not-found is an empty result, and every failure propagates.
-        try {
-            return findByCompositeKey(callContexts.current(), modelSpec, entity, businessIdExtractors, entityClass);
-        } catch (CompletionException e) {
-            throw unwrap(e);
-        }
+        // null means "no match" only: not-found is an empty result, and every failure propagates
+        // (already unwrapped from CompletionException by Futures.joinUnwrapped).
+        return findByCompositeKey(callContexts.current(), modelSpec, entity, businessIdExtractors, entityClass);
     }
 
     @Override
@@ -249,28 +241,28 @@ public class EntityServiceImpl implements EntityService {
             final Class<T> entityClass,
             final SearchAndRetrievalParams params
     ) {
-        PageResult<DataPayload> pageResult = repository.findAll(
+        PageResult<DataPayload> pageResult = Futures.joinUnwrapped(repository.findAll(
                 ctx,
                 modelSpec,
                 params
-        ).join();
+        ));
 
         return toEntities(pageResult, entityClass);
     }
 
     @Override
     public long getEntityCount(@NotNull final ModelSpec modelSpec) {
-        return repository.getEntityCount(callContexts.current(), modelSpec, null).join();
+        return Futures.joinUnwrapped(repository.getEntityCount(callContexts.current(), modelSpec, null));
     }
 
     @Override
     public long getEntityCount(@NotNull final ModelSpec modelSpec, @Nullable final OffsetDateTime pointInTime) {
-        return repository.getEntityCount(callContexts.current(), modelSpec, pointInTime).join();
+        return Futures.joinUnwrapped(repository.getEntityCount(callContexts.current(), modelSpec, pointInTime));
     }
 
     @Override
     public Map<String, Long> getEntityStatsByState(@NotNull final ModelSpec modelSpec) {
-        return repository.getEntityStatsByState(callContexts.current(), modelSpec, (OffsetDateTime) null).join();
+        return Futures.joinUnwrapped(repository.getEntityStatsByState(callContexts.current(), modelSpec, (OffsetDateTime) null));
     }
 
     @Override
@@ -278,7 +270,7 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final ModelSpec modelSpec,
             @Nullable final OffsetDateTime pointInTime
     ) {
-        return repository.getEntityStatsByState(callContexts.current(), modelSpec, pointInTime).join();
+        return Futures.joinUnwrapped(repository.getEntityStatsByState(callContexts.current(), modelSpec, pointInTime));
     }
 
     @Override
@@ -287,7 +279,7 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final List<String> states,
             @Nullable final OffsetDateTime pointInTime
     ) {
-        return repository.getEntityStatsByState(callContexts.current(), modelSpec, states, pointInTime).join();
+        return Futures.joinUnwrapped(repository.getEntityStatsByState(callContexts.current(), modelSpec, states, pointInTime));
     }
 
     /** Every page, including those fetched lazily as the stream is consumed, uses the context of this call. */
@@ -350,12 +342,12 @@ public class EntityServiceImpl implements EntityService {
             final Class<T> entityClass,
             final SearchAndRetrievalParams params
     ) {
-        PageResult<DataPayload> pageResult = repository.findAllByCriteria(
+        PageResult<DataPayload> pageResult = Futures.joinUnwrapped(repository.findAllByCriteria(
                 ctx,
                 modelSpec,
                 condition,
                 params
-        ).join();
+        ));
 
         return toEntities(pageResult, entityClass);
     }
@@ -440,7 +432,7 @@ public class EntityServiceImpl implements EntityService {
     private <T extends CyodaEntity> EntityWithMetadata<T> create(final CyodaCallContext ctx, final T entity) {
         ModelSpec modelSpec = entity.getModelKey().modelKey();
 
-        EntityTransactionResponse response = repository.save(ctx, modelSpec, objectMapper.valueToTree(entity)).join();
+        EntityTransactionResponse response = Futures.joinUnwrapped(repository.save(ctx, modelSpec, objectMapper.valueToTree(entity)));
 
         // Extract entity ID and transaction ID from response
         UUID entityId = response.getTransactionInfo().getEntityIds().getFirst();
@@ -526,7 +518,7 @@ public class EntityServiceImpl implements EntityService {
     }
 
     private UUID deleteById(final CyodaCallContext ctx, final UUID entityId) {
-        EntityDeleteResponse response = repository.deleteById(ctx, entityId).join();
+        EntityDeleteResponse response = Futures.joinUnwrapped(repository.deleteById(ctx, entityId));
         return response.getEntityId();
     }
 
@@ -551,7 +543,7 @@ public class EntityServiceImpl implements EntityService {
 
     @Override
     public Integer deleteAll(@NotNull final ModelSpec modelSpec) {
-        List<EntityDeleteAllResponse> results = repository.deleteAll(callContexts.current(), modelSpec).join();
+        List<EntityDeleteAllResponse> results = Futures.joinUnwrapped(repository.deleteAll(callContexts.current(), modelSpec));
         return results.stream()
                 .map(EntityDeleteAllResponse::getNumDeleted)
                 .reduce(0, Integer::sum);
@@ -584,8 +576,8 @@ public class EntityServiceImpl implements EntityService {
         T firstEntity = entities.iterator().next();
         ModelSpec modelSpec = firstEntity.getModelKey().modelKey();
 
-        List<EntityTransactionResponse> responses = repository.saveAll(
-                ctx, modelSpec, entities, transactionWindow, transactionTimeoutMs).join();
+        List<EntityTransactionResponse> responses = Futures.joinUnwrapped(repository.saveAll(
+                ctx, modelSpec, entities, transactionWindow, transactionTimeoutMs));
 
         return responses.stream().flatMap(response -> {
             // Extract entity IDs and transaction ID from response
@@ -639,7 +631,7 @@ public class EntityServiceImpl implements EntityService {
     ) {
         ModelSpec modelSpec = entity.getModelKey().modelKey();
 
-        EntityTransactionResponse response = repository.update(ctx, entityId, objectMapper.valueToTree(entity), transition).join();
+        EntityTransactionResponse response = Futures.joinUnwrapped(repository.update(ctx, entityId, objectMapper.valueToTree(entity), transition));
 
         @SuppressWarnings("unchecked")
         Class<T> entityClass = (Class<T>) entity.getClass();
@@ -716,13 +708,13 @@ public class EntityServiceImpl implements EntityService {
         T firstEntity = entities.iterator().next();
         ModelSpec modelSpec = firstEntity.getModelKey().modelKey();
 
-        List<EntityTransactionResponse> responses = repository.updateAll(
+        List<EntityTransactionResponse> responses = Futures.joinUnwrapped(repository.updateAll(
                 ctx,
                 objectMapper.convertValue(entities, new TypeReference<>() {}),
                 transition,
                 transactionWindow,
                 transactionTimeoutMs
-        ).join();
+        ));
 
         @SuppressWarnings("unchecked")
         Class<T> entityClass = (Class<T>) firstEntity.getClass();
@@ -785,7 +777,7 @@ public class EntityServiceImpl implements EntityService {
             final UUID entityId,
             @Nullable final OffsetDateTime pointInTime
     ) {
-        return repository.getEntityChangesMetadata(ctx, entityId, pointInTime).join();
+        return Futures.joinUnwrapped(repository.getEntityChangesMetadata(ctx, entityId, pointInTime));
     }
 
     // ========================================
