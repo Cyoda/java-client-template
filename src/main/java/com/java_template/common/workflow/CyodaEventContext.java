@@ -29,4 +29,9 @@ public interface CyodaEventContext<T extends BaseEvent>  {
         var attr = getCloudEvent().getAttributesMap().get("cyodatxtoken");
         return attr == null ? null : attr.getCeString();
     }
+
+    /** The originating principal as data (never a credential); empty when absent or unknown. */
+    default com.java_template.common.auth.CloudEventAuthContext authContext() {
+        return com.java_template.common.auth.CloudEventAuthContextExtractor.from(getCloudEvent());
+    }
 }

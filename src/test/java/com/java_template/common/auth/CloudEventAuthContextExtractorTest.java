@@ -1,85 +1,71 @@
 package com.java_template.common.auth;
 
 import io.cloudevents.v1.proto.CloudEvent;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class CloudEventAuthContextExtractorTest {
 
-    private CloudEventAuthContextExtractor extractor;
+    private static CloudEvent.CloudEventAttributeValue str(String v) {
+        return CloudEvent.CloudEventAttributeValue.newBuilder().setCeString(v).build();
+    }
 
-    @BeforeEach
-    void setUp() {
-        extractor = new CloudEventAuthContextExtractor();
+    private static CloudEvent event(String type, String id, String claims) {
+        CloudEvent.Builder b = CloudEvent.newBuilder().setId("e").setSource("s").setSpecVersion("1.0").setType("t");
+        if (type != null) b.putAttributes("authtype", str(type));
+        if (id != null) b.putAttributes("authid", str(id));
+        if (claims != null) b.putAttributes("authclaims", str(claims));
+        return b.build();
     }
 
     @Test
-    void extract_returnsEmpty_whenNoAuthTypeAttribute() {
-        CloudEvent event = CloudEvent.newBuilder().build();
-        assertThat(extractor.extract(event)).isEmpty();
+    void parsesTheCommaSeparatedWireForm() {
+        CloudEventAuthContext ctx = CloudEventAuthContextExtractor.from(event("user", "mock-user-001", "ROLE_ADMIN,ROLE_M2M"));
+
+        assertThat(ctx.type()).isEqualTo(CloudEventAuthContext.Type.USER);
+        assertThat(ctx.id()).isEqualTo("mock-user-001");
+        assertThat(ctx.roles()).containsExactly("ROLE_ADMIN", "ROLE_M2M");
     }
 
     @Test
-    void extract_returnsContext_whenAuthTypePresent() {
-        CloudEvent event = cloudEvent("user", "uuid-1", "{\"roles\":[\"USER\"]}");
-        Optional<CloudEventAuthContext> result = extractor.extract(event);
-        assertThat(result).isPresent();
-        assertThat(result.get().authType()).isEqualTo("user");
-        assertThat(result.get().authId()).isEqualTo("uuid-1");
-        assertThat(result.get().authClaimsJson()).isEqualTo("{\"roles\":[\"USER\"]}");
+    void trimsAndDropsBlanks() {
+        assertThat(CloudEventAuthContextExtractor.from(event("service", "c", " a , ,b ")).roles()).containsExactly("a", "b");
+        assertThat(CloudEventAuthContextExtractor.from(event("service", "c", "")).roles()).isEmpty();
     }
 
     @Test
-    void extract_returnsContext_withNullAuthId_whenAuthIdAbsent() {
-        CloudEvent event = CloudEvent.newBuilder()
-                .putAttributes("authtype", strAttr("service"))
-                .build();
-        Optional<CloudEventAuthContext> result = extractor.extract(event);
-        assertThat(result).isPresent();
-        assertThat(result.get().authType()).isEqualTo("service");
-        assertThat(result.get().authId()).isNull();
-        assertThat(result.get().authClaimsJson()).isNull();
+    void aJsonObjectIsNotRoles() {
+        CloudEventAuthContext ctx = CloudEventAuthContextExtractor.from(
+                event("user", "u", "{\"legalEntityId\":\"org-1\",\"roles\":[\"USER\"]}"));
+
+        assertThat(ctx.roles()).isEmpty();
+        assertThat(ctx.requireRole("USER")).isFalse();
     }
 
     @Test
-    void extract_handlesAllAuthTypeValues() {
-        for (String authType : new String[]{"user", "service", "system"}) {
-            CloudEvent event = CloudEvent.newBuilder()
-                    .putAttributes("authtype", strAttr(authType))
-                    .build();
-            Optional<CloudEventAuthContext> result = extractor.extract(event);
-            assertThat(result).isPresent();
-            assertThat(result.get().authType()).isEqualTo(authType);
-        }
+    void unknownRetiredOrAbsentAuthTypeYieldsAnEmptyContext() {
+        assertThat(CloudEventAuthContextExtractor.from(event("service_account", "x", "ROLE_M2M")).isEmpty()).isTrue();
+        assertThat(CloudEventAuthContextExtractor.from(event(null, null, null)).isEmpty()).isTrue();
     }
 
     @Test
-    void isUserContext_trueOnlyForUser() {
-        assertThat(new CloudEventAuthContext("user", null, null).isUserContext()).isTrue();
-        assertThat(new CloudEventAuthContext("service", null, null).isUserContext()).isFalse();
-        assertThat(new CloudEventAuthContext("system", null, null).isUserContext()).isFalse();
-        assertThat(new CloudEventAuthContext("unauthenticated", null, null).isUserContext()).isFalse();
+    void requireRoleIsFailClosedAndExact() {
+        CloudEventAuthContext user = CloudEventAuthContextExtractor.from(event("user", "u", "ROLE_ADMIN"));
+        CloudEventAuthContext service = CloudEventAuthContextExtractor.from(event("service", "c", "ROLE_M2M"));
+        CloudEventAuthContext system = CloudEventAuthContextExtractor.from(event("system", null, "ROLE_ADMIN"));
+
+        assertThat(user.requireRole("ROLE_ADMIN")).isTrue();
+        assertThat(user.requireRole("ADMIN")).isFalse();
+        assertThat(user.requireRole("role_admin")).isFalse();
+        assertThat(service.requireRole("ROLE_M2M")).isTrue();
+        assertThat(system.requireRole("ROLE_ADMIN")).isFalse();
+        assertThat(CloudEventAuthContext.empty().requireRole("ROLE_ADMIN")).isFalse();
+        assertThat(CloudEventAuthContextExtractor.from(event("user", "u", null)).requireRole("ROLE_ADMIN")).isFalse();
     }
 
     @Test
     void knowsExactlyTheThreeCyodaGoAuthTypes() {
         assertThat(CloudEventAuthContext.AUTH_TYPES).containsExactlyInAnyOrder("user", "service", "system");
-    }
-
-    @SuppressWarnings("SameParameterValue")
-    private CloudEvent cloudEvent(String authType, String authId, String authClaims) {
-        return CloudEvent.newBuilder()
-                .putAttributes("authtype",   strAttr(authType))
-                .putAttributes("authid",     strAttr(authId))
-                .putAttributes("authclaims", strAttr(authClaims))
-                .build();
-    }
-
-    private CloudEvent.CloudEventAttributeValue strAttr(String value) {
-        return CloudEvent.CloudEventAttributeValue.newBuilder().setCeString(value).build();
     }
 }
