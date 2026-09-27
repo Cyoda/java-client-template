@@ -40,7 +40,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.BRANCH }}
+          # Only workflow_dispatch supplies a branch. On push/pull_request the
+          # input is empty and checkout falls back to the event's own ref
+          # (e.g. refs/pull/<n>/merge). BRANCH is for display/summary only:
+          # on pull_request github.ref_name is "<n>/merge", which checkout
+          # cannot resolve.
+          ref: ${{ inputs.branch }}
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -88,7 +93,11 @@ jobs:
 
       - name: Install pinned cyoda
         if: ${{ env.BUILD_TYPE == 'standard' || env.BUILD_TYPE == 'test-only' }}
-        run: echo "CYODA_BIN=$(scripts/install-cyoda.sh)" >> "$GITHUB_ENV"
+        # Two statements so a failed install fails the step; inside a single
+        # echo the command substitution's exit status is discarded.
+        run: |
+          bin="$(scripts/install-cyoda.sh)"
+          echo "CYODA_BIN=$bin" >> "$GITHUB_ENV"
 
       - name: Run tests (unit + tier-1 integration)
         if: ${{ env.BUILD_TYPE == 'standard' || env.BUILD_TYPE == 'test-only' }}
