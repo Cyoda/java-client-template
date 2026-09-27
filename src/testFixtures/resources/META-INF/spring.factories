@@ -1,0 +1,2 @@
+org.springframework.test.context.ContextCustomizerFactory=\
+com.java_template.testing.cyoda.CyodaContextCustomizerFactory

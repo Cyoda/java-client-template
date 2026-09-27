@@ -1,0 +1,34 @@
+{
+  "version": "1.5",
+  "name": "it-thing",
+  "desc": "Tier-1 integration workflow",
+  "initialState": "none",
+  "active": true,
+  "states": {
+    "none": {
+      "transitions": [{"name": "to_new", "next": "new", "manual": false}]
+    },
+    "new": {
+      "transitions": [
+        {
+          "name": "process", "next": "processed", "manual": true,
+          "processors": [{"type": "externalized", "name": "ItRecordingProcessor", "executionMode": "SYNC",
+            "config": {"attachEntity": true, "calculationNodesTags": "${tag}", "responseTimeoutMs": 10000, "retryPolicy": "NONE"}}]
+        },
+        {
+          "name": "fail", "next": "failed", "manual": true,
+          "processors": [{"type": "externalized", "name": "ItFailingProcessor", "executionMode": "SYNC",
+            "config": {"attachEntity": true, "calculationNodesTags": "${tag}", "responseTimeoutMs": 10000, "retryPolicy": "NONE"}}]
+        },
+        {
+          "name": "approve", "next": "approved", "manual": true,
+          "criterion": {"type": "function", "function": {"name": "ItFlagCriterion",
+            "config": {"attachEntity": true, "calculationNodesTags": "${tag}", "responseTimeoutMs": 10000, "retryPolicy": "NONE"}}}
+        }
+      ]
+    },
+    "processed": {"transitions": []},
+    "failed": {"transitions": []},
+    "approved": {"transitions": []}
+  }
+}
