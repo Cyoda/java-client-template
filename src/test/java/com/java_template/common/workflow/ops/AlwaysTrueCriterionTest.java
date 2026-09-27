@@ -79,7 +79,8 @@ class AlwaysTrueCriterionTest {
 
         // Then
         assertTrue(response.getMatches());
-        assertEquals("123", response.getId());
+        assertNotNull(response.getId());
+        assertNotEquals("123", response.getId());
         assertEquals(ENTITY_ID, response.getEntityId());
         assertTrue(response.getSuccess());
     }

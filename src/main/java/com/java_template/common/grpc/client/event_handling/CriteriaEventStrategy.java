@@ -69,6 +69,22 @@ public class CriteriaEventStrategy extends AbstractEventStrategy<
     }
 
     @Override
+    protected String requestIdOf(EntityCriteriaCalculationRequest request) {
+        return request.getRequestId();
+    }
+
+    @Override
+    protected void setEntityIdInErrorResponse(EntityCriteriaCalculationResponse errorResponse,
+                                              EntityCriteriaCalculationRequest request) {
+        errorResponse.setEntityId(request.getEntityId());
+    }
+
+    @Override
+    protected void setRecoveredEntityId(EntityCriteriaCalculationResponse errorResponse, String entityId) {
+        errorResponse.setEntityId(java.util.UUID.fromString(entityId));
+    }
+
+    @Override
     protected void enrichErrorResponse(EntityCriteriaCalculationResponse errorResponse) {
         errorResponse.setMatches(false);
     }

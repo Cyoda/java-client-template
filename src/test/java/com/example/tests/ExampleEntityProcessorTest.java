@@ -103,7 +103,8 @@ class ExampleEntityProcessorTest {
         // Verify response
         assertNotNull(response);
         assertTrue(response.getSuccess());
-        assertEquals(request.getId(), response.getId());
+        assertNotNull(response.getId());
+        assertNotEquals(request.getId(), response.getId());
         assertEquals(request.getRequestId(), response.getRequestId());
         assertEquals(request.getEntityId(), response.getEntityId());
     }
@@ -257,7 +258,8 @@ class ExampleEntityProcessorTest {
         EntityProcessorCalculationResponse response = processor.process(context);
 
         assertNotNull(response);
-        assertEquals("custom-id-123", response.getId());
+        assertNotNull(response.getId());
+        assertNotEquals("custom-id-123", response.getId());
         assertEquals("custom-req-456", response.getRequestId());
         assertEquals(entityId, response.getEntityId());
     }

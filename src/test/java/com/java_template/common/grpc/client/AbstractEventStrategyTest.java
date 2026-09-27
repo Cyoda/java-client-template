@@ -1,13 +1,24 @@
 package com.java_template.common.grpc.client;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.java_template.common.grpc.client.event_handling.AbstractEventStrategy;
+import com.java_template.common.grpc.client.event_handling.ProcessorEventStrategy;
+import com.java_template.common.workflow.CyodaContextFactory;
+import com.java_template.common.workflow.OperationFactory;
 import io.cloudevents.v1.proto.CloudEvent;
+import org.cyoda.cloud.api.event.processing.EntityProcessorCalculationResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.UUID;
+
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
@@ -206,5 +217,46 @@ class AbstractEventStrategyTest {
         assertTrue(result.requestId().isPresent());
         assertEquals("req-id_with.special@chars#606", result.requestId().get());
         assertNull(result.error());
+    }
+
+    @Test
+    void anErrorResponseCarriesAFreshIdTheRequestIdAndTheEntityId() throws Exception {
+        ObjectMapper om = new ObjectMapper();
+        OperationFactory factory = mock(OperationFactory.class);
+        lenient().when(factory.getProcessorForModel(any())).thenThrow(new IllegalStateException("boom"));
+        ProcessorEventStrategy strategy = new ProcessorEventStrategy(factory, om, new CyodaContextFactory(om));
+
+        String entityId = UUID.randomUUID().toString();
+        ObjectNode request = om.createObjectNode();
+        request.put("id", "evt-1");
+        request.put("requestId", "r-1");
+        request.put("entityId", entityId);
+        request.put("processorId", "p-1");
+        request.put("processorName", "SomeProcessor");
+        ObjectNode payload = request.putObject("payload");
+        payload.put("type", "ENTITY");
+        payload.putObject("meta").putObject("modelKey").put("name", "m").put("version", 1);
+        payload.putObject("data");
+        io.cloudevents.v1.proto.CloudEvent ce = io.cloudevents.v1.proto.CloudEvent.newBuilder()
+                .setId("ce-1").setSource("test").setSpecVersion("1.0")
+                .setType("EntityProcessorCalculationRequest")
+                .setTextData(om.writeValueAsString(request)).build();
+
+        EntityProcessorCalculationResponse response = strategy.handleEvent(ce);
+
+        assertEquals(Boolean.FALSE, response.getSuccess());
+        assertNotNull(response.getId());
+        assertNotEquals("evt-1", response.getId());
+        assertEquals("r-1", response.getRequestId());
+        assertEquals(entityId, response.getEntityId().toString());
+    }
+
+    @Test
+    void entityIdIsRecoveredFromCorruptedJson() {
+        when(cloudEvent.getTextData()).thenReturn(
+                "{\"requestId\":\"r-1\",\"entityId\":\"8824c480-c166-11ee-bf9f-ae468cd3ed16\", broken");
+
+        assertEquals(java.util.Optional.of("8824c480-c166-11ee-bf9f-ae468cd3ed16"),
+                AbstractEventStrategy.recoverEntityIdFromCloudEvent(cloudEvent));
     }
 }

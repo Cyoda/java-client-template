@@ -68,6 +68,22 @@ public class ProcessorEventStrategy extends AbstractEventStrategy<
     }
 
     @Override
+    protected String requestIdOf(EntityProcessorCalculationRequest request) {
+        return request.getRequestId();
+    }
+
+    @Override
+    protected void setEntityIdInErrorResponse(EntityProcessorCalculationResponse errorResponse,
+                                              EntityProcessorCalculationRequest request) {
+        errorResponse.setEntityId(request.getEntityId());
+    }
+
+    @Override
+    protected void setRecoveredEntityId(EntityProcessorCalculationResponse errorResponse, String entityId) {
+        errorResponse.setEntityId(java.util.UUID.fromString(entityId));
+    }
+
+    @Override
     public boolean supports(@NotNull CloudEventType eventType) {
         return CloudEventType.ENTITY_PROCESSOR_CALCULATION_REQUEST.equals(eventType);
     }

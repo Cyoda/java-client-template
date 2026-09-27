@@ -83,8 +83,10 @@ public abstract class AbstractEventStrategy<
 
     protected TResponse returnErrorResponseFor(TRequest request, Exception e) {
         TResponse errorResponse = createErrorResponse();
+        errorResponse.setId(java.util.UUID.randomUUID().toString());
         errorResponse.setSuccess(false);
-        setRequestIdInErrorResponse(errorResponse, request.getId());
+        setRequestIdInErrorResponse(errorResponse, requestIdOf(request));
+        setEntityIdInErrorResponse(errorResponse, request);
         Error error = new Error();
         error.setMessage(e.getMessage());
         error.setCode("GENERAL_ERROR");
@@ -99,6 +101,8 @@ public abstract class AbstractEventStrategy<
      */
     protected TResponse returnErrorResponseFor(CloudEvent cloudEvent, JsonProcessingException e) {
         TResponse errorResponse = createErrorResponse();
+        errorResponse.setId(java.util.UUID.randomUUID().toString());
+        recoverEntityIdFromCloudEvent(cloudEvent).ifPresent(entityId -> setRecoveredEntityId(errorResponse, entityId));
 
         RequestIdRecoveryResult recoveryResult = recoverRequestIdFromCloudEvent(cloudEvent);
         if (recoveryResult.requestId().isPresent()) {
@@ -182,6 +186,24 @@ public abstract class AbstractEventStrategy<
     }
 
     /**
+     * ABOUTME: Attempts to recover the entityId from a CloudEvent when JSON parsing fails.
+     * Uses a string-based regex pattern to search for a UUID-shaped entityId field in
+     * potentially corrupted JSON.
+     *
+     * @param cloudEvent the CloudEvent containing potentially corrupted JSON data
+     * @return the recovered entityId, if any
+     */
+    public static Optional<String> recoverEntityIdFromCloudEvent(CloudEvent cloudEvent) {
+        if (cloudEvent == null || cloudEvent.getTextData() == null || cloudEvent.getTextData().isBlank()) {
+            return Optional.empty();
+        }
+        Matcher m = Pattern.compile(
+                "[\"']?entityId[\"']?\\s*:\\s*[\"']?([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})")
+                .matcher(cloudEvent.getTextData());
+        return m.find() ? Optional.of(m.group(1)) : Optional.empty();
+    }
+
+    /**
      * Adds additional error information to the response.
      */
     protected void enrichErrorResponse(TResponse errorResponse) {
@@ -219,5 +241,12 @@ public abstract class AbstractEventStrategy<
      * Sets the requestId in the error response.
      */
     protected abstract void setRequestIdInErrorResponse(TResponse errorResponse, String requestId);
+
+    /** The originating callout's requestId, which the answer must echo (not the CloudEvent payload id). */
+    protected abstract String requestIdOf(TRequest request);
+
+    protected abstract void setEntityIdInErrorResponse(TResponse errorResponse, TRequest request);
+
+    protected abstract void setRecoveredEntityId(TResponse errorResponse, String entityId);
 
 }
