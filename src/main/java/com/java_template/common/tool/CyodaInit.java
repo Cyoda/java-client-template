@@ -286,6 +286,10 @@ public class CyodaInit {
     private void importWorkflowForEntity(String dtoContent, String entityName, Integer version, String token, CyodaInitConfig initConfig) {
         logger.info("📄 Processing workflow for entity: {}, version: {}", entityName, version);
 
+        // The entity model must exist before a workflow can be imported for it; cyoda-go's
+        // workflow/import endpoint verifies model existence and returns 404 MODEL_NOT_FOUND otherwise.
+        checkAndCreateEntityModel(token, entityName, version, initConfig);
+
         JsonNode dtoJson;
         try {
             dtoJson = objectMapper.readTree(dtoContent);
@@ -330,9 +334,6 @@ public class CyodaInit {
             logger.error("❌ {}", errorMsg);
             throw new RuntimeException(errorMsg);
         }
-
-        // Check and create entity model if needed
-        checkAndCreateEntityModel(token, entityName, version, initConfig);
     }
 
     /**
