@@ -40,7 +40,7 @@ class CyodaRepositoryValidateResponseTest {
         var response = new EntityTransactionResponse();
         response.setSuccess(true);
 
-        EntityTransactionResponse result = repository.validateResponse(response);
+        EntityTransactionResponse result = repository.validateResponse(response, false);
 
         assertSame(response, result);
     }
@@ -50,7 +50,7 @@ class CyodaRepositoryValidateResponseTest {
         var response = new EntityTransactionResponse();
         response.setSuccess(null);
 
-        EntityTransactionResponse result = repository.validateResponse(response);
+        EntityTransactionResponse result = repository.validateResponse(response, false);
 
         assertSame(response, result);
     }
@@ -68,7 +68,7 @@ class CyodaRepositoryValidateResponseTest {
 
         CyodaOperationException ex = assertThrows(
                 CyodaOperationException.class,
-                () -> repository.validateResponse(response)
+                () -> repository.validateResponse(response, false)
         );
 
         assertEquals("SERVER_ERROR", ex.getErrorCode());
@@ -84,7 +84,7 @@ class CyodaRepositoryValidateResponseTest {
 
         CyodaOperationException ex = assertThrows(
                 CyodaOperationException.class,
-                () -> repository.validateResponse(response)
+                () -> repository.validateResponse(response, false)
         );
 
         assertEquals("UNKNOWN", ex.getErrorCode());
@@ -97,7 +97,7 @@ class CyodaRepositoryValidateResponseTest {
         response.setSuccess(true);
         response.setWarnings(List.of("deprecation notice", "slow query"));
 
-        EntityTransactionResponse result = repository.validateResponse(response);
+        EntityTransactionResponse result = repository.validateResponse(response, false);
 
         assertSame(response, result);
     }
@@ -116,7 +116,7 @@ class CyodaRepositoryValidateResponseTest {
 
         CyodaOperationException ex = assertThrows(
                 CyodaOperationException.class,
-                () -> repository.validateResponse(response)
+                () -> repository.validateResponse(response, false)
         );
 
         assertEquals("FAIL", ex.getErrorCode());

@@ -10,6 +10,7 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.dto.PageResult;
+import com.java_template.common.exception.CyodaErrors;
 import com.java_template.common.exception.CyodaOperationException;
 import com.java_template.common.grpc.client.event_handling.CloudEventBuilder;
 import com.java_template.common.grpc.client.event_handling.CloudEventParser;
@@ -448,7 +449,7 @@ public class CyodaRepository implements CrudRepository {
                         return cloudEvent;
                     }))
                     .thenApply(response -> cloudEventParser.parseCloudEvent(response, responsePayloadType))
-                    .thenApply(this::validateResponse);
+                    .thenApply(r -> validateResponse(r, false));
         } catch (InvalidProtocolBufferException e) {
             throw new RuntimeException(e);
         }
@@ -476,7 +477,7 @@ public class CyodaRepository implements CrudRepository {
         // Filter null CloudEvent entries that may arrive from the gRPC streaming iterator
         return stream.filter(Objects::nonNull)
                 .map(elm -> cloudEventParser.parseCloudEvent(elm, payloadType))
-                .map(this::validateResponse);
+                .map(r -> validateResponse(r, false));
     }
 
     /**
@@ -520,16 +521,12 @@ public class CyodaRepository implements CrudRepository {
      * Validates a Cyoda response: logs any warnings, then throws if the operation failed.
      * Package-private to allow direct unit testing without mocking the full gRPC pipeline.
      */
-    <T extends BaseEvent> T validateResponse(T response) {
+    <T extends BaseEvent> T validateResponse(T response, boolean joined) {
         if (response.getWarnings() != null && !response.getWarnings().isEmpty()) {
             response.getWarnings().forEach(w -> logger.warn("Cyoda warning: {}", w));
         }
         if (Boolean.FALSE.equals(response.getSuccess())) {
-            org.cyoda.cloud.api.event.common.Error error = response.getError();
-            String code = error != null ? error.getCode() : "UNKNOWN";
-            String message = error != null ? error.getMessage() : "Operation failed with no error details";
-            boolean retryable = error != null ? Optional.ofNullable(error.getRetryable()).orElse(false) : false;
-            throw new CyodaOperationException(code, message, retryable);
+            throw CyodaErrors.fromGrpcEnvelope(response.getError(), joined);
         }
         return response;
     }

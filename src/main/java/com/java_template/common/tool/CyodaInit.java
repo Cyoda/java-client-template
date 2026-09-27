@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.TextNode;
 import com.java_template.common.auth.CyodaTokenSource;
 import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaObjectMapper;
+import com.java_template.common.exception.CyodaHttpException;
 import com.java_template.common.util.HttpUtils;
 import com.java_template.common.workflow.CyodaEntity;
 import org.cyoda.cloud.api.event.common.ModelSpec;
@@ -19,7 +20,6 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.core.type.filter.AssignableTypeFilter;
 import org.springframework.stereotype.Component;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.io.File;
 import java.io.IOException;
@@ -392,6 +392,16 @@ public class CyodaInit {
         }
     }
 
+    /** True when the cause chain carries a 404 CyodaHttpException (the model/resource does not exist). */
+    private static boolean isNotFound(Throwable ex) {
+        for (Throwable t = ex; t != null; t = t.getCause()) {
+            if (t instanceof CyodaHttpException che && che.status() == 404) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Creates entity model using sample data, then sets change level to STRUCTURAL and locks the model
      */
@@ -571,10 +581,9 @@ public class CyodaInit {
 
     private static boolean isAlreadyUnlocked(Throwable ex) {
         for (Throwable t = ex; t != null; t = t.getCause()) {
-            if (t instanceof ResponseStatusException rse
-                    && rse.getStatusCode().value() == 409
-                    && rse.getReason() != null
-                    && rse.getReason().contains("MODEL_ALREADY_UNLOCKED")) {
+            if (t instanceof CyodaHttpException che
+                    && che.status() == 409
+                    && "MODEL_ALREADY_UNLOCKED".equals(che.getErrorCode())) {
                 return true;
             }
         }
@@ -603,7 +612,7 @@ public class CyodaInit {
                 // Continue with deletion attempt anyway
             }
         } catch (Exception ex) {
-            if (ex.getMessage() != null && ex.getMessage().contains("404")) {
+            if (isNotFound(ex)) {
                 logger.info("ℹ️  Entity model does not exist for: {} (version: {}), skipping deletion", entityName, version);
                 return;
             }
@@ -671,23 +680,12 @@ public class CyodaInit {
         }
     }
 
-    /** True when the cause chain carries a 404 {@link ResponseStatusException}. */
-    private static boolean isNotFound(Throwable ex) {
-        for (Throwable t = ex; t != null; t = t.getCause()) {
-            if (t instanceof ResponseStatusException rse && rse.getStatusCode().value() == 404) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** True when the cause chain carries a 409 {@link ResponseStatusException} with code MODEL_HAS_ENTITIES. */
+    /** True when the cause chain carries a 409 CyodaHttpException with code MODEL_HAS_ENTITIES. */
     private static boolean isModelHasEntities(Throwable ex) {
         for (Throwable t = ex; t != null; t = t.getCause()) {
-            if (t instanceof ResponseStatusException rse
-                    && rse.getStatusCode().value() == 409
-                    && rse.getReason() != null
-                    && rse.getReason().contains("MODEL_HAS_ENTITIES")) {
+            if (t instanceof CyodaHttpException che
+                    && che.status() == 409
+                    && "MODEL_HAS_ENTITIES".equals(che.getErrorCode())) {
                 return true;
             }
         }

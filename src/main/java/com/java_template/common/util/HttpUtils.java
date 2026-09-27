@@ -1,17 +1,15 @@
 package com.java_template.common.util;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaObjectMapper;
+import com.java_template.common.exception.CyodaErrors;
 import com.java_template.common.util.http.ContentTypeAwareParser;
 import com.java_template.common.util.http.ResponseBodyParser;
 import org.slf4j.LoggerFactory;
 import org.slf4j.Logger;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -78,10 +76,8 @@ public class HttpUtils {
                         logger.debug("[{}] {} {} succeeded", statusCode, method, url);
                     } else if (statusCode >= 300 && statusCode < 400) {
                         logger.info("[{}] {} {} redirect: {}", statusCode, method, url, responseBody);
-                    } else if (statusCode >= 400 && statusCode < 500) {
-                        throw new ResponseStatusException(HttpStatus.valueOf(statusCode), extractErrorMessage(responseBody));
-                    } else if (statusCode >= 500) {
-                        throw new ResponseStatusException(HttpStatus.valueOf(statusCode), extractErrorMessage(responseBody));
+                    } else if (statusCode >= 400) {
+                        throw CyodaErrors.fromHttp(statusCode, responseBody, false);
                     }
 
                     String contentType = response.headers()
@@ -179,30 +175,4 @@ public class HttpUtils {
         return fullUrl + "?" + queryString;
     }
 
-    /**
-     * The error message of a failed response. cyoda-go's problem+json carries its error code in
-     * {@code properties.errorCode}; when present it prefixes the message ({@code "MODEL_HAS_ENTITIES: cannot
-     * unlock: 1 entities exist"}), so callers can tell refusals apart by code, not by wording.
-     */
-    private String extractErrorMessage(String responseBody) {
-        try {
-            JsonNode errorNode = om.readTree(responseBody);
-            String message = null;
-            if (errorNode.has("errorMessage")) {
-                message = errorNode.get("errorMessage").asText();
-            } else if (errorNode.has("message")) {
-                message = errorNode.get("message").asText();
-            } else if (errorNode.has("detail")) {
-                message = errorNode.get("detail").asText();
-            }
-            JsonNode errorCode = errorNode.path("properties").path("errorCode");
-            if (errorCode.isTextual() && !errorCode.asText().isBlank()) {
-                return message == null ? errorCode.asText() : errorCode.asText() + ": " + message;
-            }
-            if (message != null) {
-                return message;
-            }
-        } catch (Exception ignored) {}
-        return responseBody;
-    }
 }
