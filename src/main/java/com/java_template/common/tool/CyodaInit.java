@@ -19,6 +19,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.core.type.filter.AssignableTypeFilter;
 import org.springframework.stereotype.Component;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.File;
 import java.io.IOException;
@@ -30,6 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Stream;
@@ -529,7 +531,45 @@ public class CyodaInit {
     }
 
     /**
-     * Deletes the entity model if it exists
+     * Unlocks the entity model. A model that is already unlocked (409 MODEL_ALREADY_UNLOCKED) is fine.
+     */
+    private void unlockModel(String token, String entityName, Integer version) {
+        String unlockPath = String.format("model/%s/%s/unlock", entityName, version);
+        logger.debug("🔗 Unlocking entity model for: {} (version: {})", entityName, version);
+
+        try {
+            JsonNode response = httpUtils.sendPutRequest(token, config.getCyodaApiUrl(), unlockPath, null).join();
+            int statusCode = response.get("status").asInt();
+            if (statusCode < 200 || statusCode >= 300) {
+                String errorMsg = String.format("Failed to unlock entity model for %s (version %s). Status code: %d, body: %s",
+                        entityName, version, statusCode, response.path("json").toString());
+                logger.error("❌ {}", errorMsg);
+                throw new RuntimeException(errorMsg);
+            }
+            logger.info("🔓 Unlocked entity model for: {} (version: {})", entityName, version);
+        } catch (CompletionException ex) {
+            if (isAlreadyUnlocked(ex)) {
+                logger.info("ℹ️  Entity model is already unlocked for: {} (version: {})", entityName, version);
+                return;
+            }
+            throw ex;
+        }
+    }
+
+    private static boolean isAlreadyUnlocked(Throwable ex) {
+        for (Throwable t = ex; t != null; t = t.getCause()) {
+            if (t instanceof ResponseStatusException rse
+                    && rse.getStatusCode().value() == 409
+                    && rse.getReason() != null
+                    && rse.getReason().contains("MODEL_ALREADY_UNLOCKED")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Deletes the entity model if it exists, unlocking it first
      */
     private void deleteEntityModel(String token, String entityName, Integer version) {
         // First check if the model exists
@@ -559,7 +599,11 @@ public class CyodaInit {
             // Continue with deletion attempt anyway
         }
 
-        // Model exists, proceed with deletion
+        // cyoda-go refuses to delete a LOCKED model (409 MODEL_ALREADY_LOCKED), and createEntityModel
+        // locks every model it creates, so unlock first.
+        unlockModel(token, entityName, version);
+
+        // Model exists and is unlocked, proceed with deletion
         String deletePath = String.format("model/%s/%s", entityName, version);
         logger.debug("🔗 Deleting entity model for: {} (version: {})", entityName, version);
 

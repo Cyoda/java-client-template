@@ -40,7 +40,7 @@ class ModelAndWorkflowSetupIT {
     private final ObjectMapper om = CyodaJackson.configure(new ObjectMapper());
 
     @Test
-    void cyodaInitImportsSampleDataLocksTheModelAndImportsTheWorkflow(@TempDir Path workflowDir) throws Exception {
+    void cyodaInitImportsSampleDataLocksTheModelAndImportsTheWorkflowAndCanRecreateIt(@TempDir Path workflowDir) throws Exception {
         ObjectNode workflow = WorkflowTemplating.load("/example/config/workflow/template_workflow.json", config.getGrpcProcessorTag());
         Path file = workflowDir.resolve("ExampleEntity/version_1/ExampleEntity.json");
         Files.createDirectories(file.getParent());
@@ -51,6 +51,22 @@ class ModelAndWorkflowSetupIT {
         cyodaInit.initCyoda(init);
 
         CyodaRest rest = CyodaTestEnvironment.rest(Profile.mockMemory());
+        assertExampleEntityV1IsLockedWithTheWorkflow(rest, workflow);
+
+        // A second --recreate-models run hits the model this run created and locked: cyoda-go refuses to
+        // delete a LOCKED model (409 MODEL_ALREADY_LOCKED), so CyodaInit must unlock it first.
+        cyodaInit.initCyoda(init);
+
+        assertExampleEntityV1IsLockedWithTheWorkflow(rest, workflow);
+
+        // An already-unlocked model (409 MODEL_ALREADY_UNLOCKED on unlock) is recreated too.
+        rest.put("model/ExampleEntity/1/unlock", null).requireSuccess();
+        cyodaInit.initCyoda(init);
+
+        assertExampleEntityV1IsLockedWithTheWorkflow(rest, workflow);
+    }
+
+    private void assertExampleEntityV1IsLockedWithTheWorkflow(CyodaRest rest, ObjectNode workflow) throws Exception {
         JsonNode models = rest.get("model/").requireSuccess().body();
         List<JsonNode> exampleEntityModels = StreamSupport.stream(models.spliterator(), false)
                 .filter(m -> "ExampleEntity".equals(m.path("modelName").asText())
