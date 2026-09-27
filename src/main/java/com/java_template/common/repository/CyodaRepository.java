@@ -195,11 +195,15 @@ public class CyodaRepository implements CrudRepository {
 
     /**
      * Stub for the server-streaming entityManageCollection/entitySearchCollection calls: it carries the call
-     * context but no deadline, since their duration grows with the result size, and a deadline would cut a
-     * long but healthy stream short.
+     * context. Outside a callout it has no deadline, since their duration grows with the result size, and a
+     * deadline would cut a long but healthy stream short. Inside a callout ({@code ctx.isJoined()}) it carries
+     * grpc-call-deadline-ms like a unary call: the tx-token's lifetime bounds the call anyway, and a direct
+     * search there is capped at {@link #DIRECT_SEARCH_LIMIT}. Built per attempt, so a retry gets a fresh one.
      */
     private CloudEventsServiceGrpc.CloudEventsServiceBlockingStub streaming(final CyodaCallContext ctx) {
-        return cloudEventsServiceBlockingStub.withOption(CyodaCallInterceptor.CONTEXT, ctx);
+        CloudEventsServiceGrpc.CloudEventsServiceBlockingStub stub =
+                cloudEventsServiceBlockingStub.withOption(CyodaCallInterceptor.CONTEXT, ctx);
+        return ctx.isJoined() ? stub.withDeadlineAfter(config.getGrpcCallDeadlineMs(), TimeUnit.MILLISECONDS) : stub;
     }
 
     @Override

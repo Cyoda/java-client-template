@@ -79,4 +79,17 @@ class CyodaErrorsTest {
         assertThat(((CyodaHttpException) e).status()).isEqualTo(502);
         assertThat(((CyodaHttpException) e).getErrorCode()).isEqualTo("HTTP_502");
     }
+
+    @Test
+    void aJoinedRest401EndsTheCalloutByStatusEvenWithoutAnErrorCode() {
+        assertThat(CyodaErrors.fromHttp(401, "", true)).isInstanceOf(CyodaCalloutEndedException.class);
+        assertThat(CyodaErrors.fromHttp(401, "{\"status\":401,\"detail\":\"token expired\"}", true))
+                .isInstanceOf(CyodaCalloutEndedException.class);
+        assertThat(CyodaErrors.fromHttp(401, problem(401, "INVALID_PASS", "INVALID_PASS: forged", null), true))
+                .isInstanceOf(CyodaCalloutEndedException.class);
+        // unjoined: an ordinary HTTP failure, as before
+        assertThat(CyodaErrors.fromHttp(401, "", false))
+                .isInstanceOf(CyodaHttpException.class)
+                .isNotInstanceOf(CyodaCalloutEndedException.class);
+    }
 }

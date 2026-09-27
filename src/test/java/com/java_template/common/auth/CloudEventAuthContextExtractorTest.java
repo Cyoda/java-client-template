@@ -68,4 +68,17 @@ class CloudEventAuthContextExtractorTest {
     void knowsExactlyTheThreeCyodaGoAuthTypes() {
         assertThat(CloudEventAuthContext.AUTH_TYPES).containsExactlyInAnyOrder("user", "service", "system");
     }
+
+    @Test
+    void authTypeParsingDoesNotDependOnTheDefaultLocale() {
+        java.util.Locale previous = java.util.Locale.getDefault();
+        java.util.Locale.setDefault(java.util.Locale.forLanguageTag("tr-TR")); // "service".toUpperCase() is "SERVİCE" here
+        try {
+            CloudEventAuthContext ctx = CloudEventAuthContextExtractor.from(event("service", "c", "ROLE_M2M"));
+
+            assertThat(ctx.type()).isEqualTo(CloudEventAuthContext.Type.SERVICE);
+        } finally {
+            java.util.Locale.setDefault(previous);
+        }
+    }
 }

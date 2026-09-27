@@ -120,4 +120,13 @@ class HttpUtilsContextTest {
         verify(tokens, never()).invalidate();
         verify(tokens, never()).invalidate(anyString());
     }
+
+    @Test
+    void aBlankForwardedTokenIsRefusedBeforeAnyIo() {
+        assertThatThrownBy(() -> http.sendGetRequest(CyodaCallContext.forward(" "), base, "entity/x"))
+                .isInstanceOf(com.java_template.common.exception.CyodaCredentialException.class);
+        assertThatThrownBy(() -> http.sendGetRequest(CyodaCallContext.forward(""), base, "entity/x"))
+                .isInstanceOf(com.java_template.common.exception.CyodaCredentialException.class);
+        assertThat(seen).isEmpty();
+    }
 }

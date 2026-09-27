@@ -295,12 +295,20 @@ public class SslUtils {
     }
 
     /**
-     * Creates a Java 11+ HttpClient with custom SSL configuration
+     * Connect timeout of every HttpClient built here (REST calls and the M2M token fetch): an unreachable Cyoda
+     * fails fast rather than hanging a caller (or, for the token, every caller waiting on it).
+     */
+    public static final java.time.Duration CONNECT_TIMEOUT = java.time.Duration.ofSeconds(10);
+
+    /**
+     * Creates a Java 11+ HttpClient with custom SSL configuration and a {@link #CONNECT_TIMEOUT}
      */
     public static java.net.http.HttpClient createHttpClient(Config config) {
         try {
             SSLContext sslContext = createSelectiveSSLContext(config);
-            java.net.http.HttpClient.Builder builder = java.net.http.HttpClient.newBuilder().sslContext(sslContext);
+            java.net.http.HttpClient.Builder builder = java.net.http.HttpClient.newBuilder()
+                    .sslContext(sslContext)
+                    .connectTimeout(CONNECT_TIMEOUT);
 
             List<String> trustedHosts = config.getTrustedHosts();
             if (config.isSslTrustAll() || !trustedHosts.isEmpty()) {
@@ -310,7 +318,7 @@ public class SslUtils {
             return builder.build();
         } catch (Exception e) {
             logger.error("Failed to create HttpClient with custom SSL, using default: {}", e.getMessage());
-            return java.net.http.HttpClient.newHttpClient();
+            return java.net.http.HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
         }
     }
 

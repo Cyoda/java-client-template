@@ -34,9 +34,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * ABOUTME: grpc-call-deadline-ms bounds every unary Cyoda call (spec §4.5) and never the server-streaming
- * entityManageCollection/entitySearchCollection calls, whose duration grows with the result size. Both kinds
- * carry the operation's CyodaCallContext as the CONTEXT call option.
+ * ABOUTME: grpc-call-deadline-ms bounds every unary Cyoda call (spec §4.5) and, outside a callout, never the
+ * server-streaming entityManageCollection/entitySearchCollection calls, whose duration grows with the result
+ * size. Inside a callout (a joined context) streaming calls carry it too. Both kinds carry the operation's
+ * CyodaCallContext as the CONTEXT call option.
  */
 @ExtendWith(MockitoExtension.class)
 class CyodaRepositoryDeadlineTest {
@@ -86,5 +87,22 @@ class CyodaRepositoryDeadlineTest {
         verify(stub).entitySearchCollection(any());
         verify(stub, never()).withDeadlineAfter(anyLong(), any());
         verify(deadlineStub, never()).entitySearchCollection(any());
+    }
+
+    @Test
+    void aJoinedServerStreamingCallCarriesTheDeadline() {
+        // inside a callout the tx-token's lifetime bounds the call anyway; the deadline keeps a hung stream
+        // from holding the processor past it
+        CyodaCallContext joined = CyodaCallContext.m2m().withTxToken("tx-1");
+        when(deadlineStub.entitySearchCollection(any())).thenReturn(Collections.emptyIterator());
+        GroupConditionDto all = new GroupConditionDto().operator(GroupConditionDto.OperatorEnum.AND).conditions(List.of());
+
+        repository.findAllByCriteria(joined, new ModelSpec().withName("thing").withVersion(1), all,
+                SearchAndRetrievalParams.defaults()).join();
+
+        verify(stub).withOption(CyodaCallInterceptor.CONTEXT, joined);
+        verify(stub).withDeadlineAfter(1_234L, TimeUnit.MILLISECONDS);
+        verify(deadlineStub).entitySearchCollection(any());
+        verify(stub, never()).entitySearchCollection(any());
     }
 }

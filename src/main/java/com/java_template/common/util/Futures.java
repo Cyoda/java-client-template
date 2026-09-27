@@ -21,8 +21,17 @@ public final class Futures {
         try {
             return future.join();
         } catch (CompletionException e) {
-            throw unwrap(e);
+            throw withCallerStack(unwrap(e));
         }
+    }
+
+    /**
+     * Adds a {@link CallerStack}, created here on the joining thread, as a suppressed exception: the unwrapped
+     * exception's own trace is the failing (often async) thread's, and would otherwise lose the caller's frames.
+     */
+    private static RuntimeException withCallerStack(RuntimeException e) {
+        e.addSuppressed(new CallerStack());
+        return e;
     }
 
     static RuntimeException unwrap(CompletionException e) {
@@ -34,8 +43,20 @@ public final class Futures {
             return runtime;
         }
         if (cause instanceof Error error) {
+            error.addSuppressed(new CallerStack());
             throw error;
         }
         return new RuntimeException(cause.getMessage(), cause);
+    }
+
+    /**
+     * Marker added as a suppressed exception to what {@link #joinUnwrapped} rethrows: created on the joining
+     * thread, its stack trace shows where the caller waited, which the async exception's own trace (from the
+     * thread that failed) does not.
+     */
+    public static final class CallerStack extends RuntimeException {
+        CallerStack() {
+            super("caller stack");
+        }
     }
 }

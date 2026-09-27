@@ -30,6 +30,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -210,18 +211,18 @@ public class CyodaInit {
         try {
             PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
             Resource[] resources = resolver.getResources(CLASSPATH_WORKFLOW_PATTERN);
-            String entityNameLower = entityName.toLowerCase();
+            String entityNameLower = entityName.toLowerCase(Locale.ROOT);
 
             for (Resource resource : resources) {
                 String fileName = resource.getFilename();
                 if (fileName == null) continue;
 
-                String fileNameLower = fileName.toLowerCase();
+                String fileNameLower = fileName.toLowerCase(Locale.ROOT);
                 String fileNameWithoutExtension = fileNameLower.endsWith(".json")
                         ? fileNameLower.substring(0, fileNameLower.length() - 5)
                         : fileNameLower;
 
-                String pathStr = resource.getURL().toString().toLowerCase();
+                String pathStr = resource.getURL().toString().toLowerCase(Locale.ROOT);
                 if (fileNameWithoutExtension.equals(entityNameLower) &&
                         (pathStr.contains("/version_" + version + "/") ||
                          pathStr.contains("/v" + version + "/"))) {
@@ -262,11 +263,11 @@ public class CyodaInit {
 
         try (Stream<Path> workflowFilesStream = Files.walk(workflowDir)) {
             return workflowFilesStream
-                    .filter(path -> path.toString().toLowerCase().endsWith(".json"))
+                    .filter(path -> path.toString().toLowerCase(Locale.ROOT).endsWith(".json"))
                     .filter(path -> {
-                        String pathStr = path.toString().toLowerCase();
-                        String fileName = path.getFileName().toString().toLowerCase();
-                        String entityNameLower = entityName.toLowerCase();
+                        String pathStr = path.toString().toLowerCase(Locale.ROOT);
+                        String fileName = path.getFileName().toString().toLowerCase(Locale.ROOT);
+                        String entityNameLower = entityName.toLowerCase(Locale.ROOT);
 
                         String fileNameWithoutExtension = fileName.endsWith(".json")
                                 ? fileName.substring(0, fileName.length() - 5)

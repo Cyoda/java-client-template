@@ -13,6 +13,9 @@ public final class CyodaGrpcCalls {
 
     private static final long[] BACKOFF_MS = {50, 100, 200};
 
+    /** How many times a joined-retryable refusal is retried: the length of the backoff schedule. */
+    public static final int JOINED_RETRIES = BACKOFF_MS.length;
+
     /**
      * The M2M token {@link CyodaCallInterceptor} attached to the call this thread is making inside
      * {@link #call}. The blocking stubs run the interceptor on the calling thread, so after an
@@ -76,6 +79,14 @@ public final class CyodaGrpcCalls {
         if (sent != null) {
             sent[0] = token;
         }
+    }
+
+    /**
+     * The backoff before retry number {@code attempt} (0-based, below {@link #JOINED_RETRIES}) of a
+     * joined-retryable refusal: 50, 100, then 200 ms. Shared by the REST retry in {@code HttpUtils}.
+     */
+    public static long joinedRetryBackoffMs(int attempt) {
+        return BACKOFF_MS[attempt];
     }
 
     private static void sleep(long ms) {

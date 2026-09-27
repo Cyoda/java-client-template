@@ -61,6 +61,12 @@ public final class CyodaErrors {
         if (code == null) {
             code = "HTTP_" + status;
         }
+        if (joined && status == 401) {
+            // A joined request authenticates with the callout's tx-token as well as the credential: a 401 there
+            // means the callout can no longer be served, whatever the body says (spec §4.2), so it is keyed on
+            // the status, not only on an UNAUTHORIZED errorCode a proxy or gateway may not send.
+            return new CyodaCalloutEndedException(code, detail == null ? "" : detail);
+        }
         return map(code, status, retryable, detail == null ? "" : detail, joined);
     }
 

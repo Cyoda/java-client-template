@@ -58,4 +58,26 @@ class FuturesTest {
                 .hasMessage("io")
                 .hasCause(io);
     }
+
+    @Test
+    void theRethrownExceptionCarriesTheCallersStackAsASuppressedMarker() throws Exception {
+        IllegalStateException boom = new IllegalStateException("boom");
+        CompletableFuture<Object> failedElsewhere = CompletableFuture.supplyAsync(() -> {
+            throw boom;
+        });
+        try {
+            failedElsewhere.join();
+        } catch (CompletionException ignored) {
+            // wait for the async failure
+        }
+
+        Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(() -> Futures.joinUnwrapped(failedElsewhere));
+
+        assertThat(thrown).isSameAs(boom);
+        assertThat(thrown.getSuppressed()).hasSize(1);
+        Throwable marker = thrown.getSuppressed()[0];
+        assertThat(marker).isInstanceOf(Futures.CallerStack.class).hasMessage("caller stack");
+        assertThat(marker.getStackTrace())
+                .anyMatch(frame -> frame.getMethodName().equals("theRethrownExceptionCarriesTheCallersStackAsASuppressedMarker"));
+    }
 }

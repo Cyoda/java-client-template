@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -32,7 +33,7 @@ public class ContentTypeAwareParser implements ResponseBodyParser {
         }
 
         // Extract base content type (ignore charset and other parameters)
-        String baseContentType = contentType.split(";")[0].trim().toLowerCase();
+        String baseContentType = contentType.split(";")[0].trim().toLowerCase(Locale.ROOT);
 
         return parsersByContentType.getOrDefault(baseContentType, defaultParser);
     }
@@ -52,7 +53,7 @@ public class ContentTypeAwareParser implements ResponseBodyParser {
         }
 
         public Builder withParser(String contentType, ResponseBodyParser parser) {
-            parsers.put(contentType.toLowerCase(), parser);
+            parsers.put(contentType.toLowerCase(Locale.ROOT), parser);
             return this;
         }
 

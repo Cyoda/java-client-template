@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 /** ABOUTME: Reads authtype/authid/authclaims from a callout CloudEvent (authclaims is comma-separated only). */
@@ -19,7 +20,7 @@ public class CloudEventAuthContextExtractor {
         }
         String id = attrs.containsKey("authid") ? attrs.get("authid").getCeString() : null;
         String claims = attrs.containsKey("authclaims") ? attrs.get("authclaims").getCeString() : "";
-        return new CloudEventAuthContext(CloudEventAuthContext.Type.valueOf(type.toUpperCase()), id, parseRoles(claims));
+        return new CloudEventAuthContext(CloudEventAuthContext.Type.valueOf(type.toUpperCase(Locale.ROOT)), id, parseRoles(claims));
     }
 
     static List<String> parseRoles(String claims) {

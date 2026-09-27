@@ -1,6 +1,7 @@
 package com.java_template.common.auth;
 
 import com.java_template.common.config.Config;
+import com.java_template.common.exception.CyodaCredentialException;
 import com.java_template.common.util.SslUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +19,7 @@ import org.springframework.security.oauth2.core.http.converter.OAuth2AccessToken
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.locks.ReentrantLock;
@@ -75,10 +77,12 @@ public class Authentication implements CyodaTokenSource {
         // We also inject a custom RestTemplate which uses our custom HttpClient to handle SSL trust.
         RestClientClientCredentialsTokenResponseClient accessTokenResponseClient = new RestClientClientCredentialsTokenResponseClient();
 
+        // Connect timeout from SslUtils; a read timeout of grpc-call-deadline-ms, so a hung token endpoint cannot
+        // hold fetchLock (and every caller waiting on it) indefinitely.
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(SslUtils.createHttpClient(config));
+        requestFactory.setReadTimeout(Duration.ofMillis(config.getGrpcCallDeadlineMs()));
         RestClient restClient = RestClient.builder()
-                .requestFactory(new JdkClientHttpRequestFactory(
-                        SslUtils.createHttpClient(config)
-                ))
+                .requestFactory(requestFactory)
                 .messageConverters((messageConverters) -> {
                     messageConverters.clear();
                     messageConverters.add(new FormHttpMessageConverter());
@@ -107,7 +111,7 @@ public class Authentication implements CyodaTokenSource {
             return current.oAuth2AccessToken;
         }
 
-        fetchLock.lock();
+        lockInterruptibly();
         try {
             current = cached;
             if (current != null && current.isValid()) {
@@ -142,6 +146,19 @@ public class Authentication implements CyodaTokenSource {
         invalidate(null);
     }
 
+    /**
+     * Waits for {@code fetchLock} (held by another thread's fetch) interruptibly: an interrupted caller gives up
+     * with {@link CyodaCredentialException}, its interrupt flag restored.
+     */
+    private void lockInterruptibly() {
+        try {
+            fetchLock.lockInterruptibly();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new CyodaCredentialException("interrupted while waiting for the M2M access token");
+        }
+    }
+
     private static boolean isBlank(String s) {
         return s == null || s.isBlank();
     }
@@ -164,7 +181,7 @@ public class Authentication implements CyodaTokenSource {
      */
     @Override
     public void invalidate(String rejectedToken) {
-        fetchLock.lock();
+        lockInterruptibly();
         try {
             CachedToken current = cached;
             if (current != null && (rejectedToken == null || rejectedToken.equals(current.getTokenValue()))) {

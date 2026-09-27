@@ -8,6 +8,8 @@ import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.exception.CyodaCredentialException;
 import com.java_template.common.exception.CyodaErrors;
+import com.java_template.common.exception.CyodaRetryableException;
+import com.java_template.common.call.CyodaGrpcCalls;
 import com.java_template.common.util.http.ContentTypeAwareParser;
 import com.java_template.common.util.http.ResponseBodyParser;
 import org.slf4j.LoggerFactory;
@@ -20,9 +22,13 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 
@@ -49,6 +55,8 @@ public class HttpUtils {
     private final ResponseBodyParser defaultParser;
     /** Origin of app.config.cyoda-api-url: the only one a Cyoda credential is ever sent to. */
     private final URI cyodaOrigin;
+    /** Bound on each request, response included: app.config.grpc-call-deadline-ms, as for a unary gRPC call. */
+    private final Duration requestTimeout;
 
     public HttpUtils(JsonUtils jsonUtils, CyodaObjectMapper wireMapper, Config config, CyodaTokenSource tokenSource) {
         this.jsonUtils = jsonUtils;
@@ -57,6 +65,7 @@ public class HttpUtils {
         this.defaultParser = ContentTypeAwareParser.createDefault(om);
         this.client = SslUtils.createHttpClient(config);
         this.cyodaOrigin = config.getCyodaApiUrl() == null ? null : URI.create(config.getCyodaApiUrl());
+        this.requestTimeout = Duration.ofMillis(config.getGrpcCallDeadlineMs());
     }
 
     /** True for a path routed to the transaction owner: entity, search or message (spec §4.4). */
@@ -74,6 +83,7 @@ public class HttpUtils {
         requireCyodaOriginForCredential(ctx, target);
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(target)
+                .timeout(requestTimeout)
                 .header("Content-Type", "application/json");
         String m2mToken = null;
         switch (ctx.credential()) {
@@ -83,7 +93,13 @@ public class HttpUtils {
                         .orElseThrow(() -> new CyodaCredentialException("no M2M token source is configured"));
                 builder.header("Authorization", "Bearer " + m2mToken);
             }
-            case CyodaCallContext.Forward forward -> builder.header("Authorization", "Bearer " + forward.token());
+            case CyodaCallContext.Forward forward -> {
+                if (forward.token() == null || forward.token().isBlank()) {
+                    // as CyodaCallInterceptor does: never send a request that would go out unauthenticated
+                    throw new CyodaCredentialException("forwarded token is blank");
+                }
+                builder.header("Authorization", "Bearer " + forward.token());
+            }
         }
         if (ctx.isJoined() && isTxRouted(path)) {
             builder.header("X-Tx-Token", ctx.txToken());
@@ -98,8 +114,38 @@ public class HttpUtils {
         return client.sendAsync(request, HttpResponse.BodyHandlers.ofString());
     }
 
+    /**
+     * Sends the request, retrying a {@code TOO_MANY_JOINED_REQUESTS} refusal up to
+     * {@link CyodaGrpcCalls#JOINED_RETRIES} times with the gRPC backoff. That refusal is safe to resend: cyoda-go's
+     * txjoin middleware answers it from {@code Joiner.CheckRoom}, before it reads the request body, or from the
+     * lock gate in {@code Joiner.RunVerified}, before the handler runs, so nothing was applied
+     * ({@code internal/httpmw/txjoin_mw.go}; {@code cyoda help errors TOO_MANY_JOINED_REQUESTS}: "The refused
+     * callback changes nothing"). {@code TRANSACTION_NODE_UNAVAILABLE} is never retried here: on REST the
+     * reverse proxy may answer it after the owning node applied the write.
+     */
     private CompletableFuture<ObjectNode> sendRequest(CyodaCallContext ctx, String url, String path, String method,
                                                        Object data, ResponseBodyParser parser) {
+        return sendRequest(ctx, url, path, method, data, parser, 0);
+    }
+
+    private CompletableFuture<ObjectNode> sendRequest(CyodaCallContext ctx, String url, String path, String method,
+                                                       Object data, ResponseBodyParser parser, int attempt) {
+        return sendOnce(ctx, url, path, method, data, parser).exceptionallyCompose(failure -> {
+            Throwable cause = failure instanceof CompletionException && failure.getCause() != null ? failure.getCause() : failure;
+            if (cause instanceof CyodaRetryableException retryable
+                    && "TOO_MANY_JOINED_REQUESTS".equals(retryable.getErrorCode())
+                    && attempt < CyodaGrpcCalls.JOINED_RETRIES) {
+                Executor delayed = CompletableFuture.delayedExecutor(
+                        CyodaGrpcCalls.joinedRetryBackoffMs(attempt), TimeUnit.MILLISECONDS);
+                return CompletableFuture.supplyAsync(() -> null, delayed)
+                        .thenCompose(ignored -> sendRequest(ctx, url, path, method, data, parser, attempt + 1));
+            }
+            return CompletableFuture.failedFuture(cause);
+        });
+    }
+
+    private CompletableFuture<ObjectNode> sendOnce(CyodaCallContext ctx, String url, String path, String method,
+                                                    Object data, ResponseBodyParser parser) {
         Prepared first = createRequest(ctx, url, path, method, data);
         return send(first.request()).thenCompose(response -> {
             if (response.statusCode() == 401 && first.m2mToken() != null) {
