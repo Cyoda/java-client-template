@@ -22,7 +22,7 @@ import java.util.Set;
  * <p>The credential is resolved eagerly, in {@link #interceptCall}, rather than lazily inside
  * {@code ClientCall.start()}. This matters: if resolution fails <em>after</em> a real delegate
  * {@link ClientCall} has been created (via {@code next.newCall(...)}), the only safe way to fail is to still
- * call {@code start()} on it (closing the listener) â€” gRPC's generated stubs unconditionally call
+ * call {@code start()} on it (closing the listener) — gRPC's generated stubs unconditionally call
  * {@code request()}/{@code sendMessage()}/{@code halfClose()} right after {@code start()}, and calling those
  * on a delegate that was never started throws {@code IllegalStateException: Not started}. Resolving the
  * credential first means a failure can be reported with a self-contained {@link FailedClientCall} that never
