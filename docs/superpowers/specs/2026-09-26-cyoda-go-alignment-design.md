@@ -362,9 +362,10 @@ event-user-resolver tests are deleted; new unit tests cover `CyodaCredentialReso
 
 `scripts/install-cyoda.sh [--from-src <git-ref>] [--dest <dir>]` reads `CYODA_VERSION`:
 released version → downloads that release (the project's `install.sh` route with
-`CYODA_VERSION` pinned); `--from-src` → `go build ./cmd/cyoda` from
-`github.com/cyoda-platform/cyoda-go` at the ref (required until v0.9.0 is tagged). Prints
-the binary path for `CYODA_BIN`.
+`CYODA_VERSION` pinned); `--from-src` → clones `https://github.com/Cyoda/cyoda-go` at the
+ref and runs `go build ./cmd/cyoda` (required until v0.9.0 is tagged; the Go module path is
+`github.com/cyoda-platform/cyoda-go`, the repository is `Cyoda/cyoda-go`). Prints the
+binary path for `CYODA_BIN`.
 
 ### 6.6 CI (`.github/workflows/build.yml`)
 
@@ -391,16 +392,22 @@ Each is checked early; a failed assumption changes the plan, not silently the de
    If that proves fragile (offline, CI resolver), fall back to `localhost` as Zitadel's
    external domain, since cyoda runs on the host.
 
-## 8. cyoda-go findings (for the user to triage; not fixed here)
+## 8. cyoda-go findings
 
-1. `client_credentials` tokens carry roles in a `scopes` claim while `cyoda help auth`
-   documents `user_roles` (`internal/auth/token.go:95`; validator falls back to `scopes`).
-2. `app/config.go:336` says the bootstrap secret is "generated if empty"; in JWT mode it is
-   required.
-3. An unknown `cyoda` subcommand (e.g. `cyoda version`) starts the server instead of
-   printing usage.
+This project never changes cyoda-go. Every finding becomes an issue in `Cyoda/cyoda-go`
+with milestone `v0.9.0`. Issue numbers are recorded here once filed.
 
-Findings discovered while implementing are appended here.
+| # | Finding | Kind | Issue |
+|---|---|---|---|
+| 1 | `client_credentials` tokens carry roles in `scopes`, not `user_roles` as `cyoda help auth`, `auth tokens` and `auth clients` document. The code is deliberate: the presence of `user_roles` vs `scopes` decides whether the principal is a user or a service. The docs are wrong and never state that rule. The same page calls `caas_org_id` a "string UUID"; a tenant id follows the tenant grammar, and only OIDC federation requires a UUID. | docs | pending |
+| 2 | The `BootstrapConfig.ClientSecret` field comment (`app/config.go:334`) says "optional, generated if empty". The secret is never generated: in jwt mode it must be set together with the client id (both or neither), and in mock mode it is ignored. User-facing docs are correct. | docs (minor) | pending |
+| 3 | An unrecognised first argument (e.g. `cyoda version`, `cyoda serve`) starts the server with the user's real config instead of failing. Extra arguments and flags are silently ignored, although `cyoda help cli` shows `[<flags>]` in the synopsis. | bug | pending |
+
+**Impact on this project:**
+- #1: the template never reads roles out of its own M2M token (§4.2), so nothing depends on the claim name.
+- #3: `CyodaBinary` calls only `--version`; `CyodaServer` starts the binary with no arguments.
+
+Findings discovered while implementing are appended here and filed the same way.
 
 ## 9. Out of scope
 
