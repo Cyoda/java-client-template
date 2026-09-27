@@ -20,8 +20,7 @@ import org.springframework.web.client.RestClient;
 
 import java.time.Instant;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 
 /**
@@ -41,10 +40,12 @@ public class Authentication implements CyodaTokenSource {
     // The manager stores the authorized client here and hands it back while its token is unexpired, so
     // invalidation must remove it here too, or the "refetch" would return the token Cyoda just rejected.
     private final OAuth2AuthorizedClientService authorizedClientService;
-    private final ConcurrentMap<String, CachedToken> tokenCache = new ConcurrentHashMap<>();
     private final Config config;
 
-    private static final String CACHE_KEY = "cyoda";
+    // Guards the token HTTP fetch. A ReentrantLock (not a `synchronized` block or ConcurrentHashMap.compute
+    // bin lock) so the blocking OAuth2 token request never pins a virtual thread (spec §4.5, JDK 21).
+    private final ReentrantLock fetchLock = new ReentrantLock();
+    private volatile CachedToken cached;
 
     public Authentication(Config config) {
         this.config = config;
@@ -102,9 +103,16 @@ public class Authentication implements CyodaTokenSource {
      * Returns a valid access token, reusing it if still fresh.
      */
     public OAuth2AccessToken getAccessToken() {
-        CachedToken token = tokenCache.compute(CACHE_KEY, (key, existing) -> {
-            if (existing != null && existing.isValid()) {
-                return existing;
+        CachedToken current = cached;
+        if (current != null && current.isValid()) {
+            return current.oAuth2AccessToken;
+        }
+
+        fetchLock.lock();
+        try {
+            current = cached;
+            if (current != null && current.isValid()) {
+                return current.oAuth2AccessToken;
             }
 
             logger.info("Fetching new OAuth2 access token");
@@ -119,19 +127,18 @@ public class Authentication implements CyodaTokenSource {
 
             OAuth2AccessToken accessToken = client.getAccessToken();
             logger.info("New token fetched, expires at: {}", accessToken.getExpiresAt());
-            return new CachedToken(accessToken);
-        });
-
-        return token.oAuth2AccessToken;
+            cached = new CachedToken(accessToken);
+            return accessToken;
+        } finally {
+            fetchLock.unlock();
+        }
     }
-
-
 
     /**
      * Clears cached token so next call re-authenticates.
      */
     public void invalidateTokens() {
-        tokenCache.remove(CACHE_KEY);
+        cached = null;
         authorizedClientService.removeAuthorizedClient(REGISTRATION_ID, PRINCIPAL_NAME);
         logger.info("Manually invalidated cached token");
     }
@@ -140,13 +147,8 @@ public class Authentication implements CyodaTokenSource {
         return s == null || s.isBlank();
     }
 
-    /**
-     * The M2M token for an outbound Cyoda call. Refused with {@link com.java_template.common.exception.CyodaCredentialException}
-     * while the current thread carries an authenticated user ({@link AuthenticatedCallerGuard}).
-     */
     @Override
     public Optional<String> bearerToken() {
-        AuthenticatedCallerGuard.refuseM2mForAuthenticatedUser();
         return Optional.of(getAccessToken().getTokenValue());
     }
 

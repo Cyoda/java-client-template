@@ -1,6 +1,8 @@
 package com.java_template.common.grpc.client.connection;
 
 import com.google.protobuf.InvalidProtocolBufferException;
+import com.java_template.common.call.CyodaCallInterceptor;
+import com.java_template.common.call.CyodaCallContexts;
 import com.java_template.common.grpc.client.event_handling.CloudEventBuilder;
 import com.java_template.common.grpc.client.event_handling.EventHandler;
 import com.java_template.common.grpc.client.event_handling.EventSender;
@@ -45,6 +47,7 @@ public class ConnectionManager implements EventSender {
     private final GreetEventListener greetEventListener;
     private final ManagedChannel managedChannel;
     private final Config config;
+    private final CyodaCallContexts callContexts;
 
     private StreamObserver<CloudEvent> streamObserver = null;
 
@@ -57,7 +60,8 @@ public class ConnectionManager implements EventSender {
             final ReconnectionStrategy reconnectionStrategy,
             final GreetEventListener greetEventListener,
             final ManagedChannel managedChannel,
-            final Config config
+            final Config config,
+            final CyodaCallContexts callContexts
     ) {
         this.eventHandler = eventHandler;
         this.eventTracker = eventTracker;
@@ -68,6 +72,7 @@ public class ConnectionManager implements EventSender {
         this.greetEventListener = greetEventListener;
         this.managedChannel = managedChannel;
         this.config = config;
+        this.callContexts = callContexts;
     }
 
     private CloudEvent createJoinEvent(
@@ -115,7 +120,9 @@ public class ConnectionManager implements EventSender {
                         requestReconnection();
                     }
             );
-            final var newObserver = cloudEventsServiceStub.startStreaming(ourObserver);
+            final var newObserver = cloudEventsServiceStub
+                    .withOption(CyodaCallInterceptor.CONTEXT, callContexts.forMemberStream())
+                    .startStreaming(ourObserver);
 
             connectionStateTracker.trackObserverStateChange(ObserverState.JOINING);
 

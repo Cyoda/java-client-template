@@ -1,7 +1,7 @@
 package com.java_template.common.config;
 
 import com.java_template.common.auth.CyodaTokenSource;
-import com.java_template.common.grpc.client.ClientAuthorizationInterceptor;
+import com.java_template.common.call.CyodaCallInterceptor;
 import com.java_template.common.observability.GrpcObservabilityInterceptor;
 import com.java_template.common.grpc.client.CalculationExecutionStrategy;
 import com.java_template.common.grpc.client.ControlThreadExecutor;
@@ -76,7 +76,7 @@ public class GrpcClientAutoConfiguration {
             final ManagedChannel managedChannel,
             @Nullable final GrpcObservabilityInterceptor observabilityInterceptor
     ) {
-        final var authInterceptor = new ClientAuthorizationInterceptor(tokenSource);
+        final var authInterceptor = new CyodaCallInterceptor(tokenSource);
         var stub = CloudEventsServiceGrpc.newStub(managedChannel)
                 .withWaitForReady()
                 .withInterceptors(authInterceptor);
@@ -92,7 +92,7 @@ public class GrpcClientAutoConfiguration {
             final ManagedChannel managedChannel,
             @Nullable final GrpcObservabilityInterceptor observabilityInterceptor
     ) {
-        final var authInterceptor = new ClientAuthorizationInterceptor(tokenSource);
+        final var authInterceptor = new CyodaCallInterceptor(tokenSource);
         var stub = CloudEventsServiceGrpc.newBlockingStub(managedChannel)
                 .withWaitForReady()
                 .withInterceptors(authInterceptor);
@@ -108,7 +108,7 @@ public class GrpcClientAutoConfiguration {
             final ManagedChannel managedChannel,
             @Nullable final GrpcObservabilityInterceptor observabilityInterceptor
     ) {
-        final var authInterceptor = new ClientAuthorizationInterceptor(tokenSource);
+        final var authInterceptor = new CyodaCallInterceptor(tokenSource);
         var stub = CloudEventsServiceGrpc.newFutureStub(managedChannel)
                 .withWaitForReady()
                 .withInterceptors(authInterceptor);
