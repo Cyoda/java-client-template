@@ -44,6 +44,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -209,7 +210,9 @@ class CyodaRepositoryContextTest {
         DataPayload payload = repo.findById(CyodaCallContext.m2m(), UUID.randomUUID(), (java.time.OffsetDateTime) null).join();
 
         assertThat(payload.getData().get("i").asInt()).isEqualTo(7);
-        verify(tokens, times(1)).invalidate();
+        // exactly the token the server refused, so a token another thread fetched since is never discarded
+        verify(tokens, times(1)).invalidate("stale");
+        verify(tokens, never()).invalidate();
         assertThat(server.seen).extracting(RecordingCyodaServer.Seen::authorization)
                 .containsExactly("Bearer stale", "Bearer fresh");
     }
@@ -225,6 +228,7 @@ class CyodaRepositoryContextTest {
                 .cause().isInstanceOf(StatusRuntimeException.class)
                 .satisfies(e -> assertThat(((StatusRuntimeException) e).getStatus().getCode()).isEqualTo(Status.Code.UNAUTHENTICATED));
         verify(tokens, never()).invalidate();
+        verify(tokens, never()).invalidate(anyString());
         assertThat(server.seen).hasSize(1);
     }
 

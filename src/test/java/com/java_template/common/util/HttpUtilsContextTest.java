@@ -93,7 +93,8 @@ class HttpUtilsContextTest {
         http.sendGetRequest(CyodaCallContext.m2m(), base, "entity/x").join();
 
         assertThat(seen).hasSize(2);
-        verify(tokens).invalidate();
+        verify(tokens).invalidate("m2m");
+        verify(tokens, never()).invalidate();
     }
 
     @Test
@@ -103,7 +104,8 @@ class HttpUtilsContextTest {
         assertThatThrownBy(() -> http.sendGetRequest(CyodaCallContext.m2m().withTxToken("t"), base, "entity/x").join())
                 .hasCauseInstanceOf(CyodaCalloutEndedException.class);
         assertThat(seen).hasSize(1);
-        verify(tokens).invalidate();
+        verify(tokens).invalidate("m2m");
+        verify(tokens, never()).invalidate();
     }
 
     @Test
@@ -114,5 +116,6 @@ class HttpUtilsContextTest {
                 .hasCauseInstanceOf(CyodaHttpException.class);
         assertThat(seen).hasSize(1);
         verify(tokens, never()).invalidate();
+        verify(tokens, never()).invalidate(anyString());
     }
 }

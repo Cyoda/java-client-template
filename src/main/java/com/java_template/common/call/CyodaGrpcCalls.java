@@ -13,6 +13,14 @@ public final class CyodaGrpcCalls {
 
     private static final long[] BACKOFF_MS = {50, 100, 200};
 
+    /**
+     * The M2M token {@link CyodaCallInterceptor} attached to the call this thread is making inside
+     * {@link #call}. The blocking stubs run the interceptor on the calling thread, so after an
+     * {@code UNAUTHENTICATED} this names exactly the token cyoda refused, and only that one is invalidated
+     * (a token another thread fetched since is kept). Set only while {@link #call} runs an attempt.
+     */
+    private static final ThreadLocal<String[]> SENT_M2M_TOKEN = new ThreadLocal<>();
+
     private CyodaGrpcCalls() {
     }
 
@@ -37,14 +45,36 @@ public final class CyodaGrpcCalls {
     }
 
     private static <T> T withM2mRetry(CyodaCallContext ctx, CyodaTokenSource tokens, Supplier<T> call) {
+        String[] sent = new String[1];
+        String[] outer = SENT_M2M_TOKEN.get();
+        SENT_M2M_TOKEN.set(sent);
         try {
             return call.get();
         } catch (StatusRuntimeException e) {
             if (e.getStatus().getCode() == Status.Code.UNAUTHENTICATED && ctx.credential() instanceof CyodaCallContext.M2m) {
-                tokens.invalidate();
+                if (sent[0] != null) {
+                    tokens.invalidate(sent[0]);
+                } else {
+                    // no token went out through the interceptor (e.g. the fetch itself failed): nothing to compare
+                    tokens.invalidate();
+                }
                 return call.get();
             }
             throw e;
+        } finally {
+            if (outer == null) {
+                SENT_M2M_TOKEN.remove();
+            } else {
+                SENT_M2M_TOKEN.set(outer);
+            }
+        }
+    }
+
+    /** Called by {@link CyodaCallInterceptor} with the M2M token it attaches; a no-op outside {@link #call}. */
+    static void recordSentM2mToken(String token) {
+        String[] sent = SENT_M2M_TOKEN.get();
+        if (sent != null) {
+            sent[0] = token;
         }
     }
 

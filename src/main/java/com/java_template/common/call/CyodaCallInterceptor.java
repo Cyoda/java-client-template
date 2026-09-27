@@ -84,8 +84,12 @@ public final class CyodaCallInterceptor implements ClientInterceptor {
     private String resolveAuthorizationHeader(CyodaCallContext ctx) {
         return switch (ctx.credential()) {
             case CyodaCallContext.None ignored -> null;
-            case CyodaCallContext.M2m ignored -> "Bearer " + tokenSource.bearerToken()
-                    .orElseThrow(() -> new IllegalStateException("no M2M token source is configured"));
+            case CyodaCallContext.M2m ignored -> {
+                String token = tokenSource.bearerToken()
+                        .orElseThrow(() -> new IllegalStateException("no M2M token source is configured"));
+                CyodaGrpcCalls.recordSentM2mToken(token);
+                yield "Bearer " + token;
+            }
             case CyodaCallContext.Forward forward -> {
                 if (forward.token() == null || forward.token().isBlank()) {
                     throw new IllegalStateException("forwarded token is blank");

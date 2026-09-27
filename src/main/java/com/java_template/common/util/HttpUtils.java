@@ -58,14 +58,22 @@ public class HttpUtils {
         return p.startsWith("entity") || p.startsWith("search") || p.startsWith("message");
     }
 
-    private HttpRequest createRequest(CyodaCallContext ctx, String url, String path, String method, Object data) {
+    /** A request ready to send, with the M2M token it carries (null for another credential). */
+    private record Prepared(HttpRequest request, String m2mToken) {
+    }
+
+    private Prepared createRequest(CyodaCallContext ctx, String url, String path, String method, Object data) {
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .header("Content-Type", "application/json");
+        String m2mToken = null;
         switch (ctx.credential()) {
             case CyodaCallContext.None ignored -> { }
-            case CyodaCallContext.M2m ignored -> builder.header("Authorization", "Bearer " + tokenSource.bearerToken()
-                    .orElseThrow(() -> new CyodaCredentialException("no M2M token source is configured")));
+            case CyodaCallContext.M2m ignored -> {
+                m2mToken = tokenSource.bearerToken()
+                        .orElseThrow(() -> new CyodaCredentialException("no M2M token source is configured"));
+                builder.header("Authorization", "Bearer " + m2mToken);
+            }
             case CyodaCallContext.Forward forward -> builder.header("Authorization", "Bearer " + forward.token());
         }
         if (ctx.isJoined() && isTxRouted(path)) {
@@ -74,21 +82,22 @@ public class HttpUtils {
         HttpRequest.BodyPublisher body = data == null
                 ? HttpRequest.BodyPublishers.noBody()
                 : HttpRequest.BodyPublishers.ofString(jsonUtils.toJson(data), StandardCharsets.UTF_8);
-        return builder.method(method, body).build();
+        return new Prepared(builder.method(method, body).build(), m2mToken);
     }
 
-    private CompletableFuture<HttpResponse<String>> send(CyodaCallContext ctx, String url, String path, String method, Object data) {
-        return client.sendAsync(createRequest(ctx, url, path, method, data), HttpResponse.BodyHandlers.ofString());
+    private CompletableFuture<HttpResponse<String>> send(HttpRequest request) {
+        return client.sendAsync(request, HttpResponse.BodyHandlers.ofString());
     }
 
     private CompletableFuture<ObjectNode> sendRequest(CyodaCallContext ctx, String url, String path, String method,
                                                        Object data, ResponseBodyParser parser) {
-        return send(ctx, url, path, method, data).thenCompose(response -> {
-            boolean m2m = ctx.credential() instanceof CyodaCallContext.M2m;
-            if (response.statusCode() == 401 && m2m) {
-                tokenSource.invalidate();
+        Prepared first = createRequest(ctx, url, path, method, data);
+        return send(first.request()).thenCompose(response -> {
+            if (response.statusCode() == 401 && first.m2mToken() != null) {
+                // only the token cyoda refused: a token another thread fetched since is kept
+                tokenSource.invalidate(first.m2mToken());
                 if (!ctx.isJoined()) {
-                    return send(ctx, url, path, method, data);
+                    return send(createRequest(ctx, url, path, method, data).request());
                 }
             }
             return CompletableFuture.completedFuture(response);

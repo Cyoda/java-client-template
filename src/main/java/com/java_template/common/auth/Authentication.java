@@ -32,7 +32,6 @@ import java.util.concurrent.locks.ReentrantLock;
 public class Authentication implements CyodaTokenSource {
 
     private static final Logger logger = LoggerFactory.getLogger(Authentication.class);
-
     private static final String REGISTRATION_ID = "cyoda";
     private static final String PRINCIPAL_NAME = "cyoda-client";
 
@@ -135,12 +134,12 @@ public class Authentication implements CyodaTokenSource {
     }
 
     /**
-     * Clears cached token so next call re-authenticates.
+     * Clears the cached token, whatever it is, so the next call re-authenticates. Prefer
+     * {@link #invalidate(String)} with the token Cyoda rejected: it never discards a token another thread
+     * fetched in the meantime.
      */
     public void invalidateTokens() {
-        cached = null;
-        authorizedClientService.removeAuthorizedClient(REGISTRATION_ID, PRINCIPAL_NAME);
-        logger.info("Manually invalidated cached token");
+        invalidate(null);
     }
 
     private static boolean isBlank(String s) {
@@ -154,7 +153,32 @@ public class Authentication implements CyodaTokenSource {
 
     @Override
     public void invalidate() {
-        invalidateTokens();
+        invalidate(null);
+    }
+
+    /**
+     * Drops {@code rejectedToken} from both this cache and the authorized-client service, so the next
+     * {@link #getAccessToken()} really fetches a new token. Compared under {@code fetchLock}: if either
+     * holds a different token (fetched by another thread since the rejected one was sent), that one is
+     * kept. {@code null} drops whatever is held.
+     */
+    @Override
+    public void invalidate(String rejectedToken) {
+        fetchLock.lock();
+        try {
+            CachedToken current = cached;
+            if (current != null && (rejectedToken == null || rejectedToken.equals(current.getTokenValue()))) {
+                cached = null;
+            }
+            OAuth2AuthorizedClient stored = authorizedClientService.loadAuthorizedClient(REGISTRATION_ID, PRINCIPAL_NAME);
+            if (stored != null && (rejectedToken == null
+                    || (stored.getAccessToken() != null && rejectedToken.equals(stored.getAccessToken().getTokenValue())))) {
+                authorizedClientService.removeAuthorizedClient(REGISTRATION_ID, PRINCIPAL_NAME);
+                logger.info("Invalidated the cached M2M access token");
+            }
+        } finally {
+            fetchLock.unlock();
+        }
     }
 
     /**

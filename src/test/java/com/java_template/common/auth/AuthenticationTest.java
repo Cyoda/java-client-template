@@ -10,13 +10,20 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * A real {@link Authentication} against a stub {@code /oauth/token} endpoint that issues a different token on
- * every request ({@code tok-1}, {@code tok-2}, …).
+ * every request ({@code tok-1}, {@code tok-2}, …). Invalidating a rejected token must force a real new fetch
+ * (Spring's authorized-client service would otherwise hand back the stored, unexpired token), and a stale
+ * rejection must never discard a token another thread has fetched since.
  */
 class AuthenticationTest {
 
@@ -72,12 +79,60 @@ class AuthenticationTest {
     }
 
     @Test
-    void invalidateForcesANewFetch() {
+    void invalidatingTheRejectedTokenForcesANewFetch() {
+        assertThat(authentication.getAccessToken().getTokenValue()).isEqualTo("tok-1");
+
+        authentication.invalidate("tok-1");
+
+        assertThat(authentication.getAccessToken().getTokenValue()).isEqualTo("tok-2");
+        assertThat(issued).hasValue(2);
+    }
+
+    @Test
+    void theNoArgInvalidateStillForcesANewFetch() {
         assertThat(authentication.bearerToken()).contains("tok-1");
 
         authentication.invalidate();
 
         assertThat(authentication.bearerToken()).contains("tok-2");
+        assertThat(issued).hasValue(2);
+    }
+
+    @Test
+    void aStaleRejectionNeverDiscardsATokenFetchedSince() {
+        assertThat(authentication.getAccessToken().getTokenValue()).isEqualTo("tok-1");
+        authentication.invalidate("tok-1");
+        assertThat(authentication.getAccessToken().getTokenValue()).isEqualTo("tok-2");
+
+        // a second caller that had sent tok-1 reports its rejection late
+        authentication.invalidate("tok-1");
+
+        assertThat(authentication.getAccessToken().getTokenValue()).isEqualTo("tok-2");
+        assertThat(issued).hasValue(2);
+    }
+
+    @Test
+    void concurrentRejectionsOfOneTokenFetchExactlyOneReplacement() throws Exception {
+        assertThat(authentication.getAccessToken().getTokenValue()).isEqualTo("tok-1");
+        int threads = 16;
+        CountDownLatch go = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        try {
+            List<Future<String>> results = new ArrayList<>();
+            for (int i = 0; i < threads; i++) {
+                results.add(pool.submit(() -> {
+                    go.await();
+                    authentication.invalidate("tok-1");
+                    return authentication.getAccessToken().getTokenValue();
+                }));
+            }
+            go.countDown();
+            for (Future<String> result : results) {
+                assertThat(result.get(10, TimeUnit.SECONDS)).isEqualTo("tok-2");
+            }
+        } finally {
+            pool.shutdownNow();
+        }
         assertThat(issued).hasValue(2);
     }
 }
