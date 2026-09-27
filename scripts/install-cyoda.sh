@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Installs the cyoda binary pinned in src/main/resources/cyoda/CYODA_VERSION (spec §7.4).
+#   scripts/install-cyoda.sh                       released pin: download; -dev pin: build pinned commit from GitHub
+#   scripts/install-cyoda.sh --from-src [<ref>]    build from GitHub at <ref> (default: the pinned commit)
+#   scripts/install-cyoda.sh --src-dir <checkout>  build an existing local checkout (its HEAD must be the pinned commit)
+#   --dest <dir>                                   output directory (default: build/cyoda-bin)
+# Prints the binary path on stdout (use it as CYODA_BIN). Never runs `cyoda init`.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PIN="$ROOT/src/main/resources/cyoda/CYODA_VERSION"
+VERSION="$(sed -n 1p "$PIN")"
+COMMIT="$(sed -n 2p "$PIN" | sed 's/^commit=//')"
+DEST="$ROOT/build/cyoda-bin"
+MODE=""
+REF=""
+SRC_DIR=""
+
+fail() { echo "install-cyoda: $*" >&2; exit 1; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --from-src)
+      MODE=github
+      if [ $# -gt 1 ] && [[ "$2" != --* ]]; then REF="$2"; shift; fi
+      shift ;;
+    --src-dir) MODE=local; SRC_DIR="${2:-}"; shift 2 ;;
+    --dest) DEST="${2:-}"; shift 2 ;;
+    *) fail "unknown argument $1" ;;
+  esac
+done
+if [ -z "$MODE" ]; then
+  if [[ "$VERSION" == *-dev ]]; then MODE=github; else MODE=release; fi
+fi
+mkdir -p "$DEST"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+build_checkout() { # <checkout dir>
+  command -v go >/dev/null || fail "Go >= 1.26.7 is required to build cyoda from source"
+  local sha date
+  sha="$(git -C "$1" rev-parse HEAD)"
+  date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  ( cd "$1" && CGO_ENABLED=0 go build \
+      -ldflags "-X main.version=$VERSION -X main.commit=$sha -X main.buildDate=$date" \
+      -o "$DEST/cyoda" ./cmd/cyoda )
+}
+
+case "$MODE" in
+  release)
+    os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+    arch="$(uname -m)"
+    case "$arch" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; esac
+    asset="cyoda_${VERSION}_${os}_${arch}.tar.gz"
+    base="https://github.com/Cyoda/cyoda-go/releases/download/v${VERSION}"
+    curl -fsSL "$base/$asset" -o "$WORK/$asset" || fail "cannot download $base/$asset"
+    curl -fsSL "$base/SHA256SUMS" -o "$WORK/SHA256SUMS" || fail "cannot download $base/SHA256SUMS"
+    ( cd "$WORK" && grep " $asset\$" SHA256SUMS | shasum -a 256 -c - >/dev/null ) || fail "checksum mismatch for $asset"
+    tar -xzf "$WORK/$asset" -C "$WORK" cyoda
+    mv "$WORK/cyoda" "$DEST/cyoda"
+    ;;
+  github)
+    [ -n "$REF" ] || REF="$COMMIT"
+    git clone --quiet https://github.com/Cyoda/cyoda-go.git "$WORK/cyoda-go"
+    git -C "$WORK/cyoda-go" checkout --quiet "$REF"
+    build_checkout "$WORK/cyoda-go"
+    ;;
+  local)
+    [ -d "$SRC_DIR/cmd/cyoda" ] || fail "$SRC_DIR is not a cyoda-go checkout"
+    head="$(git -C "$SRC_DIR" rev-parse HEAD)"
+    [ "$head" = "$COMMIT" ] || fail "$SRC_DIR is at $head but the pin is $COMMIT (sync the pin or check out the pinned commit)"
+    build_checkout "$SRC_DIR"
+    ;;
+esac
+
+chmod +x "$DEST/cyoda"
+"$DEST/cyoda" --version >&2
+echo "$DEST/cyoda"
