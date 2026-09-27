@@ -26,6 +26,10 @@ import java.util.concurrent.CompletableFuture;
  * <p>Every method takes the {@link CyodaCallContext} of the operation it belongs to (spec §4.2): the
  * credential and tx-token of every call it makes, including every stage of a multi-step search. Build it
  * with {@code CyodaCallContexts.current()} once per operation; never re-derive it per call.
+ *
+ * <p>When {@code ctx} is joined to a callout's transaction, every read refuses a non-null {@code pointInTime}
+ * with {@link IllegalArgumentException} before sending: point-in-time reads are not supported inside a
+ * callout's transaction (spec clarification 3).
  */
 public interface CrudRepository {
 
@@ -56,7 +60,9 @@ public interface CrudRepository {
      * <p>Inside a callout scope ({@code ctx.isJoined()}) this runs as a direct search, because an async
      * snapshot does not see the joined transaction's uncommitted writes: only page 0 can be read, with at most
      * {@code CyodaRepository.DIRECT_SEARCH_LIMIT} (10 000) entities; anything else throws
-     * {@link IllegalStateException} before any call is made.
+     * {@link IllegalStateException} before any call is made. A page with more matches reports
+     * {@code hasNext()}; a full page of 10 000 fails with {@link IllegalStateException}, since whether more
+     * exist cannot be told.
      *
      * @param ctx the call context (credential and tx-token) for this operation
      * @param modelSpec the model specification to match
@@ -173,7 +179,9 @@ public interface CrudRepository {
      * <p>Inside a callout scope ({@code ctx.isJoined()}) this runs as a direct search, because an async
      * snapshot does not see the joined transaction's uncommitted writes: only page 0 can be read, with at most
      * {@code CyodaRepository.DIRECT_SEARCH_LIMIT} (10 000) entities; anything else throws
-     * {@link IllegalStateException} before any call is made.
+     * {@link IllegalStateException} before any call is made. A page with more matches reports
+     * {@code hasNext()}; a full page of 10 000 fails with {@link IllegalStateException}, since whether more
+     * exist cannot be told.
      *
      * @param ctx the call context (credential and tx-token) for this operation
      * @param modelSpec the model specification to match

@@ -41,8 +41,10 @@ import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiFunction;
@@ -218,6 +220,7 @@ public class CyodaRepository implements CrudRepository {
             final UUID entityId,
             @Nullable final OffsetDateTime pointInTime
     ) {
+        rejectPointInTimeWhenJoined(ctx, pointInTime);
         return sendAndGet(
                 ctx,
                 (stub, req) -> stub.entitySearch(req),
@@ -236,8 +239,9 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final SearchAndRetrievalParams params
     ) {
         if (ctx.isJoined()) {
+            rejectPointInTimeWhenJoined(ctx, params.pointInTime());
             requireDirectSearchable(params);
-            return findAllByConditionInScope(ctx, modelSpec, params.pageSize(), condition, params.pointInTime());
+            return findAllByConditionInScope(ctx, modelSpec, params.pageSize(), condition);
         }
         OffsetDateTime pointInTime = params.pointInTime();
         return params.inMemory()
@@ -359,23 +363,32 @@ public class CyodaRepository implements CrudRepository {
     }
 
     /**
-     * Page 0 of a direct search inside a callout scope. One entity more than the page is asked for (within
-     * {@link #DIRECT_SEARCH_LIMIT}): if it arrives, the page reports a next page ({@code totalElements} is
-     * then a lower bound), and asking for that page fails in {@link #requireDirectSearchable} instead of a
-     * stream silently ending after page 0.
+     * Page 0 of a direct search inside a callout scope (never at a point in time: see
+     * {@link #rejectPointInTimeWhenJoined}). One entity more than the page is asked for: if it arrives, the page
+     * reports a next page ({@code totalElements} is then a lower bound), and asking for that page fails in
+     * {@link #requireDirectSearchable} instead of a stream silently ending after page 0. A page of
+     * {@link #DIRECT_SEARCH_LIMIT} leaves no room for that probe, so a full one fails with
+     * {@link IllegalStateException}: whether more entities exist cannot be told.
      */
     private CompletableFuture<PageResult<DataPayload>> findAllByConditionInScope(
             @NotNull final CyodaCallContext ctx,
             @NotNull final ModelSpec modelSpec,
             final int pageSize,
-            @NotNull final GroupConditionDto condition,
-            @Nullable final OffsetDateTime pointInTime
+            @NotNull final GroupConditionDto condition
     ) {
-        int limit = Math.min(pageSize + 1, DIRECT_SEARCH_LIMIT);
-        return directSearch(ctx, modelSpec, limit, condition, pointInTime)
-                .thenApply(data -> data.size() > pageSize
-                        ? PageResult.of(null, List.copyOf(data.subList(0, pageSize)), 0, pageSize, data.size())
-                        : PageResult.of(null, data, 0, pageSize, data.size()))
+        final boolean probed = pageSize < DIRECT_SEARCH_LIMIT;
+        final int limit = probed ? pageSize + 1 : DIRECT_SEARCH_LIMIT;
+        return directSearch(ctx, modelSpec, limit, condition, null)
+                .thenApply(data -> {
+                    if (!probed && data.size() >= DIRECT_SEARCH_LIMIT) {
+                        throw new IllegalStateException("inside a callout scope a direct search returns at most "
+                                + DIRECT_SEARCH_LIMIT + " entities, and this one returned " + data.size()
+                                + ": more may exist, and a direct search cannot read them");
+                    }
+                    return data.size() > pageSize
+                            ? PageResult.of(null, List.copyOf(data.subList(0, pageSize)), 0, pageSize, data.size())
+                            : PageResult.of(null, data, 0, pageSize, data.size());
+                })
                 .exceptionally(this::handleNotFoundOrThrowPageResult);
     }
 
@@ -410,8 +423,9 @@ public class CyodaRepository implements CrudRepository {
                 .conditions(List.of());
 
         if (ctx.isJoined()) {
+            rejectPointInTimeWhenJoined(ctx, params.pointInTime());
             requireDirectSearchable(params);
-            return findAllByConditionInScope(ctx, modelSpec, params.pageSize(), matchAllCondition, params.pointInTime());
+            return findAllByConditionInScope(ctx, modelSpec, params.pageSize(), matchAllCondition);
         }
         OffsetDateTime pointInTime = params.pointInTime();
         return params.inMemory()
@@ -447,6 +461,19 @@ public class CyodaRepository implements CrudRepository {
     ) {
         rejectTransactionControlWhenJoined(ctx, transactionWindow, transactionTimeoutMs);
         return saveNewEntitiesWithTransactionParams(ctx, modelSpec, entities, transactionWindow, transactionTimeoutMs);
+    }
+
+    /**
+     * A point-in-time read is not part of the contract inside an open transaction (spec clarification 3): a
+     * request joined to a callout's transaction reads that transaction's latest view. Refused loudly, before
+     * sending, rather than silently dropped. The framework's own reloads inside a scope pass no point in time.
+     */
+    private static void rejectPointInTimeWhenJoined(final CyodaCallContext ctx, @Nullable final OffsetDateTime pointInTime) {
+        if (ctx.isJoined() && pointInTime != null) {
+            throw new IllegalArgumentException("pointInTime is refused on a request joined to a callout's transaction: "
+                    + "point-in-time reads are not supported inside a callout's transaction (spec clarification 3); "
+                    + "read without pointInTime to see the transaction's latest view");
+        }
     }
 
     /** cyoda refuses transaction-control parameters on a joined request (spec §4.4); refuse them before sending. */
@@ -586,6 +613,26 @@ public class CyodaRepository implements CrudRepository {
      * executor. The stream is read to the end inside the attempt, so an envelope failure anywhere in it
      * surfaces in (and can retry) the call that caused it; an attempt abandoned part-way is cancelled, so a
      * retry never leaves the previous stream open.
+     *
+     * <p>Retrying the collection writes (entityManageCollection: saveAll, updateAll, deleteAll) is safe only
+     * because every code this path retries is refused by cyoda-go before anything is applied. Verified in the
+     * cyoda-go v0.9 sources:
+     * <ul>
+     *   <li>{@code UNAUTHENTICATED}: the auth interceptor rejects the call before any handler runs.</li>
+     *   <li>{@code TOO_MANY_JOINED_REQUESTS}: emitted only by {@code tooManyJoinedRequests()} in
+     *       {@code internal/domain/txjoin/txjoin.go}, from {@code Joiner.CheckRoom} (which
+     *       {@code internal/grpc/txroute_interceptor.go} asks before it even receives the request message) and
+     *       from the lock gate in {@code Joiner.RunVerified}, which refuses before the handler runs ("it still
+     *       mutates nothing"). A peer-forwarded call meets the same admission on the owning node. The help
+     *       topic {@code errors/TOO_MANY_JOINED_REQUESTS.md}: "The refused callback changes nothing".</li>
+     *   <li>{@code TRANSACTION_NODE_UNAVAILABLE}: on gRPC, emitted only by {@code classifyRouteErr} in
+     *       {@code txroute_interceptor.go} when {@code proxy.ResolveNodeInfo} finds the token's owner dead or
+     *       unknown, before the call is forwarded or handled. A forward that fails after reaching the owner is
+     *       not mapped to this code (it surfaces as a generic envelope or a raw gRPC status, not retried here).
+     *       On REST, by contrast, the reverse proxy's ErrorHandler answers 503 TRANSACTION_NODE_UNAVAILABLE,
+     *       possibly after the owner applied the write, which is why no REST path retries it.</li>
+     * </ul>
+     * If cyoda-go ever emits either joined code after applying part of a collection, this retry must go.
      */
     private <RESPONSE_PAYLOAD_TYPE extends BaseEvent> CompletableFuture<Stream<RESPONSE_PAYLOAD_TYPE>> sendAndGetCollection(
             final CyodaCallContext ctx,
@@ -762,11 +809,7 @@ public class CyodaRepository implements CrudRepository {
                         new TimeoutException("Timeout exceeded after " + awaitLimitMillis + " ms"));
             }
 
-            return CompletableFuture.runAsync(
-                    () -> {
-                    },
-                    CompletableFuture.delayedExecutor(intervalMillis, TimeUnit.MILLISECONDS, executor)
-            ).thenCompose(ignored -> {
+            return pollDelay(intervalMillis).thenCompose(ignored -> {
                 try {
                     return pollSnapshotStatus(ctx, snapshotId, startTime, awaitLimitMillis, intervalMillis);
                 } catch (IOException e) {
@@ -774,6 +817,27 @@ public class CyodaRepository implements CrudRepository {
                 }
             });
         });
+    }
+
+    /**
+     * Completes after {@code intervalMillis}, on the executor. The delayed hand-off to the executor happens on
+     * the JDK's delay scheduler, which swallows a rejection: if the repository has been shut down meanwhile,
+     * the delay completes exceptionally instead, so the poll fails rather than leaving a caller's join() hanging.
+     */
+    private CompletableFuture<Void> pollDelay(final long intervalMillis) {
+        final CompletableFuture<Void> delay = new CompletableFuture<>();
+        final Executor resubmit = task -> {
+            try {
+                executor.execute(task);
+            } catch (RejectedExecutionException rejected) {
+                IllegalStateException shutDown =
+                        new IllegalStateException("CyodaRepository is shut down: the snapshot poll was abandoned");
+                shutDown.addSuppressed(rejected);
+                delay.completeExceptionally(shutDown);
+            }
+        };
+        CompletableFuture.delayedExecutor(intervalMillis, TimeUnit.MILLISECONDS, resubmit).execute(() -> delay.complete(null));
+        return delay;
     }
 
     private CompletableFuture<SearchSnapshotStatus> getSnapshotStatus(
@@ -832,6 +896,7 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final ModelSpec modelSpec,
             @Nullable final OffsetDateTime pointInTime
     ) {
+        rejectPointInTimeWhenJoined(ctx, pointInTime);
         return sendAndGetCollection(
                 ctx,
                 (stub, req) -> stub.entitySearchCollection(req),
@@ -870,6 +935,7 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final List<String> states,
             @Nullable final OffsetDateTime pointInTime
     ) {
+        rejectPointInTimeWhenJoined(ctx, pointInTime);
         return sendAndGetCollection(
                 ctx,
                 (stub, req) -> stub.entitySearchCollection(req),
@@ -895,6 +961,7 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final UUID entityId,
             @Nullable final OffsetDateTime pointInTime
     ) {
+        rejectPointInTimeWhenJoined(ctx, pointInTime);
         return sendAndGetCollection(
                 ctx,
                 (stub, req) -> stub.entitySearchCollection(req),

@@ -21,31 +21,31 @@ import java.util.stream.Stream;
 /**
  * ABOUTME: Core entity service interface providing CRUD operations and search capabilities
  * for Cyoda entities with performance-optimized method selection guidance.
-
+ *
  * METHOD SELECTION GUIDE:
-
+ *
  * FOR SINGLE ENTITY RETRIEVAL:
  * - Use getById() when you have the technical UUID (fastest, most efficient)
  * - Use findByBusinessId() when you have a business identifier (e.g., "CART-123", "PAY-456")
-
+ *
  * FOR BULK RETRIEVAL:
  * - Use findAll() for paginated retrieval of all entities (returns PageResult with searchId)
  * - Use streamAll() for streaming all entities (memory-efficient, auto-pagination)
  * - Use search() for paginated retrieval with conditions (returns PageResult with searchId)
  * - Use searchAsStream() for streaming entities with conditions (memory-efficient, auto-pagination)
-
+ *
  * FOR MUTATIONS:
  * - Use create() for new entities
  * - Use update() for existing entities with technical UUID
  * - Use updateByBusinessId() for existing entities with business identifier
-
+ *
  * PERFORMANCE NOTES:
  * - Technical UUID operations are fastest (direct lookup)
  * - Business ID operations require field search (slower)
  * - Paginated methods (findAll/search) support searchId for efficient multipage retrieval
  * - Streaming methods automatically handle pagination and are memory-efficient for large datasets
  * - Set inMemory=true in search operations for small result sets.
-
+ *
  * POINT IN TIME:
  * - Every pointInTime parameter has an OffsetDateTime overload that keeps full (nanosecond) precision;
  *   use it, e.g. with EntityChangeMeta.getTimeOfChange(). The java.util.Date overloads are kept for
@@ -53,12 +53,22 @@ import java.util.stream.Stream;
  *   as-at a truncated change time can return the version before that change.
  * - Passing a bare null literal is ambiguous between the two overloads; cast it, e.g. (OffsetDateTime) null,
  *   or call the overload without pointInTime.
-
+ *
  * INSIDE A PROCESSOR OR CRITERION (an open CalloutScope):
- * - Calls join the callout's transaction. Search runs as a direct search, because an async snapshot does not
- *   see the transaction's uncommitted writes: only page 0 can be read, with at most 10 000 entities
- *   (CyodaRepository.DIRECT_SEARCH_LIMIT). A later page, a searchId, or a larger page throws
- *   IllegalStateException, and so does a stream that needs more than one page.
+ * - Calls join the callout's transaction and see its uncommitted writes.
+ * - Search (findAll, search, findByBusinessId, findByCompositeKey and the streams) runs as ONE direct search,
+ *   because an async snapshot does not see the transaction's writes. Only page 0 can be read, with a
+ *   pageSize of at most 10 000 (CyodaRepository.DIRECT_SEARCH_LIMIT); inMemory makes no difference there.
+ *   A page request with pageNumber &gt; 0 or a searchId, or a pageSize above 10 000, throws
+ *   IllegalStateException before anything is sent.
+ * - A page that has more matches than its pageSize reports hasNext(), so reading on (page 1) throws
+ *   IllegalStateException rather than silently stopping. streamAll()/searchAsStream() therefore stream
+ *   every match when they all fit in one page of params.pageSize(), and throw IllegalStateException
+ *   otherwise: pick a pageSize that covers the result, or narrow the condition. A pageSize of exactly
+ *   10 000 that comes back full also throws, since whether more exist cannot be told.
+ * - pointInTime must be null on every read (getById, findByBusinessId, search/findAll and the streams,
+ *   getEntityCount, getEntityStatsByState, getEntityChangesMetadata): a point-in-time read is not supported
+ *   inside a callout's transaction, and a non-null value throws IllegalArgumentException.
  * - transactionWindow and transactionTimeoutMs must be null (IllegalArgumentException otherwise).
  * - create/update/updateByBusinessId/save/updateAll return the transaction's latest view of the entity,
  *   read without a point in time.
@@ -165,15 +175,16 @@ public interface EntityService {
     }
 
     /**
-     * Find entity by business identifier, returning null on any exception (MEDIUM SPEED)
-     * This method wraps findByBusinessId and catches all exceptions, returning null instead.
-     * Use this when you want to check for entity existence without handling exceptions.
+     * Find entity by business identifier, returning null when there is no match (MEDIUM SPEED)
+     * Like findByBusinessId: null means only that nothing matched. Every failure propagates as the exception
+     * the call raised (not wrapped in a CompletionException), e.g. CyodaRetryableException,
+     * CyodaCalloutEndedException or a gRPC StatusRuntimeException.
      *
      * @param modelSpec Model specification containing name and version
      * @param businessId Business identifier value (e.g., "CART-123")
      * @param businessIdField Field name containing the business ID (e.g., "cartId")
      * @param entityClass Entity class type for deserialization
-     * @return EntityWithMetadata with entity and metadata, or null if not found or on error
+     * @return EntityWithMetadata with entity and metadata, or null if nothing matches
      */
     <T extends CyodaEntity> EntityWithMetadata<T> findByBusinessIdOrNull(
             @NotNull ModelSpec modelSpec,
@@ -211,15 +222,16 @@ public interface EntityService {
     );
 
     /**
-     * Find entity by composite business key, returning null on any exception (MEDIUM SPEED)
-     * This method wraps findByCompositeKey and catches all exceptions, returning null instead.
-     * Use this when you want to check for entity existence without handling exceptions.
+     * Find entity by composite business key, returning null when there is no match (MEDIUM SPEED)
+     * Like findByCompositeKey: null means only that nothing matched. Every failure propagates as the exception
+     * the call raised (not wrapped in a CompletionException), e.g. CyodaRetryableException,
+     * CyodaCalloutEndedException or a gRPC StatusRuntimeException.
      *
      * @param modelSpec Model specification containing name and version
      * @param entity Entity instance with populated business key fields
      * @param businessIdExtractors Map of field names to functions that extract business key field values
      * @param entityClass Entity class type for deserialization
-     * @return EntityWithMetadata with entity and metadata, or null if not found or on error
+     * @return EntityWithMetadata with entity and metadata, or null if nothing matches
      */
     <T extends CyodaEntity> EntityWithMetadata<T> findByCompositeKeyOrNull(
             @NotNull ModelSpec modelSpec,

@@ -8,6 +8,7 @@ import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.exception.CyodaCalloutEndedException;
+import com.java_template.common.exception.CyodaRetryableException;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.repository.CrudRepository;
 import com.java_template.common.repository.SearchAndRetrievalParams;
@@ -1365,5 +1366,93 @@ class EntityServiceImplTest {
                     createTestModelSpec(), "TEST-123", BUSINESS_ID_FIELD, TestEntity.class));
         }
         verifyNoInteractions(repository);
+    }
+
+    // ---- fix round 1 ----
+
+    @Test
+    @DisplayName("searchAsStream reads pages 0, 1, 2 of the same snapshot, in order, once each")
+    void searchAsStreamReadsPagesZeroOneTwo() {
+        UUID searchId = UUID.randomUUID();
+        TestEntity third = new TestEntity(789L, "Test Entity 3", "ACTIVE");
+        UUID thirdId = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class),
+                argThat(p -> p != null && p.pageNumber() == 0 && p.searchId() == null)))
+                .thenReturn(CompletableFuture.completedFuture(
+                        PageResult.of(searchId, List.of(createTestDataPayload(testEntity, testEntityId)), 0, 1, 3L)));
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class),
+                argThat(p -> p != null && p.pageNumber() == 1 && searchId.equals(p.searchId()))))
+                .thenReturn(CompletableFuture.completedFuture(
+                        PageResult.of(searchId, List.of(createTestDataPayload(testEntity2, testEntityId2)), 1, 1, 3L)));
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class),
+                argThat(p -> p != null && p.pageNumber() == 2 && searchId.equals(p.searchId()))))
+                .thenReturn(CompletableFuture.completedFuture(
+                        PageResult.of(searchId, List.of(createTestDataPayload(third, thirdId)), 2, 1, 3L)));
+
+        List<Long> ids;
+        try (Stream<EntityWithMetadata<TestEntity>> stream = entityService.searchAsStream(createTestModelSpec(),
+                createActiveStatusCondition(), TestEntity.class, SearchAndRetrievalParams.builder().pageSize(1).build())) {
+            ids = stream.map(e -> e.entity().getId()).toList();
+        }
+
+        assertEquals(List.of(123L, 456L, 789L), ids);
+        ArgumentCaptor<SearchAndRetrievalParams> params = ArgumentCaptor.forClass(SearchAndRetrievalParams.class);
+        verify(repository, times(3)).findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()),
+                any(GroupConditionDto.class), params.capture());
+        assertEquals(List.of(0, 1, 2), params.getAllValues().stream().map(SearchAndRetrievalParams::pageNumber).toList());
+    }
+
+    @Test
+    @DisplayName("findByBusinessIdOrNull returns null only when nothing is found")
+    void findByBusinessIdOrNullReturnsNullOnAnEmptyResult() {
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
+                .thenReturn(CompletableFuture.completedFuture(PageResult.of(null, List.of(), 0, 1, 0L)));
+
+        assertNull(entityService.findByBusinessIdOrNull(createTestModelSpec(), "TEST-123", BUSINESS_ID_FIELD, TestEntity.class));
+    }
+
+    @Test
+    @DisplayName("findByBusinessIdOrNull propagates a repository failure, unwrapped")
+    void findByBusinessIdOrNullPropagatesARepositoryFailure() {
+        CyodaRetryableException busy = new CyodaRetryableException("TOO_MANY_JOINED_REQUESTS", "busy");
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
+                .thenReturn(CompletableFuture.failedFuture(busy));
+
+        CyodaRetryableException thrown = assertThrows(CyodaRetryableException.class, () -> entityService.findByBusinessIdOrNull(
+                createTestModelSpec(), "TEST-123", BUSINESS_ID_FIELD, TestEntity.class));
+        assertSame(busy, thrown);
+    }
+
+    @Test
+    @DisplayName("findByCompositeKeyOrNull returns null only when nothing is found and propagates failures, unwrapped")
+    void findByCompositeKeyOrNullReturnsNullOnlyWhenNotFound() {
+        Map<String, java.util.function.Function<TestEntity, Object>> key = Map.of("name", TestEntity::getName);
+        CyodaCalloutEndedException ended = new CyodaCalloutEndedException("CALLOUT_SUPERSEDED", "superseded");
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
+                .thenReturn(CompletableFuture.completedFuture(PageResult.of(null, List.of(), 0, 1, 0L)),
+                        CompletableFuture.failedFuture(ended));
+
+        assertNull(entityService.findByCompositeKeyOrNull(createTestModelSpec(), testEntity, key, TestEntity.class));
+        CyodaCalloutEndedException thrown = assertThrows(CyodaCalloutEndedException.class,
+                () -> entityService.findByCompositeKeyOrNull(createTestModelSpec(), testEntity, key, TestEntity.class));
+        assertSame(ended, thrown);
+    }
+
+    @Test
+    @DisplayName("inside a callout scope updateAll reloads each entity without a point in time")
+    void updateAllInsideACalloutScopeReloadsWithoutPointInTime() {
+        when(repository.updateAll(any(CyodaCallContext.class), any(), eq(TRANSITION_ACTIVATE), isNull(), isNull()))
+                .thenReturn(CompletableFuture.completedFuture(List.of(createTransactionResponse(testEntityId))));
+        when(repository.findById(any(CyodaCallContext.class), eq(testEntityId), any()))
+                .thenReturn(CompletableFuture.completedFuture(createTestDataPayload(testEntity, testEntityId)));
+
+        try (CalloutScope ignored = CalloutScope.open("tx-1")) {
+            assertEquals(1, entityService.updateAll(List.of(testEntity), TRANSITION_ACTIVATE).size());
+        }
+
+        CyodaCallContext joined = CyodaCallContext.m2m().withTxToken("tx-1");
+        verify(repository).updateAll(eq(joined), any(), eq(TRANSITION_ACTIVATE), isNull(), isNull());
+        verify(repository).findById(eq(joined), eq(testEntityId), isNull());
+        verify(repository, never()).getEntityChangesMetadata(any(CyodaCallContext.class), any(UUID.class), any());
     }
 }

@@ -26,6 +26,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
 import java.util.*;
+import java.util.concurrent.CompletionException;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -158,13 +159,17 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final String businessIdField,
             @NotNull final Class<T> entityClass
     ) {
-        // Outside the try: a callout that has already answered, or an unusable credential, is not "not found".
-        CyodaCallContext ctx = callContexts.current();
+        // null means "no match" only: not-found is an empty result, and every failure propagates.
         try {
-            return findByBusinessId(ctx, modelSpec, businessId, businessIdField, entityClass, null);
-        } catch (Exception e) {
-            return null;
+            return findByBusinessId(callContexts.current(), modelSpec, businessId, businessIdField, entityClass, null);
+        } catch (CompletionException e) {
+            throw unwrap(e);
         }
+    }
+
+    /** The repository's own exception (e.g. a CyodaRetryableException), as-is, rather than the join() wrapper. */
+    private static RuntimeException unwrap(final CompletionException e) {
+        return e.getCause() instanceof RuntimeException cause ? cause : e;
     }
 
     @Override
@@ -221,12 +226,11 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final Map<String, java.util.function.Function<T, Object>> businessIdExtractors,
             @NotNull final Class<T> entityClass
     ) {
-        // Outside the try: a callout that has already answered, or an unusable credential, is not "not found".
-        CyodaCallContext ctx = callContexts.current();
+        // null means "no match" only: not-found is an empty result, and every failure propagates.
         try {
-            return findByCompositeKey(ctx, modelSpec, entity, businessIdExtractors, entityClass);
-        } catch (Exception e) {
-            return null;
+            return findByCompositeKey(callContexts.current(), modelSpec, entity, businessIdExtractors, entityClass);
+        } catch (CompletionException e) {
+            throw unwrap(e);
         }
     }
 
@@ -391,7 +395,7 @@ public class EntityServiceImpl implements EntityService {
                 entityClass,
                 SearchAndRetrievalParams.builder()
                         .pageSize(params.pageSize())
-                        .pageNumber(1)
+                        .pageNumber(0)
                         .pointInTime(params.pointInTime())
                         .inMemory(params.inMemory())
                         .awaitLimitMs(params.awaitLimitMs())

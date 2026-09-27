@@ -2,13 +2,19 @@ package com.java_template.common.repository;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.java_template.common.auth.CyodaTokenSource;
+import com.java_template.common.call.CalloutScope;
 import com.java_template.common.call.CyodaCallContext;
+import com.java_template.common.call.CyodaCallContexts;
 import com.java_template.common.call.CyodaCallInterceptor;
 import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaObjectMapper;
+import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.exception.CyodaRetryableException;
 import com.java_template.common.grpc.client.event_handling.CloudEventParser;
+import com.java_template.common.service.EntityServiceImpl;
+import com.java_template.common.workflow.CyodaEntity;
+import com.java_template.common.workflow.OperationSpecification;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import org.cyoda.cloud.api.common.model.GroupConditionDto;
@@ -24,10 +30,16 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -253,5 +265,128 @@ class CyodaRepositoryContextTest {
                 .isInstanceOf(CompletionException.class)
                 .cause().isInstanceOf(CyodaRetryableException.class);
         assertThat(server.seen).hasSize(1);
+    }
+
+    // ---- fix round 1 ----
+
+    /** A minimal entity for driving the real EntityServiceImpl over the recording server. */
+    public static class Thing implements CyodaEntity {
+        public int i;
+
+        @Override
+        public OperationSpecification getModelKey() {
+            return new OperationSpecification.Entity(new ModelSpec().withName("m").withVersion(1), "m");
+        }
+    }
+
+    private EntityServiceImpl service() {
+        return new EntityServiceImpl(repo, wireMapper, new CyodaCallContexts(new Config()));
+    }
+
+    @Test
+    void insideAScopeTheProcessorsSearchAsStreamReadsOneDirectPageAndDoesNotThrow() {
+        server.collection = ce -> List.of(entity(1), entity(2), entity(3));
+
+        List<Integer> seenValues;
+        // The same parameters as ExampleEntityProcessor.processRelatedEntities.
+        try (CalloutScope ignored = CalloutScope.open("tx-1");
+             var stream = service().searchAsStream(spec, all, Thing.class,
+                     SearchAndRetrievalParams.builder().pageSize(100).inMemory(true).build())) {
+            seenValues = stream.map(e -> e.entity().i).toList();
+        }
+
+        assertThat(seenValues).containsExactly(1, 2, 3);
+        assertThat(server.seen).singleElement().satisfies(s -> {
+            assertThat(s.type()).isEqualTo("EntitySearchRequest");
+            assertThat(s.txToken()).isEqualTo("tx-1");
+        });
+    }
+
+    @Test
+    void insideAScopeACallerSuppliedPointInTimeIsRefusedOnEveryReadPath() {
+        CyodaCallContext joined = CyodaCallContext.m2m().withTxToken("tx-1");
+        OffsetDateTime pit = OffsetDateTime.parse("2026-09-27T10:11:12.123456789Z");
+        UUID id = UUID.randomUUID();
+
+        assertThatThrownBy(() -> repo.findById(joined, id, pit))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
+        assertThatThrownBy(() -> repo.findAll(joined, spec, SearchAndRetrievalParams.builder().pointInTime(pit).build()))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
+        assertThatThrownBy(() -> repo.findAllByCriteria(joined, spec, all,
+                SearchAndRetrievalParams.builder().inMemory(true).pointInTime(pit).build()))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
+        assertThatThrownBy(() -> repo.getEntityCount(joined, spec, pit))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
+        assertThatThrownBy(() -> repo.getEntityStatsByState(joined, spec, pit))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
+        assertThatThrownBy(() -> repo.getEntityStatsByState(joined, spec, List.of("DRAFT"), pit))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
+        assertThatThrownBy(() -> repo.getEntityChangesMetadata(joined, id, pit))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
+        assertThat(server.seen).isEmpty();
+    }
+
+    @Test
+    void insideAScopeTheServiceRefusesACallerSuppliedPointInTimeOnGetByIdAndFindByBusinessId() {
+        OffsetDateTime pit = OffsetDateTime.parse("2026-09-27T10:11:12.123456789Z");
+        EntityServiceImpl service = service();
+
+        try (CalloutScope ignored = CalloutScope.open("tx-1")) {
+            assertThatThrownBy(() -> service.getById(UUID.randomUUID(), spec, Thing.class, pit))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
+            assertThatThrownBy(() -> service.findByBusinessId(spec, "B-1", "name", Thing.class, pit))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
+            assertThatThrownBy(() -> service.getEntityCount(spec, pit))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
+            assertThatThrownBy(() -> service.getEntityChangesMetadata(UUID.randomUUID(), pit))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
+        }
+        assertThat(server.seen).isEmpty();
+    }
+
+    @Test
+    void insideAScopeAFullPageAtTheDirectSearchLimitFailsBecauseMoreMayExist() {
+        List<BaseEvent> atTheCap = new ArrayList<>(CyodaRepository.DIRECT_SEARCH_LIMIT);
+        IntStream.range(0, CyodaRepository.DIRECT_SEARCH_LIMIT).forEach(i -> atTheCap.add(entity(i)));
+        server.collection = ce -> atTheCap;
+        CyodaCallContext joined = CyodaCallContext.m2m().withTxToken("tx-1");
+
+        assertThatThrownBy(() -> repo.findAll(joined, spec,
+                SearchAndRetrievalParams.builder().pageSize(CyodaRepository.DIRECT_SEARCH_LIMIT).build()).join())
+                .isInstanceOf(CompletionException.class)
+                .rootCause().isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("10000").hasMessageContaining("direct search");
+    }
+
+    @Test
+    void insideAScopeAPageBelowTheDirectSearchLimitThatComesBackShortSucceeds() {
+        server.collection = ce -> List.of(entity(1));
+        CyodaCallContext joined = CyodaCallContext.m2m().withTxToken("tx-1");
+
+        var page = repo.findAll(joined, spec,
+                SearchAndRetrievalParams.builder().pageSize(CyodaRepository.DIRECT_SEARCH_LIMIT).build()).join();
+
+        assertThat(page.data()).hasSize(1);
+        assertThat(page.hasNext()).isFalse();
+    }
+
+    @Test
+    void aSnapshotPollWhoseDelayedResubmissionIsRejectedAtShutdownFailsInsteadOfHanging() throws Exception {
+        UUID snapshot = UUID.randomUUID();
+        server.unary = ce -> new EntitySnapshotSearchResponse().withId("r").withSuccess(true)
+                .withStatus(new SearchSnapshotStatus().withSnapshotId(snapshot).withEntitiesCount(0L)
+                        .withStatus(SearchSnapshotStatus.Status.RUNNING));
+        CompletableFuture<PageResult<DataPayload>> search = repo.findAllByCriteria(CyodaCallContext.m2m(), spec, all,
+                SearchAndRetrievalParams.builder().pollIntervalMs(500).awaitLimitMs(60_000).build());
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (server.seen.stream().noneMatch(s -> s.type().equals("SnapshotGetStatusRequest")) && System.nanoTime() < deadline) {
+            Thread.onSpinWait();
+        }
+
+        repo.shutdownExecutor();
+
+        assertThatThrownBy(() -> search.get(5, TimeUnit.SECONDS))
+                .isInstanceOf(ExecutionException.class)
+                .rootCause().hasMessageContaining("shut down");
     }
 }

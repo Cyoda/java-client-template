@@ -165,6 +165,11 @@ public class ExampleEntityProcessor implements CyodaProcessor {
      * Use searchAsStream() when processing entities without loading all into memory.
      * This is memory-efficient for large result sets. Process each entity as it's
      * retrieved rather than loading all results first.
+     *<p>
+     * Inside a processor the stream is ONE direct search joined to the callout's transaction: it yields
+     * every match that fits in one page of pageSize (at most 10 000), and throws IllegalStateException if
+     * there are more, rather than silently stopping. Size pageSize for the expected result, and pass no
+     * pointInTime (refused inside a callout's transaction). See EntityService, "INSIDE A PROCESSOR".
      */
     private void processRelatedEntities(ExampleEntity entity) {
         // Example: Find related entities and update them
