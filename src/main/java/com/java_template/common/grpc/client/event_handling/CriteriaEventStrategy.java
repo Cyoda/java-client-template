@@ -2,7 +2,6 @@ package com.java_template.common.grpc.client.event_handling;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.java_template.common.auth.EventAuthContextHandler;
 import com.java_template.common.workflow.*;
 import org.cyoda.cloud.api.event.common.CloudEventType;
 import org.cyoda.cloud.api.event.common.EntityMetadata;
@@ -26,10 +25,9 @@ public class CriteriaEventStrategy extends AbstractEventStrategy<
     public CriteriaEventStrategy(
             OperationFactory operationFactory,
             ObjectMapper objectMapper,
-            CyodaContextFactory eventContextFactory,
-            EventAuthContextHandler authContextHandler
+            CyodaContextFactory eventContextFactory
     ) {
-        super(operationFactory, objectMapper, eventContextFactory, authContextHandler);
+        super(operationFactory, objectMapper, eventContextFactory);
     }
 
     @Override

@@ -28,9 +28,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
 
-import org.springframework.security.core.context.SecurityContext;
-import org.springframework.security.core.context.SecurityContextHolder;
-
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -375,22 +372,11 @@ public class CyodaRepository implements CrudRepository {
     ) {
         try {
             final CloudEvent requestEvent = cloudEventBuilder.buildEvent(baseEvent);
-            // Capture the SecurityContext from the calling thread so that OboAwareAuthentication
-            // can perform the OBO token exchange on the ForkJoinPool thread that executes the gRPC call.
-            // Without this capture, CompletableFuture.supplyAsync() runs on a different thread whose
-            // ThreadLocal is empty, causing a silent fallback to the M2M service-account token.
-            final SecurityContext callerContext = SecurityContextHolder.getContext();
             return CompletableFuture.supplyAsync(() -> {
-                        SecurityContext previous = SecurityContextHolder.getContext();
-                        SecurityContextHolder.setContext(callerContext);
-                        try {
-                            logger.debug("Sending event: {}", requestEvent);
-                            CloudEvent cloudEvent = requestAndGetOrThrow(apiCall, requestEvent);
-                            logger.debug("Received event: {}", cloudEvent);
-                            return cloudEvent;
-                        } finally {
-                            SecurityContextHolder.setContext(previous);
-                        }
+                        logger.debug("Sending event: {}", requestEvent);
+                        CloudEvent cloudEvent = requestAndGetOrThrow(apiCall, requestEvent);
+                        logger.debug("Received event: {}", cloudEvent);
+                        return cloudEvent;
                     })
                     .thenApply(response -> cloudEventParser.parseCloudEvent(response, responsePayloadType))
                     .thenApply(this::validateResponse);
@@ -406,17 +392,7 @@ public class CyodaRepository implements CrudRepository {
     ) {
         try {
             final var requestEvent = cloudEventBuilder.buildEvent(baseEvent);
-            // Same context-capture pattern as sendAndGet — see comment there.
-            final SecurityContext callerContext = SecurityContextHolder.getContext();
-            return CompletableFuture.supplyAsync(() -> {
-                        SecurityContext previous = SecurityContextHolder.getContext();
-                        SecurityContextHolder.setContext(callerContext);
-                        try {
-                            return requestAndGetOrThrow(apiCall, requestEvent);
-                        } finally {
-                            SecurityContextHolder.setContext(previous);
-                        }
-                    })
+            return CompletableFuture.supplyAsync(() -> requestAndGetOrThrow(apiCall, requestEvent))
                     .thenApply(response -> processCollection(Streams.stream(response), responsePayloadClass));
         } catch (InvalidProtocolBufferException e) {
             throw new RuntimeException(e);

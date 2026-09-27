@@ -3,10 +3,6 @@ package com.java_template.common.grpc.client.event_handling;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.java_template.common.auth.EventAuthContextHandler;
-import com.java_template.common.auth.EventAuthContextMissingException;
-import com.java_template.common.auth.EventAuthContextScope;
-import com.java_template.common.auth.EventUserResolutionException;
 import com.java_template.common.workflow.CyodaContextFactory;
 import com.java_template.common.workflow.CyodaEventContext;
 import com.java_template.common.workflow.OperationFactory;
@@ -38,18 +34,15 @@ public abstract class AbstractEventStrategy<
     protected final OperationFactory operationFactory;
     protected final ObjectMapper objectMapper;
     protected final CyodaContextFactory eventContextFactory;
-    private final EventAuthContextHandler authContextHandler;
 
     protected AbstractEventStrategy(
             OperationFactory operationFactory,
             ObjectMapper objectMapper,
-            CyodaContextFactory eventContextFactory,
-            EventAuthContextHandler authContextHandler
+            CyodaContextFactory eventContextFactory
     ) {
         this.operationFactory = operationFactory;
         this.objectMapper = objectMapper;
         this.eventContextFactory = eventContextFactory;
-        this.authContextHandler = authContextHandler;
     }
 
     /**
@@ -80,16 +73,8 @@ public abstract class AbstractEventStrategy<
 
             logger.debug("Running {} {}: {}", operation.getClass().getSimpleName(), cloudEventType, operationName);
 
-            try (EventAuthContextScope ignored = authContextHandler.establish(cloudEvent)) {
-                return executeOperation(operation, request, context);
-            }
+            return executeOperation(operation, request, context);
 
-        } catch (EventAuthContextMissingException e) {
-            logger.error("Auth context required but absent for {} event: {}", cloudEventType, e.getMessage());
-            return returnErrorResponseFor(request, e);
-        } catch (EventUserResolutionException e) {
-            logger.error("Cannot resolve user from auth context for {} event: {}", cloudEventType, e.getMessage());
-            return returnErrorResponseFor(request, e);
         } catch (Exception e) {
             logger.error("Error handling event: {}", cloudEvent, e);
             return returnErrorResponseFor(request, e);

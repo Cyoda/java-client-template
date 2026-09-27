@@ -1,19 +1,24 @@
 package com.java_template.common.grpc.client;
 
 import com.java_template.common.auth.Authentication;
-import com.java_template.common.auth.OboTokenException;
-import io.grpc.*;
+import io.grpc.CallOptions;
+import io.grpc.Channel;
+import io.grpc.ClientCall;
+import io.grpc.ClientInterceptor;
+import io.grpc.ForwardingClientCall;
+import io.grpc.Metadata;
+import io.grpc.MethodDescriptor;
+import io.grpc.Status;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.security.oauth2.client.ClientAuthorizationException;
-import org.springframework.security.oauth2.core.OAuth2AccessToken;
 
 /**
- * ABOUTME: gRPC client interceptor that adds OAuth2 authorization headers
- * to outgoing requests for secure communication with Cyoda services.
+ * ABOUTME: gRPC client interceptor that sends the M2M bearer token on every Cyoda call.
+ * A call is cancelled with UNAUTHENTICATED when no token can be obtained; it never proceeds unauthenticated.
  */
 public class ClientAuthorizationInterceptor implements ClientInterceptor {
     private static final Logger LOG = LoggerFactory.getLogger(ClientAuthorizationInterceptor.class);
+    private static final Metadata.Key<String> AUTHORIZATION = Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
 
     private final Authentication authentication;
 
@@ -26,28 +31,17 @@ public class ClientAuthorizationInterceptor implements ClientInterceptor {
         return new ForwardingClientCall.SimpleForwardingClientCall<>(next.newCall(method, callOptions)) {
             @Override
             public void start(Listener<RespT> responseListener, Metadata headers) {
+                final String token;
                 try {
-                    OAuth2AccessToken accessToken = authentication.getAccessToken();
-                    Metadata.Key<String> authKey = Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
-                    headers.put(authKey, "Bearer " + accessToken.getTokenValue());
-
-                } catch (OboTokenException e) {
-                    LOG.error("OBO token exchange failed — cancelling Cyoda call: {}", e.getMessage(), e);
+                    token = authentication.getAccessToken().getTokenValue();
+                } catch (RuntimeException e) {
+                    LOG.error("Cannot obtain M2M token for {} — cancelling the call", method.getFullMethodName(), e);
                     responseListener.onClose(
-                            Status.UNAUTHENTICATED
-                                    .withDescription("OBO token exchange failed: " + e.getMessage())
-                                    .withCause(e),
-                            new Metadata()
-                    );
+                            Status.UNAUTHENTICATED.withDescription("M2M token unavailable: " + e.getMessage()).withCause(e),
+                            new Metadata());
                     return;
-
-                } catch (ClientAuthorizationException e) {
-                    LOG.error("M2M token unavailable — proceeding without auth header: {}",
-                            e.getError().getDescription());
-
-                } catch (Exception e) {
-                    LOG.error("Unexpected error obtaining access token — proceeding without auth header", e);
                 }
+                headers.put(AUTHORIZATION, "Bearer " + token);
                 super.start(responseListener, headers);
             }
         };
