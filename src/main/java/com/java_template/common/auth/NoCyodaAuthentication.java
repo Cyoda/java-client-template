@@ -1,13 +1,13 @@
 package com.java_template.common.auth;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import com.java_template.common.config.Config;
 import org.springframework.stereotype.Component;
 
 import java.util.Optional;
 
 /** ABOUTME: Token source for cyoda-go mock IAM (app.config.auth-mode=none): no Authorization header is sent. */
 @Component
-@ConditionalOnProperty(name = "app.config.auth-mode", havingValue = "none")
+@ConditionalOnAuthMode(Config.AuthMode.NONE)
 public class NoCyodaAuthentication implements CyodaTokenSource {
 
     @Override

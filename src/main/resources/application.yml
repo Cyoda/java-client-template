@@ -63,6 +63,7 @@ app:
     grpc-address: grpc-${app.config.cyoda-host}
     grpc-server-port: 443
     grpc-tls: true
+    # Deadline for each unary gRPC call to Cyoda; the server-streaming collection calls have none
     grpc-call-deadline-ms: 120000
     grpc-processor-tag: cyoda_application
     grpc-communication-data-format: JSON

@@ -2,6 +2,7 @@ package com.java_template.common.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.cyoda.cloud.api.common.model.ExternalizedProcessorDefinitionDto;
+import org.cyoda.cloud.api.common.model.ProcessorDefinitionDto;
 import org.cyoda.cloud.api.common.model.TransitionDefinitionDto;
 import org.junit.jupiter.api.Test;
 
@@ -27,6 +28,10 @@ class CyodaJacksonTest {
                 TransitionDefinitionDto.class);
 
         assertThat(t.getProcessors().getFirst().getName()).isEqualTo("P");
+        assertThat(t.getProcessors()).singleElement()
+                .isInstanceOf(ExternalizedProcessorDefinitionDto.class)
+                .extracting(ProcessorDefinitionDto::getType)
+                .isEqualTo(ProcessorDefinitionDto.TypeEnum.EXTERNALIZED);
     }
 
     @Test

@@ -24,6 +24,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -117,9 +118,20 @@ class SearchIT {
                 SearchAndRetrievalParams.builder().pageSize(100).pageNumber(2).searchId(first.searchId()).build());
 
         assertThat(first.totalElements()).isEqualTo(250);
+        assertThat(first.totalPages()).isEqualTo(3);
+        assertThat(first.hasNext()).isTrue();
+        assertThat(third.hasNext()).isFalse();
         assertThat(first.data()).hasSize(100);
         assertThat(second.data()).hasSize(100);
         assertThat(third.data()).hasSize(50);
+
+        // The three pages partition the seeded set: no entity repeated across pages, none missing.
+        List<String> names = Stream.of(first, second, third)
+                .flatMap(page -> page.data().stream())
+                .map(e -> e.entity().getName())
+                .toList();
+        assertThat(names).doesNotHaveDuplicates()
+                .containsExactlyInAnyOrderElementsOf(IntStream.range(0, 250).mapToObj(i -> "p" + i).toList());
     }
 
     @Test

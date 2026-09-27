@@ -59,9 +59,13 @@ public class CyodaRepository implements CrudRepository {
     /** Fallback lifetime for a cached snapshot whose expiration date can't be determined. */
     static final long DEFAULT_SNAPSHOT_CACHE_TTL_NANOS = TimeUnit.HOURS.toNanos(1);
 
+    /** Upper bound on cached snapshot statuses, so many distinct searches cannot grow the cache without limit. */
+    static final long SNAPSHOT_CACHE_MAX_SIZE = 1000;
+
     /**
      * Cache of completed (never RUNNING) snapshot search statuses, keyed by model/condition/
-     * pointInTime/searchId. Entries are evicted based on the snapshot's expirationDate.
+     * pointInTime/searchId. Entries are evicted based on the snapshot's expirationDate, or by size
+     * beyond {@link #SNAPSHOT_CACHE_MAX_SIZE} (an evicted entry is re-read from cyoda-go on the next page).
      */
     private final Cache<SearchCacheKey, CompletableFuture<SearchSnapshotStatus>> snapshotCache;
 
@@ -85,6 +89,7 @@ public class CyodaRepository implements CrudRepository {
         // to create a brand-new, unrelated snapshot search on a cache miss instead of reading the
         // existing snapshot a caller's searchId names.
         this.snapshotCache = Caffeine.newBuilder()
+                .maximumSize(SNAPSHOT_CACHE_MAX_SIZE)
                 .expireAfter(new Expiry<SearchCacheKey, CompletableFuture<SearchSnapshotStatus>>() {
                     @Override
                     public long expireAfterCreate(SearchCacheKey key, CompletableFuture<SearchSnapshotStatus> value, long currentTime) {
@@ -130,8 +135,17 @@ public class CyodaRepository implements CrudRepository {
         return Math.max(0L, Duration.between(now, expirationDate).toNanos());
     }
 
-    private CloudEventsServiceGrpc.CloudEventsServiceBlockingStub blocking() {
+    /** Stub for unary calls: each carries grpc-call-deadline-ms (spec §4.5, "every unary call"). */
+    private CloudEventsServiceGrpc.CloudEventsServiceBlockingStub unary() {
         return cloudEventsServiceBlockingStub.withDeadlineAfter(config.getGrpcCallDeadlineMs(), TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * Stub for the server-streaming entityManageCollection/entitySearchCollection calls. No deadline: their
+     * duration grows with the result size, and a deadline would cut a long but healthy stream short.
+     */
+    private CloudEventsServiceGrpc.CloudEventsServiceBlockingStub streaming() {
+        return cloudEventsServiceBlockingStub;
     }
 
     @Override
@@ -146,7 +160,7 @@ public class CyodaRepository implements CrudRepository {
 
     private CompletableFuture<DataPayload> getById(final UUID entityId, @Nullable final OffsetDateTime pointInTime) {
         return sendAndGet(
-                req -> blocking().entitySearch(req),
+                req -> unary().entitySearch(req),
                 new EntityGetRequest().withId(UUID.randomUUID().toString())
                         .withEntityId(entityId)
                         .withPointInTime(pointInTime),
@@ -250,7 +264,7 @@ public class CyodaRepository implements CrudRepository {
             @Nullable final OffsetDateTime pointInTime
     ) {
         return sendAndGetCollection(
-                req -> blocking().entitySearchCollection(req),
+                req -> streaming().entitySearchCollection(req),
                 new EntitySearchRequest().withId(generateEventId())
                         .withModel(modelSpec)
                         .withLimit(pageSize)
@@ -312,7 +326,7 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final String transitionName
     ) {
         return sendAndGet(
-                req -> blocking().entityManage(req),
+                req -> unary().entityManage(req),
                 new EntityTransitionRequest().withId(generateEventId())
                         .withEntityId(entityId)
                         .withTransition(transitionName),
@@ -327,7 +341,7 @@ public class CyodaRepository implements CrudRepository {
             @Nullable final String transition
     ) {
         return sendAndGet(
-                req -> blocking().entityManage(req),
+                req -> unary().entityManage(req),
                 new EntityUpdateRequest().withId(generateEventId())
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
                         .withPayload(
@@ -364,7 +378,7 @@ public class CyodaRepository implements CrudRepository {
                 );
 
         return sendAndGetCollection(
-                req -> blocking().entityManageCollection(req),
+                req -> streaming().entityManageCollection(req),
                 new EntityUpdateCollectionRequest().withId(generateEventId())
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
                         .withTransactionWindow(transactionWindow)
@@ -469,7 +483,7 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final PAYLOAD_TYPE entities
     ) {
         return sendAndGet(
-                req -> blocking().entityManage(req),
+                req -> unary().entityManage(req),
                 new EntityCreateRequest().withId(generateEventId())
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
                         .withPayload(new EntityCreatePayload().withData(objectMapper.valueToTree(entities))
@@ -497,7 +511,7 @@ public class CyodaRepository implements CrudRepository {
                 .toList();
 
         return sendAndGetCollection(
-                req -> blocking().entityManageCollection(req),
+                req -> streaming().entityManageCollection(req),
                 new EntityCreateCollectionRequest().withId(generateEventId())
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
                         .withTransactionWindow(transactionWindow)
@@ -509,7 +523,7 @@ public class CyodaRepository implements CrudRepository {
 
     private CompletableFuture<EntityDeleteResponse> deleteEntity(@NotNull final UUID id) {
         return sendAndGet(
-                req -> blocking().entityManage(req),
+                req -> unary().entityManage(req),
                 new EntityDeleteRequest().withId(generateEventId()).withEntityId(id),
                 EntityDeleteResponse.class
         );
@@ -519,7 +533,7 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final ModelSpec modelSpec
     ) {
         return sendAndGetCollection(
-                req -> blocking().entityManageCollection(req),
+                req -> streaming().entityManageCollection(req),
                 new EntityDeleteAllRequest().withId(generateEventId())
                         .withModel(modelSpec),
                 EntityDeleteAllResponse.class
@@ -536,7 +550,7 @@ public class CyodaRepository implements CrudRepository {
             @Nullable final OffsetDateTime pointInTime
     ) {
         return sendAndGet(
-                req -> blocking().entitySearch(req),
+                req -> unary().entitySearch(req),
                 new EntitySnapshotSearchRequest().withId(generateEventId())
                         .withModel(modelSpec)
                         .withCondition(condition)
@@ -594,7 +608,7 @@ public class CyodaRepository implements CrudRepository {
 
     private CompletableFuture<SearchSnapshotStatus> getSnapshotStatus(@NotNull final UUID snapshotId) {
         return sendAndGet(
-                req -> blocking().entitySearch(req),
+                req -> unary().entitySearch(req),
                 new SnapshotGetStatusRequest().withId(generateEventId()).withSnapshotId(snapshotId),
                 EntitySnapshotSearchResponse.class
         ).thenApply(EntitySnapshotSearchResponse::getStatus);
@@ -606,7 +620,7 @@ public class CyodaRepository implements CrudRepository {
             final int pageNumber
     ) {
         return sendAndGetCollection(
-                req -> blocking().entitySearchCollection(req),
+                req -> streaming().entitySearchCollection(req),
                 new SnapshotGetRequest().withId(generateEventId())
                         .withSnapshotId(snapshotId)
                         .withPageSize(pageSize)
@@ -639,7 +653,7 @@ public class CyodaRepository implements CrudRepository {
     @Override
     public CompletableFuture<Long> getEntityCount(@NotNull final ModelSpec modelSpec, @Nullable final OffsetDateTime pointInTime) {
         return sendAndGetCollection(
-                req -> blocking().entitySearchCollection(req),
+                req -> streaming().entitySearchCollection(req),
                 new EntityStatsGetRequest()
                         .withId(generateEventId())
                         .withPointInTime(pointInTime)
@@ -674,7 +688,7 @@ public class CyodaRepository implements CrudRepository {
             @Nullable final OffsetDateTime pointInTime
     ) {
         return sendAndGetCollection(
-                req -> blocking().entitySearchCollection(req),
+                req -> streaming().entitySearchCollection(req),
                 new EntityStatsByStateGetRequest()
                         .withId(generateEventId())
                         .withModel(modelSpec)
@@ -697,7 +711,7 @@ public class CyodaRepository implements CrudRepository {
             @Nullable final OffsetDateTime pointInTime
     ) {
         return sendAndGetCollection(
-                req -> blocking().entitySearchCollection(req),
+                req -> streaming().entitySearchCollection(req),
                 new EntityChangesMetadataGetRequest()
                         .withId(generateEventId())
                         .withEntityId(entityId)

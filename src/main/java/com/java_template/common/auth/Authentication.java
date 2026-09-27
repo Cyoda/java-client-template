@@ -4,7 +4,6 @@ import com.java_template.common.config.Config;
 import com.java_template.common.util.SslUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.http.converter.FormHttpMessageConverter;
 import org.springframework.security.oauth2.client.*;
@@ -30,7 +29,7 @@ import java.util.concurrent.ConcurrentMap;
  * for secure communication with Cyoda platform services.
  */
 @Service
-@ConditionalOnProperty(name = "app.config.auth-mode", havingValue = "client-credentials", matchIfMissing = true)
+@ConditionalOnAuthMode(Config.AuthMode.CLIENT_CREDENTIALS)
 public class Authentication implements CyodaTokenSource {
 
     private static final Logger logger = LoggerFactory.getLogger(Authentication.class);

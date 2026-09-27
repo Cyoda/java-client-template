@@ -2,6 +2,8 @@ package com.java_template.common.auth;
 
 import com.java_template.common.config.Config;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
@@ -35,6 +37,31 @@ class AuthModeWiringTest {
                         .getFailure().rootCause()
                         .hasMessageContaining("app.config.cyoda-client-id")
                         .hasMessageContaining("app.config.cyoda-client-secret"));
+    }
+
+    /** Spring's enum binding accepts both spellings for Config.authMode; the bean conditions must agree. */
+    @ParameterizedTest
+    @ValueSource(strings = {"client-credentials", "CLIENT_CREDENTIALS", "Client-Credentials"})
+    void everySpellingOfClientCredentialsSelectsTheM2mSource(String mode) {
+        runner.withPropertyValues("app.config.auth-mode=" + mode, "app.config.cyoda-api-url=http://localhost:1/api",
+                        "app.config.cyoda-client-id=id", "app.config.cyoda-client-secret=secret")
+                .run(ctx -> {
+                    assertThat(ctx).hasNotFailed();
+                    assertThat(ctx.getBean(Config.class).getAuthMode()).isEqualTo(Config.AuthMode.CLIENT_CREDENTIALS);
+                    assertThat(ctx).hasSingleBean(CyodaTokenSource.class);
+                    assertThat(ctx.getBean(CyodaTokenSource.class)).isInstanceOf(Authentication.class);
+                });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"none", "NONE", "None"})
+    void everySpellingOfNoneSelectsTheNoTokenSource(String mode) {
+        runner.withPropertyValues("app.config.auth-mode=" + mode).run(ctx -> {
+            assertThat(ctx).hasNotFailed();
+            assertThat(ctx.getBean(Config.class).getAuthMode()).isEqualTo(Config.AuthMode.NONE);
+            assertThat(ctx).hasSingleBean(CyodaTokenSource.class);
+            assertThat(ctx.getBean(CyodaTokenSource.class)).isInstanceOf(NoCyodaAuthentication.class);
+        });
     }
 
     @Test
