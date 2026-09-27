@@ -9,7 +9,17 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Component;
 
-/** ABOUTME: The only place a {@link CyodaCallContext} is built (spec §4.2 rules 1–5). */
+/**
+ * ABOUTME: The only place a {@link CyodaCallContext} is built (spec §4.2 rules 1–5).
+ *
+ * <p>{@link #current()} reads Spring Security's thread-local {@code SecurityContext}. Work handed off to
+ * another thread from a BFF request — for example an unwrapped {@code CompletableFuture.supplyAsync} —
+ * does not carry that thread-local along, so {@code current()} on the new thread sees no authentication
+ * and the call goes out as M2M, not forwarding the user's token. Callers that need the user's token
+ * forwarded from a background thread must propagate the security context themselves, e.g. by running the
+ * work through a {@code org.springframework.security.concurrent.DelegatingSecurityContextExecutor} (or
+ * {@code DelegatingSecurityContextCallable}/{@code Runnable}) that copies the context onto the new thread.
+ */
 @Component
 public class CyodaCallContexts {
 

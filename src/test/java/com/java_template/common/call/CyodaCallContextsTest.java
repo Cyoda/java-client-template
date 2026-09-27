@@ -13,7 +13,10 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 import java.time.Instant;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -137,6 +140,32 @@ class CyodaCallContextsTest {
         try (CalloutScope ignored = CalloutScope.open("tx-6")) {
             assertThat(CalloutScope.unjoined(contexts::current)).isEqualTo(CyodaCallContext.m2m());
             assertThat(contexts.current().txToken()).isEqualTo("tx-6");
+        }
+    }
+
+    @Test
+    void unjoinedOutsideACalloutKeepsTheCallersCredential() {
+        // spec §4.2: the framework never silently downgrades to M2M. unjoined() only detaches a
+        // callout's transaction; outside a callout there is nothing to detach, so the caller's own
+        // credential (here, a forwarded user JWT) must come through unchanged.
+        SecurityContextHolder.getContext().setAuthentication(jwt("user-token"));
+
+        assertThat(CalloutScope.unjoined(contexts::current)).isEqualTo(CyodaCallContext.forward("user-token"));
+    }
+
+    @Test
+    void aWrappedTaskRunningAfterEndSeesTheCalloutAsEnded() throws Exception {
+        CalloutScope scope = CalloutScope.open("tx-7");
+        Callable<CyodaCallContext> wrapped = CalloutScope.wrap((Callable<CyodaCallContext>) contexts::current);
+        scope.end();
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            assertThatThrownBy(() -> executor.submit(wrapped).get())
+                    .hasCauseInstanceOf(CyodaCalloutEndedException.class);
+        } finally {
+            executor.shutdown();
+            scope.close();
         }
     }
 }

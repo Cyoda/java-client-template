@@ -1,5 +1,6 @@
 package com.java_template.common.call;
 
+import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.Optional;
@@ -18,25 +19,31 @@ import java.util.function.Supplier;
 public final class CalloutScope implements AutoCloseable {
 
     private static final ThreadLocal<CalloutScope> CURRENT = new ThreadLocal<>();
-    /** Marker scope used by {@link #unjoined}: M2M, no token, never ends. */
-    private static final CalloutScope DETACHED = new CalloutScope(null, null);
+    /** Marker scope used by {@link #unjoined}: M2M, no token, never ends. Never installed via {@link #open}. */
+    private static final CalloutScope DETACHED = new CalloutScope(null, null, null);
 
     private final String txToken;
     private final CalloutScope previous;
+    private final SecurityContext previousSecurityContext;
     private final AtomicBoolean open = new AtomicBoolean(true);
 
-    private CalloutScope(String txToken, CalloutScope previous) {
+    private CalloutScope(String txToken, CalloutScope previous, SecurityContext previousSecurityContext) {
         this.txToken = txToken;
         this.previous = previous;
+        this.previousSecurityContext = previousSecurityContext;
     }
 
-    /** Opens a scope on this thread and clears its SecurityContext: compute never forwards a user credential. */
+    /**
+     * Opens a scope on this thread and clears its SecurityContext: compute never forwards a user credential.
+     * The thread's previous SecurityContext is put back by {@link #close()}.
+     */
     public static CalloutScope open(String txToken) {
+        SecurityContext previousSecurityContext = SecurityContextHolder.getContext();
         SecurityContextHolder.clearContext();
         if (SecurityContextHolder.getContext().getAuthentication() != null) {
             throw new IllegalStateException("SecurityContext still holds an authentication inside a callout scope");
         }
-        CalloutScope scope = new CalloutScope(txToken, CURRENT.get());
+        CalloutScope scope = new CalloutScope(txToken, CURRENT.get(), previousSecurityContext);
         CURRENT.set(scope);
         return scope;
     }
@@ -69,6 +76,7 @@ public final class CalloutScope implements AutoCloseable {
             } else {
                 CURRENT.set(previous);
             }
+            SecurityContextHolder.setContext(previousSecurityContext);
         }
     }
 
@@ -98,8 +106,17 @@ public final class CalloutScope implements AutoCloseable {
         return scope == null ? task : () -> runIn(scope, task);
     }
 
-    /** Runs {@code body} as M2M without the tx-token (the remedy for COMMIT_IN_JOINED_TRANSACTION). */
+    /**
+     * Runs {@code body} as M2M without the tx-token, detaching it from the current callout's transaction
+     * (the remedy for COMMIT_IN_JOINED_TRANSACTION). This only ever detaches a transaction: it never
+     * downgrades a credential (spec §4.2, "the framework never silently downgrades to M2M"). Outside a
+     * callout scope there is no transaction to detach from, so {@code body} runs unchanged, with whatever
+     * credential {@link CyodaCallContexts#current()} would otherwise have produced.
+     */
     public static <T> T unjoined(Supplier<T> body) {
+        if (CURRENT.get() == null) {
+            return body.get();
+        }
         return runIn(DETACHED, body);
     }
 
