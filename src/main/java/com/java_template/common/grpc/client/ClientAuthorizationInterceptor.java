@@ -12,9 +12,11 @@ import io.grpc.Status;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Optional;
+
 /**
  * ABOUTME: gRPC client interceptor that sends the M2M bearer token on every Cyoda call.
- * A call is cancelled with UNAUTHENTICATED when no token can be obtained; it never proceeds unauthenticated.
+ * A call fails with UNAUTHENTICATED when no token can be obtained; it never proceeds unauthenticated.
  */
 public class ClientAuthorizationInterceptor implements ClientInterceptor {
     private static final Logger LOG = LoggerFactory.getLogger(ClientAuthorizationInterceptor.class);
@@ -28,22 +30,56 @@ public class ClientAuthorizationInterceptor implements ClientInterceptor {
 
     @Override
     public <ReqT, RespT> ClientCall<ReqT, RespT> interceptCall(MethodDescriptor<ReqT, RespT> method, CallOptions callOptions, Channel next) {
+        final Optional<String> token;
+        try {
+            token = tokenSource.bearerToken();
+        } catch (RuntimeException e) {
+            // Never log the token; the exception comes from the token source and carries no token.
+            LOG.warn("Cannot obtain M2M token for {}; failing the call with UNAUTHENTICATED: {}",
+                    method.getFullMethodName(), e.toString());
+            return new FailedClientCall<>(
+                    Status.UNAUTHENTICATED.withDescription("M2M token unavailable: " + e.getMessage()).withCause(e));
+        }
         return new ForwardingClientCall.SimpleForwardingClientCall<>(next.newCall(method, callOptions)) {
             @Override
             public void start(Listener<RespT> responseListener, Metadata headers) {
-                final java.util.Optional<String> token;
-                try {
-                    token = tokenSource.bearerToken();
-                } catch (RuntimeException e) {
-                    LOG.error("Cannot obtain M2M token for {} — cancelling the call", method.getFullMethodName(), e);
-                    responseListener.onClose(
-                            Status.UNAUTHENTICATED.withDescription("M2M token unavailable: " + e.getMessage()).withCause(e),
-                            new Metadata());
-                    return;
-                }
                 token.ifPresent(t -> headers.put(AUTHORIZATION, "Bearer " + t));
                 super.start(responseListener, headers);
             }
         };
+    }
+
+    /**
+     * A call that never reaches the transport: start() closes the listener with the given status and every
+     * other method is a no-op. gRPC stubs call request()/sendMessage()/halfClose() after start(), so the
+     * delegate must not be left unstarted (it would throw IllegalStateException "Not started").
+     */
+    private static final class FailedClientCall<ReqT, RespT> extends ClientCall<ReqT, RespT> {
+        private final Status status;
+
+        FailedClientCall(Status status) {
+            this.status = status;
+        }
+
+        @Override
+        public void start(Listener<RespT> responseListener, Metadata headers) {
+            responseListener.onClose(status, new Metadata());
+        }
+
+        @Override
+        public void request(int numMessages) {
+        }
+
+        @Override
+        public void cancel(String message, Throwable cause) {
+        }
+
+        @Override
+        public void halfClose() {
+        }
+
+        @Override
+        public void sendMessage(ReqT message) {
+        }
     }
 }
