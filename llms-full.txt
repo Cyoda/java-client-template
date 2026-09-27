@@ -147,7 +147,7 @@ java -jar build/libs/java-client-template-1.0-SNAPSHOT-workflow-import.jar --spr
 #### Option 2: Run Manually After Build
 ```bash
 ./gradlew build
-java -jar build/libs/java-client-template-1.0-SNAPSHOT.jar --spring.profiles.active=local
+java -jar build/libs/app.jar --spring.profiles.active=local
 ```
 
 > Access the app (local profile): [http://localhost:8081/api/swagger-ui/index.html](http://localhost:8081/api/swagger-ui/index.html)
