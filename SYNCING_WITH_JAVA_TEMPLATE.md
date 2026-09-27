@@ -276,3 +276,29 @@ After any sync (pull or propagate), verify:
 git status
 find apps/backend/src/ -name ".DS_Store" -delete
 ```
+
+## Breaking changes in the cyoda-go v0.9.0 alignment
+
+The template now implements cyoda-go's contract. Contract files are vendored under
+`src/main/resources/cyoda/` (refresh with `scripts/sync-cyoda-contract.sh`). Replace, do not merge.
+
+| Area | Before | After |
+|---|---|---|
+| Contract files | `src/main/resources/{proto,schema,api}` | `src/main/resources/cyoda/{proto,schema,openapi}` + `CYODA_VERSION`; transforms in `buildSrc/` |
+| OpenAPI DTO packages | `org.cyoda.cloud.api.{common,workflow,search,audit,iam}.model` | `org.cyoda.cloud.api.common.model` only |
+| Condition operators | `OperatorTypeDto`, `GroupOperatorDto`, `.operation(…)` | `SimpleConditionDto.OperatorTypeEnum`, `LifecycleConditionDto.OperatorTypeEnum`, `GroupConditionDto.OperatorEnum`, `.operatorType(…)` |
+| Nested conditions | `List<QueryConditionDto>` | `List<GroupConditionDtoAllOfConditions>` |
+| `EntityCrudOperations.FieldFilter.operation` | `OperatorTypeDto` | `SimpleConditionDto.OperatorTypeEnum` |
+| Simple-name clashes | — | `EntityChangeMeta`, `EntityMetadata`, `EntityTransactionResponse` exist in both `org.cyoda.cloud.api.common.model` and `org.cyoda.cloud.api.event.*`; do not wildcard-import both |
+| Generated proto | `CloudEventBatch`, `Cloudevents` generated | not generated; `io.cloudevents.v1.proto.CloudEvent` comes from `cloudevents-protobuf` |
+| Event DTO date-times | `java.util.Date` (millisecond precision) | `java.time.OffsetDateTime` for all generated event DTOs, lossless with cyoda-go's RFC3339Nano. Also covers `EntityWithMetadata.getCreationDate()` and the `CrudRepository` pointInTime params. The `EntityService` / `SearchAndRetrievalParams` public API keeps `Date`. `CyodaJackson` registers `JavaTimeModule` with `WRITE_DATES_AS_TIMESTAMPS` off |
+| `deleteAll` | chunked (`transactionSize` 1000) | one transaction by default: the template no longer sends `transactionSize` (cyoda-go still honours it when sent, #379); `pageSize` removed from `EntityDeleteAllRequest` |
+| Snapshot search paging | a page request with a searchId could silently start a new search, and `totalElements` was the running count (often 0) | a searchId (= snapshotId) always pages the same snapshot, and `totalElements` is the final count. An expired or unknown searchId fails instead of re-searching |
+| Config | `app.config.cyoda-light.*`, `skip-ssl`, `execution.mode`, `cyoda.api.url` | removed; use `cyoda-api-url`, `grpc-*`, `grpc-tls`, `app.config.execution-mode` (default `virtual`), `auth-mode` |
+| Local cyoda-go | cyoda-light toggle | `--spring.profiles.active=local` (app on 8081, `auth-mode: none`) |
+| OBO | `app.obo.*`, `OboAwareAuthentication`, `OboKeyRegistrationService`, … | removed; compute calls Cyoda as M2M |
+| Event user resolver | `app.event.auth-context.*`, `EventAuthContextHandler`, … | removed |
+| `authtype` values | `user`, `service_account` | `user`, `service`, `system` |
+| Workflow JSON | `"version": "1.0"` | `"version": "1.5"`; `$.` on every `jsonPath` |
+| `CyodaInit` | imported a workflow without checking for its model | creates the model before importing its workflow; a workflow import for a missing model is rejected by cyoda-go with `MODEL_NOT_FOUND` |
+| Tests | Cucumber `GherkinE2eTest` | JUnit `src/integrationTest` with `@CyodaIntegrationTest`; `./gradlew check` needs a cyoda binary (`scripts/install-cyoda.sh`); `./gradlew build -x integrationTest` without one |

@@ -3,6 +3,8 @@ run-name: Build [${{ inputs.branch }}] • ${{ inputs.build_type }} • ${{ inpu
 
 
 on:
+  push:
+  pull_request:
   workflow_dispatch:
     inputs:
       branch:
@@ -30,12 +32,15 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      BUILD_TYPE: ${{ inputs.build_type || 'standard' }}
+      BRANCH: ${{ inputs.branch || github.ref_name }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch }}
+          ref: ${{ env.BRANCH }}
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -57,14 +62,14 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Compile only (report all compilation errors)
-        if: ${{ inputs.build_type == 'compile-only' || inputs.build_type == 'workflow-validation' }}
+        if: ${{ env.BUILD_TYPE == 'compile-only' || env.BUILD_TYPE == 'workflow-validation' }}
         run: |
-          echo "::notice::Starting compilation check for branch ${{ inputs.branch }}"
+          echo "::notice::Starting compilation check for branch ${{ env.BRANCH }}"
           # Clean first to ensure a full recompile so all diagnostics are surfaced
           # Use --continue so Gradle doesn't stop at the first failing task
           # Use --console=plain and -i to make sure all javac diagnostics are printed in GH Actions logs
-          # Compile both main and test sources to catch all compilation errors
-          ./gradlew clean compileJava compileTestJava --continue --console=plain -i
+          # Compile main, test, test-fixtures and integration-test sources to catch all compilation errors
+          ./gradlew clean compileJava compileTestJava compileTestFixturesJava compileIntegrationTestJava --continue --console=plain -i
           status=$?
           if [ $status -eq 0 ]; then
             echo "::notice::✅ Compilation successful - no errors found in main or test sources"
@@ -75,35 +80,53 @@ jobs:
             exit 1
           fi
 
-      - name: Run tests
-        if: ${{ inputs.build_type == 'standard' || inputs.build_type == 'test-only' }}
-        run: ./gradlew test
+      - name: Set up Go (source build of the pinned cyoda)
+        if: ${{ env.BUILD_TYPE == 'standard' || env.BUILD_TYPE == 'test-only' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.7'
+
+      - name: Install pinned cyoda
+        if: ${{ env.BUILD_TYPE == 'standard' || env.BUILD_TYPE == 'test-only' }}
+        run: echo "CYODA_BIN=$(scripts/install-cyoda.sh)" >> "$GITHUB_ENV"
+
+      - name: Run tests (unit + tier-1 integration)
+        if: ${{ env.BUILD_TYPE == 'standard' || env.BUILD_TYPE == 'test-only' }}
+        run: ./gradlew check
+
+      - name: Upload cyoda logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyoda-logs-${{ github.run_id }}
+          path: build/cyoda-logs/
+          retention-days: 7
 
       - name: Run workflow validation test
-        if: ${{ inputs.build_type == 'workflow-validation' }}
+        if: ${{ env.BUILD_TYPE == 'workflow-validation' }}
         run: ./gradlew test --tests WorkflowComponentValidationStandaloneTest
 
       - name: Build standard JAR
-        if: ${{ inputs.build_type == 'standard' || inputs.build_type == 'both' }}
+        if: ${{ env.BUILD_TYPE == 'standard' || env.BUILD_TYPE == 'both' }}
         run: ./gradlew bootJar
 
       - name: Build workflow import JAR
-        if: ${{ inputs.build_type == 'workflow-import' || inputs.build_type == 'both' }}
+        if: ${{ env.BUILD_TYPE == 'workflow-import' || env.BUILD_TYPE == 'both' }}
         run: ./gradlew bootJarWorkflowImport
 
       - name: Upload standard build artifacts
-        if: ${{ inputs.build_type == 'standard' || inputs.build_type == 'both' }}
+        if: ${{ env.BUILD_TYPE == 'standard' || env.BUILD_TYPE == 'both' }}
         uses: actions/upload-artifact@v4
         with:
-          name: standard-jar-${{ inputs.branch }}
-          path: build/libs/*-SNAPSHOT.jar
+          name: standard-jar-${{ env.BRANCH }}
+          path: build/libs/app.jar
           retention-days: 30
 
       - name: Upload workflow import build artifacts
-        if: ${{ inputs.build_type == 'workflow-import' || inputs.build_type == 'both' }}
+        if: ${{ env.BUILD_TYPE == 'workflow-import' || env.BUILD_TYPE == 'both' }}
         uses: actions/upload-artifact@v4
         with:
-          name: workflow-import-jar-${{ inputs.branch }}
+          name: workflow-import-jar-${{ env.BRANCH }}
           path: build/libs/*-workflow-import.jar
           retention-days: 30
 
@@ -111,45 +134,52 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-results-${{ inputs.branch }}
-          path: build/test-results/test/
+          name: test-results-${{ env.BRANCH }}
+          path: |
+            build/test-results/test/
+            build/test-results/integrationTest/
           retention-days: 7
 
       - name: Upload test reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-reports-${{ inputs.branch }}
-          path: build/reports/tests/test/
+          name: test-reports-${{ env.BRANCH }}
+          path: |
+            build/reports/tests/test/
+            build/reports/tests/integrationTest/
           retention-days: 7
 
   summary:
     runs-on: ubuntu-latest
     needs: build
     if: always()
+    env:
+      BUILD_TYPE: ${{ inputs.build_type || 'standard' }}
+      BRANCH: ${{ inputs.branch || github.ref_name }}
     steps:
       - name: Build Summary
         run: |
           echo "## 🚀 Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Branch** | \`${{ inputs.branch }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Build Type** | \`${{ inputs.build_type }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Branch** | \`${{ env.BRANCH }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Build Type** | \`${{ env.BUILD_TYPE }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Tracker ID** | \`${{ inputs.tracker_id || 'N/A' }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Status** | ${{ needs.build.result == 'success' && '✅ Success' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Triggered by** | @${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Run ID** | [\`${{ github.run_id }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Commit** | [\`${GITHUB_SHA:0:7}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}) |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [[ "${{ inputs.build_type }}" == "compile-only" ]]; then
+
+          if [[ "${{ env.BUILD_TYPE }}" == "compile-only" ]]; then
             echo "### 🔍 Compilation Check Results" >> $GITHUB_STEP_SUMMARY
             if [[ "${{ needs.build.result }}" == "success" ]]; then
               echo "✅ **All Java files compiled successfully** - No compilation errors found!" >> $GITHUB_STEP_SUMMARY
             else
               echo "❌ **Compilation failed** - Please check the build logs for error details." >> $GITHUB_STEP_SUMMARY
             fi
-          elif [[ "${{ inputs.build_type }}" == "workflow-validation" ]]; then
+          elif [[ "${{ env.BUILD_TYPE }}" == "workflow-validation" ]]; then
             echo "### 🔍 Workflow Validation Results" >> $GITHUB_STEP_SUMMARY
             if [[ "${{ needs.build.result }}" == "success" ]]; then
               echo "✅ **All workflow components validated successfully** - All processors and criteria have corresponding Java implementations!" >> $GITHUB_STEP_SUMMARY

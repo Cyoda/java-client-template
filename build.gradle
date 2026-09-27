@@ -8,7 +8,6 @@ plugins {
     id 'io.freefair.lombok' version '8.4'
     id "org.jsonschema2pojo" version "1.2.1"
     id 'com.google.protobuf' version '0.9.4'
-    id 'se.thinkcode.cucumber-runner' version '0.0.11'
     id 'jacoco'
     id 'org.openapi.generator' version '7.12.0'
     id 'java-test-fixtures'
@@ -32,29 +31,6 @@ kotlin {
 tasks.withType(JavaCompile).configureEach {
     // Increase maximum number of diagnostics shown by javac
     options.compilerArgs += ['-Xmaxerrs', '1000', '-Xmaxwarns', '1000']
-}
-
-task cucumberTest(type: Test) {
-  include '**/GherkinE2eTest.class'
-  testClassesDirs = sourceSets.test.output.classesDirs
-  classpath = sourceSets.test.runtimeClasspath
-  useJUnitPlatform()
-  finalizedBy jacocoTestReport
-
-  // Force test profile and cucumber env file
-  systemProperty 'spring.profiles.active', 'cucumber'
-
-  testLogging {
-    events "passed", "skipped", "failed"
-    showStandardStreams true
-    exceptionFormat "full"
-  }
-}
-
-jacocoTestReport {
-  dependsOn cucumberTest
-  executionData.from = files("$buildDir/jacoco/cucumberTest.exec")
-  reports.xml.required = true
 }
 
 jacoco {
@@ -162,9 +138,6 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation platform('org.junit:junit-bom:5.13.1')
     testImplementation 'org.junit.jupiter:junit-jupiter:5.13.1'
-    testImplementation("io.cucumber:cucumber-java:7.18.0")
-    testImplementation("io.cucumber:cucumber-spring:7.18.0")
-    testImplementation("io.cucumber:cucumber-junit-platform-engine:7.18.0")
     testImplementation 'org.instancio:instancio-junit:5.5.1'
     testImplementation("org.junit.platform:junit-platform-suite")
     testImplementation 'io.opentelemetry:opentelemetry-sdk-testing:1.44.1'
@@ -180,8 +153,6 @@ dependencies {
 }
 
 test {
-    exclude '**/GherkinE2eTest.class'
-
     useJUnitPlatform()
 
     // Pass system properties to tests (needed for conditional test execution).
@@ -216,6 +187,14 @@ tasks.register('integrationTest', Test) {
 }
 
 tasks.named('check') { dependsOn 'integrationTest' }
+
+jacocoTestReport {
+    dependsOn tasks.named('test'), tasks.named('integrationTest')
+    executionData.from = files(
+            layout.buildDirectory.file('jacoco/test.exec'),
+            layout.buildDirectory.file('jacoco/integrationTest.exec'))
+    reports.xml.required = true
+}
 
 tasks.register('prepareEventSchemas', com.cyoda.build.PrepareEventSchemasTask) {
     sourceDir = file('src/main/resources/cyoda/schema')
