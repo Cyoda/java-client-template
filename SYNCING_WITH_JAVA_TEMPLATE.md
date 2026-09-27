@@ -37,8 +37,7 @@ The `java-client-template` project provides the shared framework layer (`com.jav
 | `src/main/resources/entity/` | App entity JSON schemas |
 | `src/main/resources/entity-schemas/` | App entity example data |
 | `src/test/java/com/<app_package>/application/` | App-specific unit tests |
-| `src/test/java/e2e/` | App-specific E2E tests |
-| `src/test/resources/features/` | App-specific Gherkin features |
+| `src/integrationTest/java/com/<app_package>/` | App-specific integration tests (`@CyodaIntegrationTest`) |
 
 ---
 

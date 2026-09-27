@@ -1,5 +1,5 @@
 name: Build Application
-run-name: Build [${{ inputs.branch }}] • ${{ inputs.build_type }} • ${{ inputs.tracker_id || 'N/A' }}
+run-name: Build [${{ inputs.branch || github.ref_name }}] • ${{ inputs.build_type || 'standard' }} • ${{ inputs.tracker_id || 'N/A' }}
 
 
 on:
