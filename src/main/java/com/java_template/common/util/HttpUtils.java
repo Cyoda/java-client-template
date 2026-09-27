@@ -20,6 +20,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -34,6 +35,9 @@ import java.util.stream.Collectors;
  * and the path is tx-routed ({@link #isTxRouted(String)}). A 401 against an M2M credential invalidates
  * the cached token and retries once, but only outside a joined call; inside a joined call the failure
  * is mapped by {@link CyodaErrors#fromHttp} to {@code CyodaCalloutEndedException} instead.
+ * <p>
+ * A request carrying a credential (M2M or forwarded) goes only to the origin of {@code app.config.cyoda-api-url};
+ * any other origin is refused with {@link IllegalArgumentException} before any network I/O.
  */
 @Component
 public class HttpUtils {
@@ -43,6 +47,8 @@ public class HttpUtils {
     private final JsonUtils jsonUtils;
     private final CyodaTokenSource tokenSource;
     private final ResponseBodyParser defaultParser;
+    /** Origin of app.config.cyoda-api-url: the only one a Cyoda credential is ever sent to. */
+    private final URI cyodaOrigin;
 
     public HttpUtils(JsonUtils jsonUtils, CyodaObjectMapper wireMapper, Config config, CyodaTokenSource tokenSource) {
         this.jsonUtils = jsonUtils;
@@ -50,6 +56,7 @@ public class HttpUtils {
         this.tokenSource = tokenSource;
         this.defaultParser = ContentTypeAwareParser.createDefault(om);
         this.client = SslUtils.createHttpClient(config);
+        this.cyodaOrigin = config.getCyodaApiUrl() == null ? null : URI.create(config.getCyodaApiUrl());
     }
 
     /** True for a path routed to the transaction owner: entity, search or message (spec §4.4). */
@@ -63,8 +70,10 @@ public class HttpUtils {
     }
 
     private Prepared createRequest(CyodaCallContext ctx, String url, String path, String method, Object data) {
+        URI target = URI.create(url);
+        requireCyodaOriginForCredential(ctx, target);
         HttpRequest.Builder builder = HttpRequest.newBuilder()
-                .uri(URI.create(url))
+                .uri(target)
                 .header("Content-Type", "application/json");
         String m2mToken = null;
         switch (ctx.credential()) {
@@ -193,6 +202,45 @@ public class HttpUtils {
                                                             ResponseBodyParser parser) {
         String fullUrl = buildUrlWithParams(apiUrl, path, null);
         return sendRequest(ctx, fullUrl, path, "DELETE", null, parser);
+    }
+
+    /**
+     * Refuses a request that would carry a Cyoda credential (M2M or a forwarded user token) to any origin but
+     * the configured {@code cyoda-api-url}: those tokens are Cyoda's, and must never reach another host. Checked
+     * before the token is resolved and before any network I/O. A request with no credential may go anywhere.
+     */
+    private void requireCyodaOriginForCredential(CyodaCallContext ctx, URI target) {
+        if (ctx.credential() instanceof CyodaCallContext.None) {
+            return;
+        }
+        if (cyodaOrigin == null || !sameOrigin(cyodaOrigin, target)) {
+            throw new IllegalArgumentException("refusing to send a Cyoda credential to " + describeOrigin(target)
+                    + ": credentials go only to the configured app.config.cyoda-api-url origin ("
+                    + (cyodaOrigin == null ? "not set" : describeOrigin(cyodaOrigin)) + ")");
+        }
+    }
+
+    /** Same scheme, host and port (default ports made explicit; scheme and host compared case-insensitively). */
+    static boolean sameOrigin(URI a, URI b) {
+        return a.getScheme() != null && a.getScheme().equalsIgnoreCase(b.getScheme())
+                && a.getHost() != null && a.getHost().equalsIgnoreCase(b.getHost())
+                && effectivePort(a) == effectivePort(b);
+    }
+
+    private static int effectivePort(URI uri) {
+        if (uri.getPort() != -1) {
+            return uri.getPort();
+        }
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        return switch (scheme) {
+            case "http" -> 80;
+            case "https" -> 443;
+            default -> -1;
+        };
+    }
+
+    private static String describeOrigin(URI uri) {
+        return uri.getScheme() + "://" + uri.getHost() + (uri.getPort() == -1 ? "" : ":" + uri.getPort());
     }
 
     private String buildUrlWithParams(String apiUrl, String path, Map<String, String> params) {

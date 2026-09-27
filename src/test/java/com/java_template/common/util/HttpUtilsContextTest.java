@@ -58,7 +58,9 @@ class HttpUtilsContextTest {
         base = "http://127.0.0.1:" + server.getAddress().getPort() + "/api";
         when(tokens.bearerToken()).thenReturn(Optional.of("m2m"));
         CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
-        http = new HttpUtils(new JsonUtils(wireMapper), wireMapper, new Config(), tokens);
+        Config config = new Config();
+        config.setCyodaApiUrl(base); // the stub server is the configured Cyoda origin
+        http = new HttpUtils(new JsonUtils(wireMapper), wireMapper, config, tokens);
     }
 
     @AfterEach
