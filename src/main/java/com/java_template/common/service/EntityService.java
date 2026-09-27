@@ -53,6 +53,15 @@ import java.util.stream.Stream;
  *   as-at a truncated change time can return the version before that change.
  * - Passing a bare null literal is ambiguous between the two overloads; cast it, e.g. (OffsetDateTime) null,
  *   or call the overload without pointInTime.
+
+ * INSIDE A PROCESSOR OR CRITERION (an open CalloutScope):
+ * - Calls join the callout's transaction. Search runs as a direct search, because an async snapshot does not
+ *   see the transaction's uncommitted writes: only page 0 can be read, with at most 10 000 entities
+ *   (CyodaRepository.DIRECT_SEARCH_LIMIT). A later page, a searchId, or a larger page throws
+ *   IllegalStateException, and so does a stream that needs more than one page.
+ * - transactionWindow and transactionTimeoutMs must be null (IllegalArgumentException otherwise).
+ * - create/update/updateByBusinessId/save/updateAll return the transaction's latest view of the entity,
+ *   read without a point in time.
  */
 public interface EntityService {
 

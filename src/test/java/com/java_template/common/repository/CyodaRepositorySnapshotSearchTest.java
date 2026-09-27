@@ -1,5 +1,7 @@
 package com.java_template.common.repository;
 
+import com.java_template.common.auth.CyodaTokenSource;
+import com.java_template.common.call.CyodaCallContext;
 import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.config.Config;
 import com.java_template.common.dto.PageResult;
@@ -56,15 +58,18 @@ class CyodaRepositorySnapshotSearchTest {
     @Mock CloudEventBuilder cloudEventBuilder;
     @Mock CloudEventParser cloudEventParser;
     @Mock Config config;
+    @Mock CyodaTokenSource tokenSource;
 
     @InjectMocks CyodaRepository repository;
 
     private final ModelSpec modelSpec = new ModelSpec().withName("thing").withVersion(1);
+    private final CyodaCallContext ctx = CyodaCallContext.forward("user-token");
     private final GroupConditionDto condition = new GroupConditionDto()
             .operator(GroupConditionDto.OperatorEnum.AND).conditions(List.of());
 
     private void stubGrpcPlumbing() throws Exception {
         lenient().when(config.getGrpcCallDeadlineMs()).thenReturn(120_000L);
+        lenient().when(stub.withOption(any(), any())).thenReturn(stub);
         lenient().when(stub.withDeadlineAfter(anyLong(), any())).thenReturn(stub);
         lenient().when(cloudEventBuilder.buildEvent(any(BaseEvent.class))).thenReturn(CloudEvent.getDefaultInstance());
         lenient().when(stub.entitySearch(any())).thenReturn(CloudEvent.getDefaultInstance());
@@ -96,7 +101,7 @@ class CyodaRepositorySnapshotSearchTest {
         when(cloudEventParser.parseCloudEvent(any(CloudEvent.class), eq(EntitySnapshotSearchResponse.class)))
                 .thenReturn(response(running), response(done));
 
-        PageResult<DataPayload> page = repository.findAllByCriteria(modelSpec, condition, params(0, null))
+        PageResult<DataPayload> page = repository.findAllByCriteria(ctx, modelSpec, condition, params(0, null))
                 .get(5, TimeUnit.SECONDS);
 
         assertEquals(250L, page.totalElements());
@@ -119,7 +124,7 @@ class CyodaRepositorySnapshotSearchTest {
         when(cloudEventParser.parseCloudEvent(any(CloudEvent.class), eq(EntitySnapshotSearchResponse.class)))
                 .thenReturn(response(done));
 
-        PageResult<DataPayload> page = repository.findAllByCriteria(modelSpec, condition, params(1, snapshotId))
+        PageResult<DataPayload> page = repository.findAllByCriteria(ctx, modelSpec, condition, params(1, snapshotId))
                 .get(5, TimeUnit.SECONDS);
 
         assertEquals(250L, page.totalElements());
@@ -147,12 +152,34 @@ class CyodaRepositorySnapshotSearchTest {
         when(cloudEventParser.parseCloudEvent(any(CloudEvent.class), eq(EntitySnapshotSearchResponse.class)))
                 .thenReturn(response(done));
 
-        repository.findAllByCriteria(modelSpec, condition, params(0, snapshotId)).get(5, TimeUnit.SECONDS);
-        PageResult<DataPayload> second = repository.findAllByCriteria(modelSpec, condition, params(1, snapshotId))
+        repository.findAllByCriteria(ctx, modelSpec, condition, params(0, snapshotId)).get(5, TimeUnit.SECONDS);
+        PageResult<DataPayload> second = repository.findAllByCriteria(ctx, modelSpec, condition, params(1, snapshotId))
                 .get(5, TimeUnit.SECONDS);
 
         assertEquals(250L, second.totalElements());
         verify(cloudEventParser, times(1)).parseCloudEvent(any(CloudEvent.class), eq(EntitySnapshotSearchResponse.class));
+    }
+
+    @Test
+    void aCachedSnapshotStatusIsNeverServedToACallerWithADifferentContext() throws Exception {
+        stubGrpcPlumbing();
+        UUID snapshotId = UUID.randomUUID();
+        SearchSnapshotStatus done = status(SearchSnapshotStatus.Status.SUCCESSFUL, snapshotId, 250L);
+        when(cloudEventParser.parseCloudEvent(any(CloudEvent.class), eq(EntitySnapshotSearchResponse.class)))
+                .thenReturn(response(done));
+
+        repository.findAllByCriteria(ctx, modelSpec, condition, params(0, snapshotId)).get(5, TimeUnit.SECONDS);
+        repository.findAllByCriteria(CyodaCallContext.forward("another-user"), modelSpec, condition, params(1, snapshotId))
+                .get(5, TimeUnit.SECONDS);
+        repository.findAllByCriteria(CyodaCallContext.m2m(), modelSpec, condition, params(1, snapshotId))
+                .get(5, TimeUnit.SECONDS);
+
+        // Each distinct caller reads the snapshot's status itself (under its own credential): three reads.
+        verify(cloudEventParser, times(3)).parseCloudEvent(any(CloudEvent.class), eq(EntitySnapshotSearchResponse.class));
+
+        // The first caller's own next page is still served from its cache entry.
+        repository.findAllByCriteria(ctx, modelSpec, condition, params(1, snapshotId)).get(5, TimeUnit.SECONDS);
+        verify(cloudEventParser, times(3)).parseCloudEvent(any(CloudEvent.class), eq(EntitySnapshotSearchResponse.class));
     }
 
     @Test

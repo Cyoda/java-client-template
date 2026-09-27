@@ -10,6 +10,7 @@ import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.java_template.common.auth.CyodaTokenSource;
 import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.config.Config;
 import com.java_template.common.grpc.client.event_handling.CloudEventBuilder;
@@ -32,6 +33,7 @@ class CyodaRepositoryValidateResponseTest {
     @Mock CloudEventBuilder cloudEventBuilder;
     @Mock CloudEventParser cloudEventParser;
     @Mock Config config;
+    @Mock CyodaTokenSource tokenSource;
 
     @InjectMocks CyodaRepository repository;
 

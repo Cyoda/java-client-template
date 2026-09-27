@@ -1,8 +1,13 @@
 package com.java_template.common.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.call.CalloutScope;
+import com.java_template.common.call.CyodaCallContext;
+import com.java_template.common.call.CyodaCallContexts;
+import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.dto.EntityWithMetadata;
+import com.java_template.common.exception.CyodaCalloutEndedException;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.repository.CrudRepository;
 import com.java_template.common.repository.SearchAndRetrievalParams;
@@ -25,9 +30,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
@@ -65,7 +75,7 @@ class EntityServiceImplTest {
     void setUp() {
         CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
         objectMapper = wireMapper.mapper();
-        entityService = new EntityServiceImpl(repository, wireMapper);
+        entityService = new EntityServiceImpl(repository, wireMapper, new CyodaCallContexts(new Config()));
         testEntityId = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
         testEntityId2 = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
         testEntity = new TestEntity(123L, "Test Entity", "ACTIVE");
@@ -187,41 +197,41 @@ class EntityServiceImplTest {
     @Test
     @DisplayName("getById should handle repository failure gracefully")
     void testGetByIdRepositoryFailure() {
-        when(repository.findById(eq(testEntityId), isNull()))
+        when(repository.findById(any(CyodaCallContext.class), eq(testEntityId), isNull()))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Repository error")));
 
         assertRepositoryFailure(() -> entityService.getById(testEntityId, createTestModelSpec(), TestEntity.class), "Repository error");
-        verify(repository).findById(eq(testEntityId), isNull());
+        verify(repository).findById(any(CyodaCallContext.class), eq(testEntityId), isNull());
     }
 
     @Test
     @DisplayName("deleteById should handle repository failure gracefully")
     void testDeleteByIdRepositoryFailure() {
-        when(repository.deleteById(testEntityId))
+        when(repository.deleteById(any(CyodaCallContext.class), eq(testEntityId)))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Delete failed")));
 
         assertRepositoryFailure(() -> entityService.deleteById(testEntityId), "Delete failed");
-        verify(repository).deleteById(testEntityId);
+        verify(repository).deleteById(any(CyodaCallContext.class), eq(testEntityId));
     }
 
     @Test
     @DisplayName("save should handle repository failure gracefully")
     void testCreateRepositoryFailure() {
-        when(repository.save(eq(createTestModelSpec()), any()))
+        when(repository.save(any(CyodaCallContext.class), eq(createTestModelSpec()), any()))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Save failed")));
 
         assertRepositoryFailure(() -> entityService.create(testEntity), "Save failed");
-        verify(repository).save(eq(createTestModelSpec()), any());
+        verify(repository).save(any(CyodaCallContext.class), eq(createTestModelSpec()), any());
     }
 
     @Test
     @DisplayName("update should handle repository failure gracefully")
     void testUpdateRepositoryFailure() {
-        when(repository.update(eq(testEntityId), any(), isNull()))
+        when(repository.update(any(CyodaCallContext.class), eq(testEntityId), any(), isNull()))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Update failed")));
 
         assertRepositoryFailure(() -> entityService.update(testEntityId, testEntity, null), "Update failed");
-        verify(repository).update(eq(testEntityId), any(), isNull());
+        verify(repository).update(any(CyodaCallContext.class), eq(testEntityId), any(), isNull());
     }
 
     // ========================================
@@ -232,7 +242,7 @@ class EntityServiceImplTest {
     @DisplayName("getById should return EntityWithMetadata when successful")
     void testGetByIdSuccess() {
         DataPayload dataPayload = createTestDataPayload(testEntity, testEntityId);
-        when(repository.findById(eq(testEntityId), isNull()))
+        when(repository.findById(any(CyodaCallContext.class), eq(testEntityId), isNull()))
                 .thenReturn(CompletableFuture.completedFuture(dataPayload));
 
         EntityWithMetadata<TestEntity> result = entityService.getById(testEntityId, createTestModelSpec(), TestEntity.class);
@@ -242,7 +252,7 @@ class EntityServiceImplTest {
         assertNotNull(result.metadata());
         assertEntityMatches(result.entity(), testEntity);
         assertMetadata(result, testEntityId, testEntity.getStatus());
-        verify(repository).findById(eq(testEntityId), isNull());
+        verify(repository).findById(any(CyodaCallContext.class), eq(testEntityId), isNull());
     }
 
     @Test
@@ -251,11 +261,11 @@ class EntityServiceImplTest {
         UUID savedEntityId = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
         EntityTransactionResponse transactionResponse = createTransactionResponse(savedEntityId);
         OffsetDateTime timeOfChange = OffsetDateTime.parse("2026-09-27T10:11:12.123456789Z");
-        when(repository.save(eq(createTestModelSpec()), any()))
+        when(repository.save(any(CyodaCallContext.class), eq(createTestModelSpec()), any()))
                 .thenReturn(CompletableFuture.completedFuture(transactionResponse));
-        when(repository.findById(eq(savedEntityId), any()))
+        when(repository.findById(any(CyodaCallContext.class), eq(savedEntityId), any()))
                 .thenReturn(CompletableFuture.completedFuture(createTestDataPayload(testEntity, savedEntityId)));
-        when(repository.getEntityChangesMetadata(eq(savedEntityId), isNull()))
+        when(repository.getEntityChangesMetadata(any(CyodaCallContext.class), eq(savedEntityId), isNull()))
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(transactionResponse.getTransactionInfo().getTransactionId())
@@ -269,23 +279,23 @@ class EntityServiceImplTest {
         assertNotNull(result.metadata());
         assertEntityMatches(result.entity(), testEntity);
         assertEquals(savedEntityId, result.metadata().getId());
-        verify(repository).save(eq(createTestModelSpec()), any());
+        verify(repository).save(any(CyodaCallContext.class), eq(createTestModelSpec()), any());
         // Pins that the reload passes EntityChangeMeta.timeOfChange through verbatim, at full
         // nanosecond precision, rather than losing precision by round-tripping through Date.
-        verify(repository).findById(savedEntityId, timeOfChange);
+        verify(repository).findById(any(CyodaCallContext.class), eq(savedEntityId), eq(timeOfChange));
     }
 
     @Test
     @DisplayName("deleteById should return entity ID when successful")
     void testDeleteByIdSuccess() {
         EntityDeleteResponse deleteResponse = createDeleteResponse(testEntityId);
-        when(repository.deleteById(testEntityId))
+        when(repository.deleteById(any(CyodaCallContext.class), eq(testEntityId)))
                 .thenReturn(CompletableFuture.completedFuture(deleteResponse));
 
         UUID result = entityService.deleteById(testEntityId);
 
         assertEquals(testEntityId, result);
-        verify(repository).deleteById(testEntityId);
+        verify(repository).deleteById(any(CyodaCallContext.class), eq(testEntityId));
     }
 
     @Test
@@ -295,13 +305,13 @@ class EntityServiceImplTest {
                 createDeleteAllResponse(5),
                 createDeleteAllResponse(3)
         );
-        when(repository.deleteAll(createTestModelSpec()))
+        when(repository.deleteAll(any(CyodaCallContext.class), eq(createTestModelSpec())))
                 .thenReturn(CompletableFuture.completedFuture(responses));
 
         Integer result = entityService.deleteAll(createTestModelSpec());
 
         assertEquals(8, result);
-        verify(repository).deleteAll(createTestModelSpec());
+        verify(repository).deleteAll(any(CyodaCallContext.class), eq(createTestModelSpec()));
     }
 
     @Test
@@ -311,13 +321,13 @@ class EntityServiceImplTest {
         int customVersion = 2;
         ModelSpec customModelSpec = new ModelSpec().withName(customModel).withVersion(customVersion);
         List<EntityDeleteAllResponse> responses = List.of(createDeleteAllResponse(10));
-        when(repository.deleteAll(eq(customModelSpec)))
+        when(repository.deleteAll(any(CyodaCallContext.class), eq(customModelSpec)))
                 .thenReturn(CompletableFuture.completedFuture(responses));
 
         Integer result = entityService.deleteAll(customModelSpec);
 
         assertEquals(10, result);
-        verify(repository).deleteAll(eq(customModelSpec));
+        verify(repository).deleteAll(any(CyodaCallContext.class), eq(customModelSpec));
     }
 
     // ========================================
@@ -329,11 +339,11 @@ class EntityServiceImplTest {
     void testUpdateWithNullTransition() {
         EntityTransactionResponse response = createTransactionResponse(testEntityId);
         OffsetDateTime timeOfChange = OffsetDateTime.parse("2026-09-27T10:11:12.123456789Z");
-        when(repository.update(eq(testEntityId), any(), isNull()))
+        when(repository.update(any(CyodaCallContext.class), eq(testEntityId), any(), isNull()))
                 .thenReturn(CompletableFuture.completedFuture(response));
-        when(repository.findById(eq(testEntityId), any()))
+        when(repository.findById(any(CyodaCallContext.class), eq(testEntityId), any()))
                 .thenReturn(CompletableFuture.completedFuture(createTestDataPayload(testEntity, testEntityId)));
-        when(repository.getEntityChangesMetadata(eq(testEntityId), isNull()))
+        when(repository.getEntityChangesMetadata(any(CyodaCallContext.class), eq(testEntityId), isNull()))
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(response.getTransactionInfo().getTransactionId())
@@ -347,21 +357,21 @@ class EntityServiceImplTest {
         assertNotNull(result.metadata());
         assertEntityMatches(result.entity(), testEntity);
         assertEquals(testEntityId, result.metadata().getId());
-        verify(repository).update(eq(testEntityId), any(), isNull());
+        verify(repository).update(any(CyodaCallContext.class), eq(testEntityId), any(), isNull());
         // Pins that the reload passes EntityChangeMeta.timeOfChange through verbatim, at full
         // nanosecond precision, rather than losing precision by round-tripping through Date.
-        verify(repository).findById(testEntityId, timeOfChange);
+        verify(repository).findById(any(CyodaCallContext.class), eq(testEntityId), eq(timeOfChange));
     }
 
     @Test
     @DisplayName("update should use provided transition when not null")
     void testUpdateWithCustomTransition() {
         EntityTransactionResponse response = createTransactionResponse(testEntityId);
-        when(repository.update(eq(testEntityId), any(), eq(TRANSITION_ACTIVATE)))
+        when(repository.update(any(CyodaCallContext.class), eq(testEntityId), any(), eq(TRANSITION_ACTIVATE)))
                 .thenReturn(CompletableFuture.completedFuture(response));
-        when(repository.findById(eq(testEntityId), any()))
+        when(repository.findById(any(CyodaCallContext.class), eq(testEntityId), any()))
                 .thenReturn(CompletableFuture.completedFuture(createTestDataPayload(testEntity, testEntityId)));
-        when(repository.getEntityChangesMetadata(eq(testEntityId), isNull()))
+        when(repository.getEntityChangesMetadata(any(CyodaCallContext.class), eq(testEntityId), isNull()))
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(response.getTransactionInfo().getTransactionId())
@@ -375,7 +385,7 @@ class EntityServiceImplTest {
         assertNotNull(result.metadata());
         assertEntityMatches(result.entity(), testEntity);
         assertEquals(testEntityId, result.metadata().getId());
-        verify(repository).update(eq(testEntityId), any(), eq(TRANSITION_ACTIVATE));
+        verify(repository).update(any(CyodaCallContext.class), eq(testEntityId), any(), eq(TRANSITION_ACTIVATE));
     }
 
     // ========================================
@@ -391,7 +401,7 @@ class EntityServiceImplTest {
 
         assertNotNull(result);
         assertTrue(result.isEmpty());
-        verify(repository, never()).saveAll(any(ModelSpec.class), any());
+        verify(repository, never()).saveAll(any(CyodaCallContext.class), any(ModelSpec.class), any());
     }
 
     @Test
@@ -403,7 +413,7 @@ class EntityServiceImplTest {
 
         assertNotNull(result);
         assertTrue(result.isEmpty());
-        verify(repository, never()).updateAll(any(), anyString());
+        verify(repository, never()).updateAll(any(CyodaCallContext.class), any(), anyString());
     }
 
     @Test
@@ -411,12 +421,12 @@ class EntityServiceImplTest {
     void testUpdateAllWithNullTransition() {
         Collection<TestEntity> entities = List.of(testEntity);
         List<EntityTransactionResponse> responses = List.of(createTransactionResponse(testEntityId));
-        when(repository.updateAll(any(), isNull(),any(), any()))
+        when(repository.updateAll(any(CyodaCallContext.class), any(), isNull(),any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(responses));
 
-        when(repository.findById(eq(testEntityId), any()))
+        when(repository.findById(any(CyodaCallContext.class), eq(testEntityId), any()))
                 .thenReturn(CompletableFuture.completedFuture(createTestDataPayload(testEntity, testEntityId)));
-        when(repository.getEntityChangesMetadata(eq(testEntityId), isNull()))
+        when(repository.getEntityChangesMetadata(any(CyodaCallContext.class), eq(testEntityId), isNull()))
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(responses.getFirst().getTransactionInfo().getTransactionId())
@@ -432,7 +442,7 @@ class EntityServiceImplTest {
         assertNotNull(entityWithMetadata.metadata());
         assertEntityMatches(entityWithMetadata.entity(), testEntity);
         assertEquals(testEntityId, entityWithMetadata.metadata().getId());
-        verify(repository).updateAll(any(), isNull(), any(), any());
+        verify(repository).updateAll(any(CyodaCallContext.class), any(), isNull(), any(), any());
     }
 
     // ========================================
@@ -444,7 +454,7 @@ class EntityServiceImplTest {
     void testFindByBusinessIdRepositoryCall() {
         TestEntity entityWithBusinessId = new TestEntity(123L, "TEST-123", "ACTIVE");
         List<DataPayload> payloads = List.of(createTestDataPayload(entityWithBusinessId, testEntityId));
-        when(repository.findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
                 .thenReturn(CompletableFuture.completedFuture(PageResult.of(SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros(), payloads, 0, 1, payloads.size())));
 
         EntityWithMetadata<TestEntity> result = entityService.findByBusinessId(createTestModelSpec(), "TEST-123", BUSINESS_ID_FIELD, TestEntity.class);
@@ -454,25 +464,25 @@ class EntityServiceImplTest {
         assertNotNull(result.metadata());
         assertEntityMatches(result.entity(), entityWithBusinessId);
         assertMetadata(result, testEntityId, entityWithBusinessId.getStatus());
-        verify(repository).findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any());
+        verify(repository).findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any());
     }
 
     @Test
     @DisplayName("findByBusinessId should handle repository failure")
     void testFindByBusinessIdRepositoryFailure() {
-        when(repository.findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Search failed")));
 
         assertRepositoryFailure(() -> entityService.findByBusinessId(createTestModelSpec(), "TEST-123", BUSINESS_ID_FIELD, TestEntity.class),
                 "Search failed");
-        verify(repository).findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any());
+        verify(repository).findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any());
     }
 
     @Test
     @DisplayName("findAll should call repository.findAll with correct model parameters")
     void testFindAllRepositoryCall() {
         List<DataPayload> payloads = List.of(createTestDataPayload(testEntity, testEntityId));
-        when(repository.findAll(eq(createTestModelSpec()), any()))
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any()))
                 .thenReturn(CompletableFuture.completedFuture(PageResult.of(SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros(), payloads, 0, 100, payloads.size())));
 
         PageResult<EntityWithMetadata<TestEntity>> result = entityService.findAll(createTestModelSpec(), TestEntity.class);
@@ -482,17 +492,17 @@ class EntityServiceImplTest {
         EntityWithMetadata<TestEntity> entityWithMetadata = result.data().getFirst();
         assertEntityMatches(entityWithMetadata.entity(), testEntity);
         assertMetadata(entityWithMetadata, testEntityId, testEntity.getStatus());
-        verify(repository).findAll(eq(createTestModelSpec()), any());
+        verify(repository).findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any());
     }
 
     @Test
     @DisplayName("findAll should handle repository failure")
     void testFindAllRepositoryFailure() {
-        when(repository.findAll(eq(createTestModelSpec()), any()))
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any()))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Find all failed")));
 
         assertRepositoryFailure(() -> entityService.findAll(createTestModelSpec(), TestEntity.class), "Find all failed");
-        verify(repository).findAll(eq(createTestModelSpec()), any());
+        verify(repository).findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any());
     }
 
     @Test
@@ -500,7 +510,7 @@ class EntityServiceImplTest {
     void testSearchRepositoryCall() {
         GroupConditionDto condition = createActiveStatusCondition();
         List<DataPayload> payloads = List.of(createTestDataPayload(testEntity, testEntityId));
-        when(repository.findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
                 .thenReturn(CompletableFuture.completedFuture(PageResult.of(SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros(), payloads, 0, 100, payloads.size())));
 
         PageResult<EntityWithMetadata<TestEntity>> result = entityService.search(createTestModelSpec(), condition, TestEntity.class);
@@ -510,18 +520,18 @@ class EntityServiceImplTest {
         EntityWithMetadata<TestEntity> entityWithMetadata = result.data().getFirst();
         assertEntityMatches(entityWithMetadata.entity(), testEntity);
         assertMetadata(entityWithMetadata, testEntityId, testEntity.getStatus());
-        verify(repository).findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any());
+        verify(repository).findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any());
     }
 
     @Test
     @DisplayName("search should handle repository failure")
     void testSearchRepositoryFailure() {
         GroupConditionDto condition = createActiveStatusCondition();
-        when(repository.findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Search failed")));
 
         assertRepositoryFailure(() -> entityService.search(createTestModelSpec(), condition, TestEntity.class), "Search failed");
-        verify(repository).findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any());
+        verify(repository).findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any());
     }
 
     // ========================================
@@ -532,11 +542,11 @@ class EntityServiceImplTest {
     @Test
     @DisplayName("deleteAll should handle repository failure")
     void testDeleteAllRepositoryFailure() {
-        when(repository.deleteAll(createTestModelSpec()))
+        when(repository.deleteAll(any(CyodaCallContext.class), eq(createTestModelSpec())))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Delete all failed")));
 
         assertRepositoryFailure(() -> entityService.deleteAll(createTestModelSpec()), "Delete all failed");
-        verify(repository).deleteAll(createTestModelSpec());
+        verify(repository).deleteAll(any(CyodaCallContext.class), eq(createTestModelSpec()));
     }
 
     @Test
@@ -545,49 +555,49 @@ class EntityServiceImplTest {
         String customModel = "custom-model";
         int customVersion = 2;
         ModelSpec customModelSpec = new ModelSpec().withName(customModel).withVersion(customVersion);
-        when(repository.deleteAll(customModelSpec))
+        when(repository.deleteAll(any(CyodaCallContext.class), eq(customModelSpec)))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Delete failed")));
 
         assertRepositoryFailure(() -> entityService.deleteAll(customModelSpec), "Delete failed");
-        verify(repository).deleteAll(customModelSpec);
+        verify(repository).deleteAll(any(CyodaCallContext.class), eq(customModelSpec));
     }
 
     @Test
     @DisplayName("getItems should handle repository failure")
     void testGetItemsRepositoryFailure() {
-        when(repository.findAll(eq(createTestModelSpec()), any()))
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any()))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Find all failed")));
 
         assertRepositoryFailure(() -> entityService.findAll(createTestModelSpec(), TestEntity.class),
                 "Find all failed");
-        verify(repository).findAll(eq(createTestModelSpec()), any());
+        verify(repository).findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any());
     }
 
     @Test
     @DisplayName("updateByBusinessId should handle repository failure during find")
     void testUpdateByBusinessIdFindFailure() {
         testEntity.setName("TEST-123");
-        when(repository.findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Find failed")));
 
         assertRepositoryFailure(() -> entityService.updateByBusinessId(testEntity, BUSINESS_ID_FIELD, TRANSITION_ACTIVATE),
                 "Find failed");
-        verify(repository).findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any());
-        verify(repository, never()).update(any(UUID.class), any(), anyString());
+        verify(repository).findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any());
+        verify(repository, never()).update(any(CyodaCallContext.class), any(UUID.class), any(), anyString());
     }
 
     @Test
     @DisplayName("updateByBusinessId should handle entity not found")
     void testUpdateByBusinessIdEntityNotFound() {
         testEntity.setName("NONEXISTENT");
-        when(repository.findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
                 .thenReturn(CompletableFuture.completedFuture(PageResult.of(SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros(), List.of(), 0, 1, 0L)));
 
         RuntimeException exception = assertThrows(RuntimeException.class,
                 () -> entityService.updateByBusinessId(testEntity, BUSINESS_ID_FIELD, TRANSITION_ACTIVATE));
         assertTrue(exception.getMessage().contains("Entity not found with business ID"));
-        verify(repository).findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any());
-        verify(repository, never()).update(any(UUID.class), any(), anyString());
+        verify(repository).findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any());
+        verify(repository, never()).update(any(CyodaCallContext.class), any(UUID.class), any(), anyString());
     }
 
     @Test
@@ -598,16 +608,16 @@ class EntityServiceImplTest {
 
         TestEntity foundEntity = new TestEntity(123L, "TEST-123", "ACTIVE");
         DataPayload foundPayload = createTestDataPayload(foundEntity, existingEntityTechnicalId);
-        when(repository.findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
                 .thenReturn(CompletableFuture.completedFuture(PageResult.of(SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros(), List.of(foundPayload), 0, 1, 1L)));
 
         EntityTransactionResponse updateResponse = createTransactionResponse(existingEntityTechnicalId);
-        when(repository.update(eq(existingEntityTechnicalId), any(), eq(TRANSITION_ACTIVATE)))
+        when(repository.update(any(CyodaCallContext.class), eq(existingEntityTechnicalId), any(), eq(TRANSITION_ACTIVATE)))
                 .thenReturn(CompletableFuture.completedFuture(updateResponse));
 
-        when(repository.findById(eq(existingEntityTechnicalId), any()))
+        when(repository.findById(any(CyodaCallContext.class), eq(existingEntityTechnicalId), any()))
                 .thenReturn(CompletableFuture.completedFuture(foundPayload));
-        when(repository.getEntityChangesMetadata(eq(existingEntityTechnicalId), isNull()))
+        when(repository.getEntityChangesMetadata(any(CyodaCallContext.class), eq(existingEntityTechnicalId), isNull()))
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(updateResponse.getTransactionInfo().getTransactionId())
@@ -621,33 +631,33 @@ class EntityServiceImplTest {
         assertNotNull(result.metadata());
         assertEntityMatches(result.entity(), testEntity);
         assertEquals(existingEntityTechnicalId, result.metadata().getId());
-        verify(repository).findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any());
-        verify(repository).update(eq(existingEntityTechnicalId), any(), eq(TRANSITION_ACTIVATE));
+        verify(repository).findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any());
+        verify(repository).update(any(CyodaCallContext.class), eq(existingEntityTechnicalId), any(), eq(TRANSITION_ACTIVATE));
     }
 
     @Test
     @DisplayName("deleteByBusinessId should handle repository failure during find")
     void testDeleteByBusinessIdFindFailure() {
-        when(repository.findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Find failed")));
 
         assertRepositoryFailure(() -> entityService.deleteByBusinessId(createTestModelSpec(), "TEST-123", BUSINESS_ID_FIELD, TestEntity.class),
                 "Find failed");
-        verify(repository).findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any());
-        verify(repository, never()).deleteById(any(UUID.class));
+        verify(repository).findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any());
+        verify(repository, never()).deleteById(any(CyodaCallContext.class), any(UUID.class));
     }
 
     @Test
     @DisplayName("deleteByBusinessId should return false when entity not found")
     void testDeleteByBusinessIdEntityNotFound() {
-        when(repository.findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
                 .thenReturn(CompletableFuture.completedFuture(PageResult.of(SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros(), List.of(), 0, 1, 0L)));
 
         boolean result = entityService.deleteByBusinessId(createTestModelSpec(), "NONEXISTENT", BUSINESS_ID_FIELD, TestEntity.class);
 
         assertFalse(result);
-        verify(repository).findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any());
-        verify(repository, never()).deleteById(any(UUID.class));
+        verify(repository).findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any());
+        verify(repository, never()).deleteById(any(CyodaCallContext.class), any(UUID.class));
     }
 
     @Test
@@ -656,18 +666,18 @@ class EntityServiceImplTest {
         UUID entityTechnicalId = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
         TestEntity foundEntity = new TestEntity(123L, "TEST-123", "ACTIVE");
         DataPayload foundPayload = createTestDataPayload(foundEntity, entityTechnicalId);
-        when(repository.findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
                 .thenReturn(CompletableFuture.completedFuture(PageResult.of(SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros(), List.of(foundPayload), 0, 1, 1L)));
 
         EntityDeleteResponse deleteResponse = createDeleteResponse(entityTechnicalId);
-        when(repository.deleteById(entityTechnicalId))
+        when(repository.deleteById(any(CyodaCallContext.class), eq(entityTechnicalId)))
                 .thenReturn(CompletableFuture.completedFuture(deleteResponse));
 
         boolean result = entityService.deleteByBusinessId(createTestModelSpec(), "TEST-123", BUSINESS_ID_FIELD, TestEntity.class);
 
         assertTrue(result);
-        verify(repository).findAllByCriteria(eq(createTestModelSpec()), any(GroupConditionDto.class), any());
-        verify(repository).deleteById(entityTechnicalId);
+        verify(repository).findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any());
+        verify(repository).deleteById(any(CyodaCallContext.class), eq(entityTechnicalId));
     }
 
     @Test
@@ -680,21 +690,21 @@ class EntityServiceImplTest {
         EntityTransactionResponse transactionResponse = new EntityTransactionResponse();
         transactionResponse.setTransactionInfo(transactionInfo);
 
-        when(repository.saveAll(eq(createTestModelSpec()), eq(entities), any(), any()))
+        when(repository.saveAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(entities), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(List.of(transactionResponse)));
 
-        when(repository.findById(eq(testEntityId), any()))
+        when(repository.findById(any(CyodaCallContext.class), eq(testEntityId), any()))
                 .thenReturn(CompletableFuture.completedFuture(createTestDataPayload(testEntity, testEntityId)));
-        when(repository.getEntityChangesMetadata(eq(testEntityId), isNull()))
+        when(repository.getEntityChangesMetadata(any(CyodaCallContext.class), eq(testEntityId), isNull()))
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(transactionResponse.getTransactionInfo().getTransactionId())
                                 .withTimeOfChange(OffsetDateTime.now())
                 )));
 
-        when(repository.findById(eq(testEntityId2), any()))
+        when(repository.findById(any(CyodaCallContext.class), eq(testEntityId2), any()))
                 .thenReturn(CompletableFuture.completedFuture(createTestDataPayload(testEntity2, testEntityId2)));
-        when(repository.getEntityChangesMetadata(eq(testEntityId2), isNull()))
+        when(repository.getEntityChangesMetadata(any(CyodaCallContext.class), eq(testEntityId2), isNull()))
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(transactionResponse.getTransactionInfo().getTransactionId())
@@ -710,18 +720,18 @@ class EntityServiceImplTest {
         assertEntityMatches(result.get(1).entity(), testEntity2);
         assertEquals(testEntityId, result.getFirst().metadata().getId());
         assertEquals(testEntityId2, result.get(1).metadata().getId());
-        verify(repository).saveAll(eq(createTestModelSpec()), eq(entities), any(), any());
+        verify(repository).saveAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(entities), any(), any());
     }
 
     @Test
     @DisplayName("saveAll should handle repository failure with non-empty collection")
     void testCreateAllWithEntitiesRepositoryFailure() {
         Collection<TestEntity> entities = List.of(testEntity, testEntity2);
-        when(repository.saveAll(eq(createTestModelSpec()), eq(entities), any(), any()))
+        when(repository.saveAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(entities), any(), any()))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Save all failed")));
 
         assertRepositoryFailure(() -> entityService.save(entities), "Save all failed");
-        verify(repository).saveAll(eq(createTestModelSpec()), eq(entities), any(), any());
+        verify(repository).saveAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(entities), any(), any());
     }
 
     // ========================================
@@ -751,7 +761,7 @@ class EntityServiceImplTest {
                 createTestDataPayload(entity1, id1),
                 createTestDataPayload(entity2, id2)
         );
-        when(repository.findAll(eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(0).searchId(null).build())))
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(0).searchId(null).build())))
                 .thenReturn(CompletableFuture.completedFuture(
                         PageResult.of(searchId, page1Payloads, 0, 2, 5L)
                 ));
@@ -761,7 +771,7 @@ class EntityServiceImplTest {
                 createTestDataPayload(entity3, id3),
                 createTestDataPayload(entity4, id4)
         );
-        when(repository.findAll(eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(1).searchId(searchId).build())))
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(1).searchId(searchId).build())))
                 .thenReturn(CompletableFuture.completedFuture(
                         PageResult.of(searchId, page2Payloads, 1, 2, 5L)
                 ));
@@ -770,7 +780,7 @@ class EntityServiceImplTest {
         List<DataPayload> page3Payloads = List.of(
                 createTestDataPayload(entity5, id5)
         );
-        when(repository.findAll(eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(2).searchId(searchId).build())))
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(2).searchId(searchId).build())))
                 .thenReturn(CompletableFuture.completedFuture(
                         PageResult.of(searchId, page3Payloads, 2, 2, 5L)
                 ));
@@ -792,15 +802,15 @@ class EntityServiceImplTest {
         assertEntityMatches(result.get(4).entity(), entity5);
 
         // Verify repository calls
-        verify(repository).findAll(eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(0).searchId(null).build()));
-        verify(repository).findAll(eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(1).searchId(searchId).build()));
-        verify(repository).findAll(eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(2).searchId(searchId).build()));
+        verify(repository).findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(0).searchId(null).build()));
+        verify(repository).findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(1).searchId(searchId).build()));
+        verify(repository).findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(2).searchId(searchId).build()));
     }
 
     @Test
     @DisplayName("streamAll should handle empty result set")
     void testStreamAllEmptyResults() {
-        when(repository.findAll(eq(createTestModelSpec()), any()))
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any()))
                 .thenReturn(CompletableFuture.completedFuture(
                         PageResult.of(SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros(), List.of(), 0, 100, 0L)
                 ));
@@ -813,7 +823,7 @@ class EntityServiceImplTest {
 
         assertNotNull(result);
         assertTrue(result.isEmpty());
-        verify(repository).findAll(eq(createTestModelSpec()), any());
+        verify(repository).findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any());
     }
 
     @Test
@@ -830,7 +840,7 @@ class EntityServiceImplTest {
         );
 
         // totalElements = 2, pageSize = 100, so totalPages = 1 (no more pages)
-        when(repository.findAll(eq(createTestModelSpec()), any()))
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any()))
                 .thenReturn(CompletableFuture.completedFuture(
                         PageResult.of(SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros(), payloads, 0, 100, 2L)
                 ));
@@ -845,7 +855,7 @@ class EntityServiceImplTest {
         assertEquals(2, result.size());
         assertEntityMatches(result.getFirst().entity(), entity1);
         assertEntityMatches(result.get(1).entity(), entity2);
-        verify(repository).findAll(eq(createTestModelSpec()), any());
+        verify(repository).findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any());
     }
 
     @Test
@@ -861,7 +871,7 @@ class EntityServiceImplTest {
                 createTestDataPayload(inactiveEntity, id2)
         );
 
-        when(repository.findAll(eq(createTestModelSpec()), any()))
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any()))
                 .thenReturn(CompletableFuture.completedFuture(
                         PageResult.of(SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros(), payloads, 0, 100, 2L)
                 ));
@@ -893,7 +903,7 @@ class EntityServiceImplTest {
         );
 
         // totalElements = 2, pageSize = 100, so totalPages = 1 (no more pages)
-        when(repository.findAll(eq(createTestModelSpec()), any()))
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any()))
                 .thenReturn(CompletableFuture.completedFuture(
                         PageResult.of(SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros(), payloads, 0, 100, 2L)
                 ));
@@ -915,14 +925,14 @@ class EntityServiceImplTest {
     @Test
     @DisplayName("streamAll should handle repository failure on first page")
     void testStreamAllRepositoryFailureFirstPage() {
-        when(repository.findAll(eq(createTestModelSpec()), any()))
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any()))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Find all failed")));
 
         assertRepositoryFailure(
                 () -> entityService.streamAll(createTestModelSpec(), TestEntity.class, SearchAndRetrievalParams.builder().pageSize(100).build()).toList(),
                 "Find all failed"
         );
-        verify(repository).findAll(eq(createTestModelSpec()), any());
+        verify(repository).findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any());
     }
 
     @Test
@@ -933,20 +943,20 @@ class EntityServiceImplTest {
         UUID searchId = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
 
         List<DataPayload> page1Payloads = List.of(createTestDataPayload(entity1, id1));
-        when(repository.findAll(eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(1).pageNumber(0).build())))
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(1).pageNumber(0).build())))
                 .thenReturn(CompletableFuture.completedFuture(
                         PageResult.of(searchId, page1Payloads, 0, 1, 2L)
                 ));
 
-        when(repository.findAll(eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(1).pageNumber(1).searchId(searchId).build())))
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(1).pageNumber(1).searchId(searchId).build())))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Page 2 failed")));
 
         assertRepositoryFailure(
                 () -> entityService.streamAll(createTestModelSpec(), TestEntity.class, SearchAndRetrievalParams.builder().pageSize(1).build()).toList(),
                 "Page 2 failed"
         );
-        verify(repository).findAll(eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(1).pageNumber(0).build()));
-        verify(repository).findAll(eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(1).pageNumber(1).searchId(searchId).build()));
+        verify(repository).findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(1).pageNumber(0).build()));
+        verify(repository).findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(1).pageNumber(1).searchId(searchId).build()));
     }
 
     @Test
@@ -957,7 +967,7 @@ class EntityServiceImplTest {
         UUID id1 = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
 
         List<DataPayload> payloads = List.of(createTestDataPayload(entity1, id1));
-        when(repository.findAll(eq(createTestModelSpec()), any()))
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any()))
                 .thenReturn(CompletableFuture.completedFuture(
                         PageResult.of(SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros(), payloads, 0, 100, 1L)
                 ));
@@ -971,7 +981,7 @@ class EntityServiceImplTest {
         assertNotNull(result);
         assertEquals(1, result.size());
         assertEntityMatches(result.getFirst().entity(), entity1);
-        verify(repository).findAll(eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(100).pageNumber(0).pointInTime(pointInTime).build()));
+        verify(repository).findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(100).pageNumber(0).pointInTime(pointInTime).build()));
     }
 
     @Test
@@ -988,7 +998,7 @@ class EntityServiceImplTest {
         );
 
         // totalElements = 2, pageSize = 100, so totalPages = 1 (no more pages)
-        when(repository.findAll(eq(createTestModelSpec()), any()))
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any()))
                 .thenReturn(CompletableFuture.completedFuture(
                         PageResult.of(SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros(), payloads, 0, 100, 2L)
                 ));
@@ -1000,7 +1010,7 @@ class EntityServiceImplTest {
         ).count();
 
         assertEquals(2, count);
-        verify(repository).findAll(eq(createTestModelSpec()), any());
+        verify(repository).findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any());
     }
 
     @Test
@@ -1026,12 +1036,12 @@ class EntityServiceImplTest {
         );
 
         // totalElements = 3, pageSize = 2, so totalPages = 2
-        when(repository.findAll(eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).build())))
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).build())))
                 .thenReturn(CompletableFuture.completedFuture(
                         PageResult.of(searchId, page1Payloads, 0, 2, 3L)
                 ));
 
-        when(repository.findAll(eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(1).searchId(searchId).build())))
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(1).searchId(searchId).build())))
                 .thenReturn(CompletableFuture.completedFuture(
                         PageResult.of(searchId, page2Payloads, 1, 2, 3L)
                 ));
@@ -1074,8 +1084,8 @@ class EntityServiceImplTest {
         long sizeAfterThird = spliterator.estimateSize();
         assertEquals(0, sizeAfterThird, "Size after third element should be 0 remaining");
 
-        verify(repository).findAll(eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(0).build()));
-        verify(repository).findAll(eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(1).searchId(searchId).build()));
+        verify(repository).findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(0).build()));
+        verify(repository).findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(SearchAndRetrievalParams.builder().pageSize(2).pageNumber(1).searchId(searchId).build()));
     }
 
     // ========================================
@@ -1090,7 +1100,7 @@ class EntityServiceImplTest {
                 "VALIDATED", 10L,
                 "ARCHIVED", 2L
         );
-        when(repository.getEntityStatsByState(eq(createTestModelSpec()), isNull()))
+        when(repository.getEntityStatsByState(any(CyodaCallContext.class), eq(createTestModelSpec()), isNull()))
                 .thenReturn(CompletableFuture.completedFuture(expectedStats));
 
         Map<String, Long> result = entityService.getEntityStatsByState(createTestModelSpec());
@@ -1100,7 +1110,7 @@ class EntityServiceImplTest {
         assertEquals(5L, result.get("DRAFT"));
         assertEquals(10L, result.get("VALIDATED"));
         assertEquals(2L, result.get("ARCHIVED"));
-        verify(repository).getEntityStatsByState(eq(createTestModelSpec()), isNull());
+        verify(repository).getEntityStatsByState(any(CyodaCallContext.class), eq(createTestModelSpec()), isNull());
     }
 
     @Test
@@ -1112,7 +1122,7 @@ class EntityServiceImplTest {
                 "DRAFT", 3L,
                 "VALIDATED", 7L
         );
-        when(repository.getEntityStatsByState(eq(createTestModelSpec()), eq(expectedPointInTime)))
+        when(repository.getEntityStatsByState(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(expectedPointInTime)))
                 .thenReturn(CompletableFuture.completedFuture(expectedStats));
 
         Map<String, Long> result = entityService.getEntityStatsByState(createTestModelSpec(), pointInTime);
@@ -1121,7 +1131,7 @@ class EntityServiceImplTest {
         assertEquals(2, result.size());
         assertEquals(3L, result.get("DRAFT"));
         assertEquals(7L, result.get("VALIDATED"));
-        verify(repository).getEntityStatsByState(eq(createTestModelSpec()), eq(expectedPointInTime));
+        verify(repository).getEntityStatsByState(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(expectedPointInTime));
     }
 
     @Test
@@ -1134,7 +1144,7 @@ class EntityServiceImplTest {
                 "DRAFT", 5L,
                 "VALIDATED", 10L
         );
-        when(repository.getEntityStatsByState(eq(createTestModelSpec()), eq(states), eq(expectedPointInTime)))
+        when(repository.getEntityStatsByState(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(states), eq(expectedPointInTime)))
                 .thenReturn(CompletableFuture.completedFuture(expectedStats));
 
         Map<String, Long> result = entityService.getEntityStatsByState(createTestModelSpec(), states, pointInTime);
@@ -1144,21 +1154,21 @@ class EntityServiceImplTest {
         assertEquals(5L, result.get("DRAFT"));
         assertEquals(10L, result.get("VALIDATED"));
         assertNull(result.get("ARCHIVED"));
-        verify(repository).getEntityStatsByState(eq(createTestModelSpec()), eq(states), eq(expectedPointInTime));
+        verify(repository).getEntityStatsByState(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(states), eq(expectedPointInTime));
     }
 
     @Test
     @DisplayName("getEntityStatsByState should return empty map when no entities exist")
     void testGetEntityStatsByStateEmpty() {
         Map<String, Long> emptyStats = Collections.emptyMap();
-        when(repository.getEntityStatsByState(eq(createTestModelSpec()), isNull()))
+        when(repository.getEntityStatsByState(any(CyodaCallContext.class), eq(createTestModelSpec()), isNull()))
                 .thenReturn(CompletableFuture.completedFuture(emptyStats));
 
         Map<String, Long> result = entityService.getEntityStatsByState(createTestModelSpec());
 
         assertNotNull(result);
         assertTrue(result.isEmpty());
-        verify(repository).getEntityStatsByState(eq(createTestModelSpec()), isNull());
+        verify(repository).getEntityStatsByState(any(CyodaCallContext.class), eq(createTestModelSpec()), isNull());
     }
 
     // ========================================
@@ -1170,37 +1180,37 @@ class EntityServiceImplTest {
     @Test
     @DisplayName("getById(OffsetDateTime) passes a nanosecond point in time to the repository unchanged")
     void getByIdOffsetDateTimeReachesRepositoryUnchanged() {
-        when(repository.findById(eq(testEntityId), any()))
+        when(repository.findById(any(CyodaCallContext.class), eq(testEntityId), any()))
                 .thenReturn(CompletableFuture.completedFuture(createTestDataPayload(testEntity, testEntityId)));
 
         entityService.getById(testEntityId, createTestModelSpec(), TestEntity.class, NANO_PIT);
 
-        verify(repository).findById(eq(testEntityId), same(NANO_PIT));
+        verify(repository).findById(any(CyodaCallContext.class), eq(testEntityId), same(NANO_PIT));
     }
 
     @Test
     @DisplayName("getById(Date) still works and converts to a UTC OffsetDateTime")
     void getByIdDateStillConvertsToUtc() {
         Date pointInTime = new Date(1_790_000_000_123L);
-        when(repository.findById(eq(testEntityId), any()))
+        when(repository.findById(any(CyodaCallContext.class), eq(testEntityId), any()))
                 .thenReturn(CompletableFuture.completedFuture(createTestDataPayload(testEntity, testEntityId)));
 
         entityService.getById(testEntityId, createTestModelSpec(), TestEntity.class, pointInTime);
 
-        verify(repository).findById(eq(testEntityId), eq(pointInTime.toInstant().atOffset(ZoneOffset.UTC)));
+        verify(repository).findById(any(CyodaCallContext.class), eq(testEntityId), eq(pointInTime.toInstant().atOffset(ZoneOffset.UTC)));
     }
 
     @Test
     @DisplayName("count, stats and change-history OffsetDateTime overloads pass the point in time unchanged")
     void metadataOffsetDateTimeOverloadsReachRepositoryUnchanged() {
         List<String> states = List.of("DRAFT");
-        when(repository.getEntityCount(eq(createTestModelSpec()), same(NANO_PIT)))
+        when(repository.getEntityCount(any(CyodaCallContext.class), eq(createTestModelSpec()), same(NANO_PIT)))
                 .thenReturn(CompletableFuture.completedFuture(4L));
-        when(repository.getEntityStatsByState(eq(createTestModelSpec()), same(NANO_PIT)))
+        when(repository.getEntityStatsByState(any(CyodaCallContext.class), eq(createTestModelSpec()), same(NANO_PIT)))
                 .thenReturn(CompletableFuture.completedFuture(Map.of("DRAFT", 4L)));
-        when(repository.getEntityStatsByState(eq(createTestModelSpec()), eq(states), same(NANO_PIT)))
+        when(repository.getEntityStatsByState(any(CyodaCallContext.class), eq(createTestModelSpec()), eq(states), same(NANO_PIT)))
                 .thenReturn(CompletableFuture.completedFuture(Map.of("DRAFT", 4L)));
-        when(repository.getEntityChangesMetadata(eq(testEntityId), same(NANO_PIT)))
+        when(repository.getEntityChangesMetadata(any(CyodaCallContext.class), eq(testEntityId), same(NANO_PIT)))
                 .thenReturn(CompletableFuture.completedFuture(List.of()));
 
         assertEquals(4L, entityService.getEntityCount(createTestModelSpec(), NANO_PIT));
@@ -1212,13 +1222,148 @@ class EntityServiceImplTest {
     @Test
     @DisplayName("findByBusinessId(OffsetDateTime) searches at the exact point in time")
     void findByBusinessIdOffsetDateTimeSearchesAtTheExactInstant() {
-        when(repository.findAllByCriteria(eq(createTestModelSpec()), any(), any()))
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(
                         PageResult.of(null, List.of(createTestDataPayload(testEntity, testEntityId)), 0, 1, 1L)));
 
         entityService.findByBusinessId(createTestModelSpec(), "TEST-123", BUSINESS_ID_FIELD, TestEntity.class, NANO_PIT);
 
-        verify(repository).findAllByCriteria(eq(createTestModelSpec()), any(),
+        verify(repository).findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(),
                 argThat(params -> NANO_PIT.equals(params.pointInTime())));
+    }
+
+    // ========================================
+    // CALL CONTEXT (spec §4.2, §4.4, clarification 3)
+    // ========================================
+
+    private static JwtAuthenticationToken userJwt(String value) {
+        Jwt token = Jwt.withTokenValue(value).header("alg", "RS256").subject("u1")
+                .issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(60)).build();
+        return new JwtAuthenticationToken(token);
+    }
+
+    private EntityTransactionResponse stubCreateWithHistory(UUID savedEntityId, OffsetDateTime timeOfChange) {
+        EntityTransactionResponse transactionResponse = createTransactionResponse(savedEntityId);
+        when(repository.save(any(CyodaCallContext.class), eq(createTestModelSpec()), any()))
+                .thenReturn(CompletableFuture.completedFuture(transactionResponse));
+        when(repository.findById(any(CyodaCallContext.class), eq(savedEntityId), any()))
+                .thenReturn(CompletableFuture.completedFuture(createTestDataPayload(testEntity, savedEntityId)));
+        lenient().when(repository.getEntityChangesMetadata(any(CyodaCallContext.class), eq(savedEntityId), isNull()))
+                .thenReturn(CompletableFuture.completedFuture(List.of(
+                        new EntityChangeMeta()
+                                .withTransactionId(transactionResponse.getTransactionInfo().getTransactionId())
+                                .withTimeOfChange(timeOfChange)
+                )));
+        return transactionResponse;
+    }
+
+    @Test
+    @DisplayName("create builds one context and every repository call of the operation carries that same context")
+    void createUsesOneContextForEveryRepositoryCall() {
+        UUID savedEntityId = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
+        stubCreateWithHistory(savedEntityId, OffsetDateTime.parse("2026-09-27T10:11:12.123456789Z"));
+        SecurityContextHolder.getContext().setAuthentication(userJwt("user-jwt"));
+        try {
+            entityService.create(testEntity);
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+
+        ArgumentCaptor<CyodaCallContext> save = ArgumentCaptor.forClass(CyodaCallContext.class);
+        ArgumentCaptor<CyodaCallContext> history = ArgumentCaptor.forClass(CyodaCallContext.class);
+        ArgumentCaptor<CyodaCallContext> reload = ArgumentCaptor.forClass(CyodaCallContext.class);
+        verify(repository).save(save.capture(), eq(createTestModelSpec()), any());
+        verify(repository).getEntityChangesMetadata(history.capture(), eq(savedEntityId), isNull());
+        verify(repository).findById(reload.capture(), eq(savedEntityId), any());
+        assertEquals(CyodaCallContext.forward("user-jwt"), save.getValue());
+        assertSame(save.getValue(), history.getValue());
+        assertSame(save.getValue(), reload.getValue());
+    }
+
+    @Test
+    @DisplayName("inside a callout scope create reloads the joined transaction's latest view, without a point in time")
+    void createInsideACalloutScopeReloadsWithoutPointInTime() {
+        UUID savedEntityId = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
+        stubCreateWithHistory(savedEntityId, OffsetDateTime.parse("2026-09-27T10:11:12.123456789Z"));
+
+        try (CalloutScope ignored = CalloutScope.open("tx-1")) {
+            EntityWithMetadata<TestEntity> result = entityService.create(testEntity);
+            assertEquals(savedEntityId, result.metadata().getId());
+        }
+
+        CyodaCallContext joined = CyodaCallContext.m2m().withTxToken("tx-1");
+        verify(repository).save(eq(joined), eq(createTestModelSpec()), any());
+        verify(repository).findById(eq(joined), eq(savedEntityId), isNull());
+        verify(repository, never()).getEntityChangesMetadata(any(CyodaCallContext.class), any(UUID.class), any());
+    }
+
+    @Test
+    @DisplayName("inside a callout scope update reloads the joined transaction's latest view, without a point in time")
+    void updateInsideACalloutScopeReloadsWithoutPointInTime() {
+        when(repository.update(any(CyodaCallContext.class), eq(testEntityId), any(), isNull()))
+                .thenReturn(CompletableFuture.completedFuture(createTransactionResponse(testEntityId)));
+        when(repository.findById(any(CyodaCallContext.class), eq(testEntityId), any()))
+                .thenReturn(CompletableFuture.completedFuture(createTestDataPayload(testEntity, testEntityId)));
+
+        try (CalloutScope ignored = CalloutScope.open("tx-1")) {
+            entityService.update(testEntityId, testEntity, null);
+        }
+
+        CyodaCallContext joined = CyodaCallContext.m2m().withTxToken("tx-1");
+        verify(repository).update(eq(joined), eq(testEntityId), any(), isNull());
+        verify(repository).findById(eq(joined), eq(testEntityId), isNull());
+        verify(repository, never()).getEntityChangesMetadata(any(CyodaCallContext.class), any(UUID.class), any());
+    }
+
+    @Test
+    @DisplayName("inside a callout scope save(Collection) reloads each entity without a point in time")
+    void saveInsideACalloutScopeReloadsWithoutPointInTime() {
+        when(repository.saveAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any(), isNull(), isNull()))
+                .thenReturn(CompletableFuture.completedFuture(List.of(createTransactionResponse(testEntityId))));
+        when(repository.findById(any(CyodaCallContext.class), eq(testEntityId), any()))
+                .thenReturn(CompletableFuture.completedFuture(createTestDataPayload(testEntity, testEntityId)));
+
+        try (CalloutScope ignored = CalloutScope.open("tx-1")) {
+            assertEquals(1, entityService.save(List.of(testEntity)).size());
+        }
+
+        verify(repository).findById(eq(CyodaCallContext.m2m().withTxToken("tx-1")), eq(testEntityId), isNull());
+        verify(repository, never()).getEntityChangesMetadata(any(CyodaCallContext.class), any(UUID.class), any());
+    }
+
+    @Test
+    @DisplayName("later pages of streamAll use the context of the call, not whatever the consuming thread holds")
+    void streamAllPagesKeepTheContextOfTheCall() {
+        UUID searchId = UUID.randomUUID();
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                                PageResult.of(searchId, List.of(createTestDataPayload(testEntity, testEntityId)), 0, 1, 2L)),
+                        CompletableFuture.completedFuture(
+                                PageResult.of(searchId, List.of(createTestDataPayload(testEntity2, testEntityId2)), 1, 1, 2L)));
+
+        Stream<EntityWithMetadata<TestEntity>> stream;
+        SecurityContextHolder.getContext().setAuthentication(userJwt("user-jwt"));
+        try {
+            stream = entityService.streamAll(createTestModelSpec(), TestEntity.class,
+                    SearchAndRetrievalParams.builder().pageSize(1).build());
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+        assertEquals(2, stream.toList().size());
+
+        ArgumentCaptor<CyodaCallContext> contexts = ArgumentCaptor.forClass(CyodaCallContext.class);
+        verify(repository, times(2)).findAll(contexts.capture(), eq(createTestModelSpec()), any());
+        assertEquals(List.of(CyodaCallContext.forward("user-jwt"), CyodaCallContext.forward("user-jwt")), contexts.getAllValues());
+    }
+
+    @Test
+    @DisplayName("findByBusinessIdOrNull does not swallow a callout that has already answered")
+    void findByBusinessIdOrNullDoesNotHideAnEndedCallout() {
+        try (CalloutScope scope = CalloutScope.open("tx-1")) {
+            scope.end();
+            assertThrows(CyodaCalloutEndedException.class, () -> entityService.findByBusinessIdOrNull(
+                    createTestModelSpec(), "TEST-123", BUSINESS_ID_FIELD, TestEntity.class));
+        }
+        verifyNoInteractions(repository);
     }
 }
