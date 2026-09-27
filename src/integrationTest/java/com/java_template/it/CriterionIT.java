@@ -7,6 +7,7 @@ import com.java_template.common.grpc.client.monitoring.ConnectionStateTracker;
 import com.java_template.common.service.EntityService;
 import com.java_template.it.support.ItThing;
 import com.java_template.testing.cyoda.*;
+import org.cyoda.cloud.api.event.common.ModelSpec;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
@@ -28,12 +29,14 @@ class CriterionIT {
     @Autowired ObjectMapper objectMapper;
 
     private String model;
+    private ModelSpec spec;
     private CyodaRest rest;
 
     @BeforeAll
     void createModel() {
         CyodaAwait.memberReady(tracker, Duration.ofSeconds(20));
         model = "crit_it_" + UUID.randomUUID().toString().substring(0, 8);
+        spec = new ModelSpec().withName(model).withVersion(1);
         rest = CyodaTestEnvironment.rest(Profile.mockMemory());
         CyodaModelSetup.createModel(rest, model, 1, ItThing.sampleData(),
                 WorkflowTemplating.load("/it-workflows/thing-workflow.json", config.getGrpcProcessorTag()));
@@ -57,6 +60,11 @@ class CriterionIT {
 
         assertThat(r.status()).isEqualTo(400);
         assertThat(r.raw()).contains("WORKFLOW_FAILED").contains("amount below 10");
+
+        EntityWithMetadata<ItThing> read = entityService.getById(created.getId(), spec, ItThing.class);
+        assertThat(read.getState()).isEqualTo("new");
+        assertThat(read.entity().getAmount()).isEqualTo(5);
+        assertThat(read.entity().getNote()).isEmpty();
     }
 
     @Test
@@ -66,5 +74,10 @@ class CriterionIT {
         assertThatThrownBy(() -> entityService.update(created.getId(), created.entity().in(model), "approve"))
                 .hasStackTraceContaining("WORKFLOW_FAILED")
                 .hasStackTraceContaining("amount below 10");
+
+        EntityWithMetadata<ItThing> read = entityService.getById(created.getId(), spec, ItThing.class);
+        assertThat(read.getState()).isEqualTo("new");
+        assertThat(read.entity().getAmount()).isEqualTo(5);
+        assertThat(read.entity().getNote()).isEmpty();
     }
 }

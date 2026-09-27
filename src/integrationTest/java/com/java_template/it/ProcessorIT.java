@@ -4,6 +4,7 @@ import com.java_template.common.config.Config;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.grpc.client.monitoring.ConnectionStateTracker;
 import com.java_template.common.service.EntityService;
+import com.java_template.it.support.ItRecordingProcessor;
 import com.java_template.it.support.ItThing;
 import com.java_template.testing.cyoda.*;
 import org.cyoda.cloud.api.event.common.ModelSpec;
@@ -25,6 +26,7 @@ class ProcessorIT {
     @Autowired EntityService entityService;
     @Autowired Config config;
     @Autowired ConnectionStateTracker tracker;
+    @Autowired ItRecordingProcessor recorder;
 
     private String model;
     private ModelSpec spec;
@@ -47,6 +49,7 @@ class ProcessorIT {
         EntityWithMetadata<ItThing> read = entityService.getById(created.getId(), spec, ItThing.class);
         assertThat(read.getState()).isEqualTo("processed");
         assertThat(read.entity().getNote()).isEqualTo("processed");
+        assertThat(recorder.hasProcessed(created.getId())).isTrue();
     }
 
     @Test
