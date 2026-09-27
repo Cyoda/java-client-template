@@ -1,6 +1,7 @@
 package com.java_template.common.controller;
 
 import com.java_template.common.exception.CyodaCredentialException;
+import com.java_template.common.exception.CyodaHttpException;
 import io.grpc.Status;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -14,8 +15,8 @@ import java.util.concurrent.CompletionException;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * ABOUTME: A refused call for a logged-in user, or Cyoda rejecting the service's credentials, is a server-side
- * limitation (500), not the client's fault; request errors keep the caller's status (400).
+ * ABOUTME: A credential that cannot be determined or obtained, or Cyoda rejecting one (gRPC UNAUTHENTICATED,
+ * REST 401), is a server-side fault (500), not the client's; request errors keep the caller's status (400).
  */
 class ErrorResponsesTest {
 
@@ -26,9 +27,9 @@ class ErrorResponsesTest {
     }
 
     @Test
-    void aRefusedLoggedInCallIs500() {
+    void aCredentialFailureIs500() {
         ResponseEntity<Object> response = failure(new CompletionException(
-                new CyodaCredentialException("the M2M token is refused for alice (internal detail)")));
+                new CyodaCredentialException("principal of type alice (internal detail) cannot be forwarded")));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
         ProblemDetail body = (ProblemDetail) response.getBody();
@@ -45,9 +46,19 @@ class ErrorResponsesTest {
     }
 
     @Test
+    void anUpstreamRest401Is500() {
+        ResponseEntity<Object> response = failure(new CompletionException(
+                new CyodaHttpException(401, "UNAUTHORIZED", "token rejected", false)));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    @Test
     void aRequestErrorKeepsTheGivenStatus() {
         assertThat(failure(new IllegalArgumentException("bad field")).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(failure(new CompletionException(Status.INVALID_ARGUMENT.asRuntimeException())).getStatusCode())
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(failure(new CyodaHttpException(404, "HTTP_404", "not found", false)).getStatusCode())
                 .isEqualTo(HttpStatus.BAD_REQUEST);
     }
 }

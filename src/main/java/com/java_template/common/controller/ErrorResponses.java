@@ -1,6 +1,7 @@
 package com.java_template.common.controller;
 
 import com.java_template.common.exception.CyodaCredentialException;
+import com.java_template.common.exception.CyodaHttpException;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import org.slf4j.Logger;
@@ -17,9 +18,10 @@ import java.util.UUID;
  * exception under that id.
  * <p>
  * The status is the caller's (e.g. 400 for a request the operation could not carry out), except for a call
- * refused because a logged-in user is on the thread ({@link CyodaCredentialException}) or rejected by Cyoda as
- * {@code UNAUTHENTICATED}: those are the service's own configuration limits, not the client's fault, so they
- * answer 500.
+ * whose credential could not be determined or obtained ({@link CyodaCredentialException}) or that Cyoda rejected
+ * as unauthenticated (gRPC {@code UNAUTHENTICATED}, REST 401): the caller's own request was already authenticated
+ * by this service, so those are the service's own configuration faults (token endpoint, IdP federation), not the
+ * client's, and they answer 500.
  */
 public final class ErrorResponses {
 
@@ -52,13 +54,16 @@ public final class ErrorResponses {
         return ResponseEntity.of(problem(logger, status, publicMessage, cause)).build();
     }
 
-    /** A refused logged-in call, or Cyoda rejecting the service's credentials, anywhere in the cause chain. */
+    /** A credential that could not be determined or obtained, or Cyoda rejecting one, anywhere in the cause chain. */
     static boolean isServerSideCredentialFailure(Throwable cause) {
         for (Throwable t = cause; t != null; t = t.getCause()) {
             if (t instanceof CyodaCredentialException) {
                 return true;
             }
             if (t instanceof StatusRuntimeException sre && sre.getStatus().getCode() == Status.Code.UNAUTHENTICATED) {
+                return true;
+            }
+            if (t instanceof CyodaHttpException che && che.status() == 401) {
                 return true;
             }
         }

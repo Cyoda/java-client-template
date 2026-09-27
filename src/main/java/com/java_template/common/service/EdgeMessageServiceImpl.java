@@ -5,7 +5,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.java_template.common.auth.CyodaTokenSource;
+import com.java_template.common.call.CyodaCallContext;
+import com.java_template.common.call.CyodaCallContexts;
 import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.util.HttpUtils;
@@ -28,18 +29,18 @@ public class EdgeMessageServiceImpl implements EdgeMessageService {
     private static final Logger logger = LoggerFactory.getLogger(EdgeMessageServiceImpl.class);
 
     private final HttpUtils httpUtils;
-    private final CyodaTokenSource tokenSource;
+    private final CyodaCallContexts callContexts;
     private final ObjectMapper objectMapper;
     private final String cyodaApiUrl;
 
     public EdgeMessageServiceImpl(
             HttpUtils httpUtils,
-            CyodaTokenSource tokenSource,
+            CyodaCallContexts callContexts,
             CyodaObjectMapper wireMapper,
             Config configProperties
     ) {
         this.httpUtils = httpUtils;
-        this.tokenSource = tokenSource;
+        this.callContexts = callContexts;
         this.objectMapper = wireMapper.mapper();
         this.cyodaApiUrl = configProperties.getCyodaApiUrl();
     }
@@ -49,15 +50,14 @@ public class EdgeMessageServiceImpl implements EdgeMessageService {
     public JsonNode getMessageById(@NotNull UUID messageId) {
         logger.debug("Retrieving EdgeMessage with ID: {}", messageId);
 
-        // Get OAuth2 access token
-        String token = tokenSource.bearerToken().orElse(null);
+        CyodaCallContext ctx = callContexts.current();
 
         // Construct API path: message/get/{messageId}
         String path = String.format("message/%s", messageId);
         logger.debug("Using EdgeMessage endpoint: {}", path);
 
         // Make HTTP GET request to Cyoda API
-        ObjectNode response = httpUtils.sendGetRequest(token, cyodaApiUrl, path).join();
+        ObjectNode response = httpUtils.sendGetRequest(ctx, cyodaApiUrl, path).join();
         int statusCode = response.get("status").asInt();
 
         if (statusCode == 200) {
@@ -136,8 +136,7 @@ public class EdgeMessageServiceImpl implements EdgeMessageService {
         logger.debug("Creating EdgeMessage with subject: {}", subject);
 
         try {
-            // Get OAuth2 access token
-            String token = tokenSource.bearerToken().orElse(null);
+            CyodaCallContext ctx = callContexts.current();
 
             // Construct API path: message/new/{subject}
             String path = String.format("message/new/%s", subject);
@@ -155,7 +154,7 @@ public class EdgeMessageServiceImpl implements EdgeMessageService {
 
             // Make HTTP POST request to Cyoda API
             // The API expects Content-Type and Content-Length headers which are set by httpUtils
-            ObjectNode response = httpUtils.sendPostRequest(token, cyodaApiUrl, path, requestBody).join();
+            ObjectNode response = httpUtils.sendPostRequest(ctx, cyodaApiUrl, path, requestBody).join();
             int statusCode = response.get("status").asInt();
 
             if (statusCode == 200 || statusCode == 201) {
@@ -195,15 +194,14 @@ public class EdgeMessageServiceImpl implements EdgeMessageService {
         logger.debug("Deleting EdgeMessage with ID: {}", messageId);
 
         try {
-            // Get OAuth2 access token
-            String token = tokenSource.bearerToken().orElse(null);
+            CyodaCallContext ctx = callContexts.current();
 
             // Construct API path: message/{messageId}
             String path = String.format("message/%s", messageId);
             logger.debug("Using EdgeMessage deletion endpoint: {}", path);
 
             // Make HTTP DELETE request to Cyoda API
-            ObjectNode response = httpUtils.sendDeleteRequest(token, cyodaApiUrl, path).join();
+            ObjectNode response = httpUtils.sendDeleteRequest(ctx, cyodaApiUrl, path).join();
             int statusCode = response.get("status").asInt();
 
             if (statusCode == 200 || statusCode == 204) {

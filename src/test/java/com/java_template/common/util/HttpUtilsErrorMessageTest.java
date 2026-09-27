@@ -1,5 +1,7 @@
 package com.java_template.common.util;
 
+import com.java_template.common.auth.CyodaTokenSource;
+import com.java_template.common.call.CyodaCallContext;
 import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.exception.CyodaHttpException;
@@ -15,6 +17,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 /** The status, error code and message of the CyodaHttpException HttpUtils throws for a failed response. */
 class HttpUtilsErrorMessageTest {
@@ -38,7 +41,7 @@ class HttpUtilsErrorMessageTest {
         server.start();
         baseUrl = "http://127.0.0.1:" + server.getAddress().getPort() + "/api";
         CyodaObjectMapper mapper = CyodaObjectMapper.standalone();
-        httpUtils = new HttpUtils(new JsonUtils(mapper), mapper, new Config());
+        httpUtils = new HttpUtils(new JsonUtils(mapper), mapper, new Config(), mock(CyodaTokenSource.class));
     }
 
     @AfterEach
@@ -52,7 +55,7 @@ class HttpUtilsErrorMessageTest {
                 + "\"detail\":\"cannot unlock: 1 entities exist\","
                 + "\"properties\":{\"errorCode\":\"MODEL_HAS_ENTITIES\",\"entityCount\":1}}");
 
-        assertThatThrownBy(() -> httpUtils.sendPutRequest(null, baseUrl, "model/X/1/unlock", null).join())
+        assertThatThrownBy(() -> httpUtils.sendPutRequest(CyodaCallContext.none(), baseUrl, "model/X/1/unlock", null).join())
                 .isInstanceOf(CompletionException.class)
                 .cause()
                 .isInstanceOf(CyodaHttpException.class)
@@ -68,7 +71,7 @@ class HttpUtilsErrorMessageTest {
     void withoutAnErrorCodeTheDetailIsTheMessage() {
         body.set("{\"status\":409,\"detail\":\"some conflict\"}");
 
-        assertThatThrownBy(() -> httpUtils.sendGetRequest(null, baseUrl, "x").join())
+        assertThatThrownBy(() -> httpUtils.sendGetRequest(CyodaCallContext.none(), baseUrl, "x").join())
                 .cause()
                 .isInstanceOf(CyodaHttpException.class)
                 .satisfies(e -> {
