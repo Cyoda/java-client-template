@@ -87,7 +87,7 @@ sourceSets {
             srcDirs += "src/main/kotlin"
         }
         proto {
-            srcDir 'src/main/resources/proto'
+            srcDir layout.buildDirectory.dir('cyoda-proto/main')
         }
     }
     test {
@@ -123,6 +123,11 @@ dependencies {
     implementation 'io.cloudevents:cloudevents-protobuf:4.0.1'
     implementation 'io.cloudevents:cloudevents-json-jackson:4.0.1'
     implementation 'io.cloudevents:cloudevents-spring:4.0.1'
+
+    // cloudevents.proto is import-only; io.cloudevents.v1.proto.CloudEvent comes from cloudevents-protobuf (spec §3.3.1)
+    compileProtoPath files(layout.buildDirectory.dir('cyoda-proto/include')) {
+        builtBy 'prepareCyodaProto'
+    }
 
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.19.1'
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
@@ -185,23 +190,33 @@ jsonSchema2Pojo {
     includeAllPropertiesConstructor = true
 }
 
+tasks.register('prepareCyodaProto', com.cyoda.build.PrepareCyodaProtoTask) {
+    sourceDir = file('src/main/resources/cyoda/proto')
+    outputDir = layout.buildDirectory.dir('cyoda-proto')
+}
+
 protobuf {
     protoc {
-        artifact = 'com.google.protobuf:protoc:3.25.1'
+        artifact = 'com.google.protobuf:protoc:4.31.1'
     }
-
     plugins {
         grpc {
-            artifact = 'io.grpc:protoc-gen-grpc-java:1.62.2'
+            artifact = 'io.grpc:protoc-gen-grpc-java:1.73.0'
         }
     }
-
     generateProtoTasks {
-        all()*.plugins {
-            grpc {}
+        all().configureEach { task ->
+            task.dependsOn 'prepareCyodaProto'
+            task.plugins { grpc {} }
         }
     }
 }
+
+tasks.matching { it.name == 'extractIncludeProto' }.configureEach { dependsOn 'prepareCyodaProto' }
+
+// The protobuf plugin folds sourceSets.main.proto into main resources (so raw .proto files are
+// packaged), which makes processResources an implicit consumer of prepareCyodaProto's output.
+tasks.named('processResources') { dependsOn 'prepareCyodaProto' }
 
 // OpenAPI Generator tasks for generating Java models from OpenAPI YAML files
 // Package structure matches Cyoda client library: org.cyoda.cloud.api.*.model with Dto suffix
