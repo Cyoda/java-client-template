@@ -47,6 +47,12 @@ jobs:
           # cannot resolve.
           ref: ${{ inputs.branch }}
 
+      - name: Artifact name suffix
+        # upload-artifact rejects '/' in names; branch names and PR refs ("<n>/merge") contain it.
+        run: |
+          suffix="${BRANCH//\//-}"
+          echo "ARTIFACT_SUFFIX=$suffix" >> "$GITHUB_ENV"
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -127,7 +133,7 @@ jobs:
         if: ${{ env.BUILD_TYPE == 'standard' || env.BUILD_TYPE == 'both' }}
         uses: actions/upload-artifact@v4
         with:
-          name: standard-jar-${{ env.BRANCH }}
+          name: standard-jar-${{ env.ARTIFACT_SUFFIX }}
           path: build/libs/app.jar
           retention-days: 30
 
@@ -135,7 +141,7 @@ jobs:
         if: ${{ env.BUILD_TYPE == 'workflow-import' || env.BUILD_TYPE == 'both' }}
         uses: actions/upload-artifact@v4
         with:
-          name: workflow-import-jar-${{ env.BRANCH }}
+          name: workflow-import-jar-${{ env.ARTIFACT_SUFFIX }}
           path: build/libs/*-workflow-import.jar
           retention-days: 30
 
@@ -143,7 +149,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-results-${{ env.BRANCH }}
+          name: test-results-${{ env.ARTIFACT_SUFFIX }}
           path: |
             build/test-results/test/
             build/test-results/integrationTest/
@@ -153,7 +159,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-reports-${{ env.BRANCH }}
+          name: test-reports-${{ env.ARTIFACT_SUFFIX }}
           path: |
             build/reports/tests/test/
             build/reports/tests/integrationTest/
