@@ -1,6 +1,6 @@
 package com.java_template.common.config;
 
-import com.java_template.common.auth.Authentication;
+import com.java_template.common.auth.CyodaTokenSource;
 import com.java_template.common.grpc.client.ClientAuthorizationInterceptor;
 import com.java_template.common.observability.GrpcObservabilityInterceptor;
 import com.java_template.common.grpc.client.CalculationExecutionStrategy;
@@ -55,7 +55,7 @@ public class GrpcClientAutoConfiguration {
         final ManagedChannel channel = SslUtils.createGrpcChannelBuilder(
                 config.getGrpcAddress(),
                 config.getGrpcServerPort(),
-                config.isSkipSsl(),
+                !config.isGrpcTls(),
                 config
         ).build();
 
@@ -72,11 +72,11 @@ public class GrpcClientAutoConfiguration {
 
     @Bean
     public CloudEventsServiceGrpc.CloudEventsServiceStub cloudEventsServiceStub(
-            final Authentication authentication,
+            final CyodaTokenSource tokenSource,
             final ManagedChannel managedChannel,
             @Nullable final GrpcObservabilityInterceptor observabilityInterceptor
     ) {
-        final var authInterceptor = new ClientAuthorizationInterceptor(authentication);
+        final var authInterceptor = new ClientAuthorizationInterceptor(tokenSource);
         var stub = CloudEventsServiceGrpc.newStub(managedChannel)
                 .withWaitForReady()
                 .withInterceptors(authInterceptor);
@@ -88,11 +88,11 @@ public class GrpcClientAutoConfiguration {
 
     @Bean
     public CloudEventsServiceGrpc.CloudEventsServiceBlockingStub cloudEventsServiceBlockingStub(
-            final Authentication authentication,
+            final CyodaTokenSource tokenSource,
             final ManagedChannel managedChannel,
             @Nullable final GrpcObservabilityInterceptor observabilityInterceptor
     ) {
-        final var authInterceptor = new ClientAuthorizationInterceptor(authentication);
+        final var authInterceptor = new ClientAuthorizationInterceptor(tokenSource);
         var stub = CloudEventsServiceGrpc.newBlockingStub(managedChannel)
                 .withWaitForReady()
                 .withInterceptors(authInterceptor);
@@ -104,11 +104,11 @@ public class GrpcClientAutoConfiguration {
 
     @Bean
     public CloudEventsServiceGrpc.CloudEventsServiceFutureStub cloudEventsServiceFutureStub(
-            final Authentication authentication,
+            final CyodaTokenSource tokenSource,
             final ManagedChannel managedChannel,
             @Nullable final GrpcObservabilityInterceptor observabilityInterceptor
     ) {
-        final var authInterceptor = new ClientAuthorizationInterceptor(authentication);
+        final var authInterceptor = new ClientAuthorizationInterceptor(tokenSource);
         var stub = CloudEventsServiceGrpc.newFutureStub(managedChannel)
                 .withWaitForReady()
                 .withInterceptors(authInterceptor);
@@ -121,44 +121,6 @@ public class GrpcClientAutoConfiguration {
     @Bean
     public EventFormat eventFormat() {
         return EventFormatProvider.getInstance().resolveFormat(ProtobufFormat.PROTO_CONTENT_TYPE);
-    }
-
-    // Separate thread pool executors for different event types
-
-    @Bean
-    @ConditionalOnProperty(name = "execution.mode", havingValue = "platform", matchIfMissing = true)
-    public CalculationExecutionStrategy processorThreadExecutor() {
-        return new ProcessorThreadExecutor(false, config.getProcessorThreadPool());
-    }
-
-    @Bean
-    @ConditionalOnProperty(name = "execution.mode", havingValue = "virtual")
-    public CalculationExecutionStrategy processorThreadExecutorVirtual() {
-        return new ProcessorThreadExecutor(true, config.getProcessorThreadPool());
-    }
-
-    @Bean
-    @ConditionalOnProperty(name = "execution.mode", havingValue = "platform", matchIfMissing = true)
-    public CalculationExecutionStrategy criteriaThreadExecutor() {
-        return new CriteriaThreadExecutor(false, config.getCriteriaThreadPool());
-    }
-
-    @Bean
-    @ConditionalOnProperty(name = "execution.mode", havingValue = "virtual")
-    public CalculationExecutionStrategy criteriaThreadExecutorVirtual() {
-        return new CriteriaThreadExecutor(true, config.getCriteriaThreadPool());
-    }
-
-    @Bean
-    @ConditionalOnProperty(name = "execution.mode", havingValue = "platform", matchIfMissing = true)
-    public CalculationExecutionStrategy controlThreadExecutor() {
-        return new ControlThreadExecutor(false, config.getControlThreadPool());
-    }
-
-    @Bean
-    @ConditionalOnProperty(name = "execution.mode", havingValue = "virtual")
-    public CalculationExecutionStrategy controlThreadExecutorVirtual() {
-        return new ControlThreadExecutor(true, config.getControlThreadPool());
     }
 
     @Bean

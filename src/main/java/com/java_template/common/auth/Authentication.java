@@ -4,6 +4,7 @@ import com.java_template.common.config.Config;
 import com.java_template.common.util.SslUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.http.converter.FormHttpMessageConverter;
 import org.springframework.security.oauth2.client.*;
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -28,7 +30,8 @@ import java.util.concurrent.ConcurrentMap;
  * for secure communication with Cyoda platform services.
  */
 @Service
-public class Authentication {
+@ConditionalOnProperty(name = "app.config.auth-mode", havingValue = "client-credentials", matchIfMissing = true)
+public class Authentication implements CyodaTokenSource {
 
     private static final Logger logger = LoggerFactory.getLogger(Authentication.class);
 
@@ -40,6 +43,11 @@ public class Authentication {
 
     public Authentication(Config config) {
         this.config = config;
+
+        if (isBlank(config.getCyodaClientId()) || isBlank(config.getCyodaClientSecret())) {
+            throw new IllegalStateException("app.config.cyoda-client-id and app.config.cyoda-client-secret must be set "
+                    + "when app.config.auth-mode=client-credentials (use auth-mode=none for cyoda-go mock IAM)");
+        }
 
         ClientRegistration registration = ClientRegistration.withRegistrationId("cyoda")
                 .tokenUri(config.getCyodaApiUrl() + "/oauth/token")
@@ -120,6 +128,20 @@ public class Authentication {
     public void invalidateTokens() {
         tokenCache.remove(CACHE_KEY);
         logger.info("Manually invalidated cached token");
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
+    }
+
+    @Override
+    public Optional<String> bearerToken() {
+        return Optional.of(getAccessToken().getTokenValue());
+    }
+
+    @Override
+    public void invalidate() {
+        invalidateTokens();
     }
 
     /**

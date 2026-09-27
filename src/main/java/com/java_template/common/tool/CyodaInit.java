@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
-import com.java_template.common.auth.Authentication;
+import com.java_template.common.auth.CyodaTokenSource;
 import com.java_template.common.config.Config;
 import com.java_template.common.util.HttpUtils;
 import com.java_template.common.workflow.CyodaEntity;
@@ -52,13 +52,13 @@ public class CyodaInit {
     public static final int THREAD_POOL_SIZE = 20;
 
     private final HttpUtils httpUtils;
-    private final Authentication authentication;
+    private final CyodaTokenSource tokenSource;
     private final ObjectMapper objectMapper;
     private final Config config;
 
-    public CyodaInit(HttpUtils httpUtils, Authentication authentication, ObjectMapper objectMapper, Config config) {
+    public CyodaInit(HttpUtils httpUtils, CyodaTokenSource tokenSource, ObjectMapper objectMapper, Config config) {
         this.httpUtils = httpUtils;
-        this.authentication = authentication;
+        this.tokenSource = tokenSource;
         this.objectMapper = objectMapper;
         this.config = config;
     }
@@ -69,7 +69,7 @@ public class CyodaInit {
             logger.info("⚠️  Recreate models flag is enabled - existing models will be deleted and recreated");
         }
 
-        String token = authentication.getAccessToken().getTokenValue();
+        String token = tokenSource.bearerToken().orElse(null);
         initEntitiesSchemaFromEntities(token, config);
         logger.info("✅ Workflow import process completed.");
     }

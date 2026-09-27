@@ -37,6 +37,8 @@ gradle-app.setting
 .sandbox/
 
 application-*.yml
+# Except the template's own local-profile default, which ships as part of the repo.
+!src/main/resources/application-local.yml
 
 # Python version manager
 .python-version

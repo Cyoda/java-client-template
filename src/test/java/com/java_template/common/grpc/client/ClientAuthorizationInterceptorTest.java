@@ -1,6 +1,6 @@
 package com.java_template.common.grpc.client;
 
-import com.java_template.common.auth.Authentication;
+import com.java_template.common.auth.CyodaTokenSource;
 import io.grpc.CallOptions;
 import io.grpc.Channel;
 import io.grpc.ClientCall;
@@ -10,9 +10,6 @@ import io.grpc.Status;
 import org.cyoda.cloud.api.grpc.CloudEventsServiceGrpc;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.security.oauth2.core.OAuth2AccessToken;
-
-import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -29,14 +26,13 @@ class ClientAuthorizationInterceptorTest {
     @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
     void addsTheM2mBearerToken() {
-        Authentication auth = mock(Authentication.class);
-        when(auth.getAccessToken()).thenReturn(new OAuth2AccessToken(
-                OAuth2AccessToken.TokenType.BEARER, "tok", Instant.now(), Instant.now().plusSeconds(600)));
+        CyodaTokenSource source = mock(CyodaTokenSource.class);
+        when(source.bearerToken()).thenReturn(java.util.Optional.of("tok"));
         ClientCall<Object, Object> delegate = mock(ClientCall.class);
         Channel channel = mock(Channel.class);
         when(channel.newCall(any(), any())).thenReturn((ClientCall) delegate);
 
-        ClientCall<Object, Object> call = new ClientAuthorizationInterceptor(auth).interceptCall(method, CallOptions.DEFAULT, channel);
+        ClientCall<Object, Object> call = new ClientAuthorizationInterceptor(source).interceptCall(method, CallOptions.DEFAULT, channel);
         Metadata headers = new Metadata();
         call.start(mock(ClientCall.Listener.class), headers);
 
@@ -47,19 +43,36 @@ class ClientAuthorizationInterceptorTest {
     @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
     void cancelsTheCallWhenNoTokenCanBeObtained() {
-        Authentication auth = mock(Authentication.class);
-        when(auth.getAccessToken()).thenThrow(new IllegalStateException("token endpoint down"));
+        CyodaTokenSource source = mock(CyodaTokenSource.class);
+        when(source.bearerToken()).thenThrow(new IllegalStateException("token endpoint down"));
         ClientCall<Object, Object> delegate = mock(ClientCall.class);
         Channel channel = mock(Channel.class);
         when(channel.newCall(any(), any())).thenReturn((ClientCall) delegate);
         ClientCall.Listener<Object> listener = mock(ClientCall.Listener.class);
 
-        new ClientAuthorizationInterceptor(auth).interceptCall(method, CallOptions.DEFAULT, channel)
+        new ClientAuthorizationInterceptor(source).interceptCall(method, CallOptions.DEFAULT, channel)
                 .start(listener, new Metadata());
 
         ArgumentCaptor<Status> status = ArgumentCaptor.forClass(Status.class);
         verify(listener).onClose(status.capture(), any());
         assertThat(status.getValue().getCode()).isEqualTo(Status.Code.UNAUTHENTICATED);
         verify(delegate, never()).start(any(), any());
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void sendsNoHeaderInAuthModeNone() {
+        CyodaTokenSource source = mock(CyodaTokenSource.class);
+        when(source.bearerToken()).thenReturn(java.util.Optional.empty());
+        ClientCall<Object, Object> delegate = mock(ClientCall.class);
+        Channel channel = mock(Channel.class);
+        when(channel.newCall(any(), any())).thenReturn((ClientCall) delegate);
+        Metadata headers = new Metadata();
+
+        new ClientAuthorizationInterceptor(source).interceptCall(method, CallOptions.DEFAULT, channel)
+                .start(mock(ClientCall.Listener.class), headers);
+
+        assertThat(headers.get(AUTH)).isNull();
+        verify(delegate).start(any(), same(headers));
     }
 }

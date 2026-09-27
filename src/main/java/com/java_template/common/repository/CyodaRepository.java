@@ -113,6 +113,10 @@ public class CyodaRepository implements CrudRepository {
                 });
     }
 
+    private CloudEventsServiceGrpc.CloudEventsServiceBlockingStub blocking() {
+        return cloudEventsServiceBlockingStub.withDeadlineAfter(config.getGrpcCallDeadlineMs(), TimeUnit.MILLISECONDS);
+    }
+
     @Override
     public CompletableFuture<DataPayload> findById(@NotNull final UUID id) {
         return getById(id, null);
@@ -125,7 +129,7 @@ public class CyodaRepository implements CrudRepository {
 
     private CompletableFuture<DataPayload> getById(final UUID entityId, @Nullable final Date pointInTime) {
         return sendAndGet(
-                cloudEventsServiceBlockingStub::entitySearch,
+                req -> blocking().entitySearch(req),
                 new EntityGetRequest().withId(UUID.randomUUID().toString())
                         .withEntityId(entityId)
                         .withPointInTime(pointInTime),
@@ -225,7 +229,7 @@ public class CyodaRepository implements CrudRepository {
             @Nullable final Date pointInTime
     ) {
         return sendAndGetCollection(
-                cloudEventsServiceBlockingStub::entitySearchCollection,
+                req -> blocking().entitySearchCollection(req),
                 new EntitySearchRequest().withId(generateEventId())
                         .withModel(modelSpec)
                         .withLimit(pageSize)
@@ -286,7 +290,7 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final String transitionName
     ) {
         return sendAndGet(
-                cloudEventsServiceBlockingStub::entityManage,
+                req -> blocking().entityManage(req),
                 new EntityTransitionRequest().withId(generateEventId())
                         .withEntityId(entityId)
                         .withTransition(transitionName),
@@ -301,7 +305,7 @@ public class CyodaRepository implements CrudRepository {
             @Nullable final String transition
     ) {
         return sendAndGet(
-                cloudEventsServiceBlockingStub::entityManage,
+                req -> blocking().entityManage(req),
                 new EntityUpdateRequest().withId(generateEventId())
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
                         .withPayload(
@@ -338,7 +342,7 @@ public class CyodaRepository implements CrudRepository {
                 );
 
         return sendAndGetCollection(
-                cloudEventsServiceBlockingStub::entityManageCollection,
+                req -> blocking().entityManageCollection(req),
                 new EntityUpdateCollectionRequest().withId(generateEventId())
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
                         .withTransactionWindow(transactionWindow)
@@ -443,7 +447,7 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final PAYLOAD_TYPE entities
     ) {
         return sendAndGet(
-                cloudEventsServiceBlockingStub::entityManage,
+                req -> blocking().entityManage(req),
                 new EntityCreateRequest().withId(generateEventId())
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
                         .withPayload(new EntityCreatePayload().withData(objectMapper.valueToTree(entities))
@@ -471,7 +475,7 @@ public class CyodaRepository implements CrudRepository {
                 .toList();
 
         return sendAndGetCollection(
-                cloudEventsServiceBlockingStub::entityManageCollection,
+                req -> blocking().entityManageCollection(req),
                 new EntityCreateCollectionRequest().withId(generateEventId())
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
                         .withTransactionWindow(transactionWindow)
@@ -483,7 +487,7 @@ public class CyodaRepository implements CrudRepository {
 
     private CompletableFuture<EntityDeleteResponse> deleteEntity(@NotNull final UUID id) {
         return sendAndGet(
-                cloudEventsServiceBlockingStub::entityManage,
+                req -> blocking().entityManage(req),
                 new EntityDeleteRequest().withId(generateEventId()).withEntityId(id),
                 EntityDeleteResponse.class
         );
@@ -493,7 +497,7 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final ModelSpec modelSpec
     ) {
         return sendAndGetCollection(
-                cloudEventsServiceBlockingStub::entityManageCollection,
+                req -> blocking().entityManageCollection(req),
                 new EntityDeleteAllRequest().withId(generateEventId())
                         .withModel(modelSpec),
                 EntityDeleteAllResponse.class
@@ -510,7 +514,7 @@ public class CyodaRepository implements CrudRepository {
             @Nullable final Date pointInTime
     ) {
         return sendAndGet(
-                cloudEventsServiceBlockingStub::entitySearch,
+                req -> blocking().entitySearch(req),
                 new EntitySnapshotSearchRequest().withId(generateEventId())
                         .withModel(modelSpec)
                         .withCondition(condition)
@@ -568,7 +572,7 @@ public class CyodaRepository implements CrudRepository {
 
     private CompletableFuture<SearchSnapshotStatus.Status> getSnapshotStatus(@NotNull final UUID snapshotId) {
         return sendAndGet(
-                cloudEventsServiceBlockingStub::entitySearch,
+                req -> blocking().entitySearch(req),
                 new SnapshotGetStatusRequest().withId(generateEventId()).withSnapshotId(snapshotId),
                 EntitySnapshotSearchResponse.class
         ).thenApply(EntitySnapshotSearchResponse::getStatus)
@@ -581,7 +585,7 @@ public class CyodaRepository implements CrudRepository {
             final int pageNumber
     ) {
         return sendAndGetCollection(
-                cloudEventsServiceBlockingStub::entitySearchCollection,
+                req -> blocking().entitySearchCollection(req),
                 new SnapshotGetRequest().withId(generateEventId())
                         .withSnapshotId(snapshotId)
                         .withPageSize(pageSize)
@@ -614,7 +618,7 @@ public class CyodaRepository implements CrudRepository {
     @Override
     public CompletableFuture<Long> getEntityCount(@NotNull final ModelSpec modelSpec, @Nullable final Date pointInTime) {
         return sendAndGetCollection(
-                cloudEventsServiceBlockingStub::entitySearchCollection,
+                req -> blocking().entitySearchCollection(req),
                 new EntityStatsGetRequest()
                         .withId(generateEventId())
                         .withPointInTime(pointInTime)
@@ -649,7 +653,7 @@ public class CyodaRepository implements CrudRepository {
             @Nullable final Date pointInTime
     ) {
         return sendAndGetCollection(
-                cloudEventsServiceBlockingStub::entitySearchCollection,
+                req -> blocking().entitySearchCollection(req),
                 new EntityStatsByStateGetRequest()
                         .withId(generateEventId())
                         .withModel(modelSpec)
@@ -672,7 +676,7 @@ public class CyodaRepository implements CrudRepository {
             @Nullable final Date pointInTime
     ) {
         return sendAndGetCollection(
-                cloudEventsServiceBlockingStub::entitySearchCollection,
+                req -> blocking().entitySearchCollection(req),
                 new EntityChangesMetadataGetRequest()
                         .withId(generateEventId())
                         .withEntityId(entityId)

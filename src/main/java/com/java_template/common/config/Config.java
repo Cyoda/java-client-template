@@ -48,7 +48,7 @@ public class Config {
     private int sentEventsCacheMaxSize = 100;
     private int monitoringSchedulerInitialDelaySeconds = 1;
     private int monitoringSchedulerDelaySeconds = 3;
-    private long keepAliveWarningThreshold = 60000;
+    private long keepAliveWarningThreshold = 20000;
 
     // SSL Configuration
     private boolean sslTrustAll = false;
@@ -56,9 +56,37 @@ public class Config {
 
     private boolean includeDefaultOperations = false;
 
-    private boolean skipSsl = false;
-    private String executionMode = "platform";
-    private CyodaLight cyodaLight = new CyodaLight();
+    private String executionMode = "virtual";
+
+    public enum AuthMode { CLIENT_CREDENTIALS, NONE }
+
+    private boolean grpcTls = true;
+    private AuthMode authMode = AuthMode.CLIENT_CREDENTIALS;
+    private long grpcCallDeadlineMs = 120_000L;
+
+    public boolean isGrpcTls() {
+        return grpcTls;
+    }
+
+    public void setGrpcTls(boolean grpcTls) {
+        this.grpcTls = grpcTls;
+    }
+
+    public AuthMode getAuthMode() {
+        return authMode;
+    }
+
+    public void setAuthMode(AuthMode authMode) {
+        this.authMode = authMode;
+    }
+
+    public long getGrpcCallDeadlineMs() {
+        return grpcCallDeadlineMs;
+    }
+
+    public void setGrpcCallDeadlineMs(long grpcCallDeadlineMs) {
+        this.grpcCallDeadlineMs = grpcCallDeadlineMs;
+    }
 
     /** Base package scanned for {@link com.java_template.common.workflow.CyodaEntity} implementations. */
     private String entityBasePackage = "com.java_template.application";
@@ -300,28 +328,12 @@ public class Config {
         this.includeDefaultOperations = includeDefaultOperations;
     }
 
-    public boolean isSkipSsl() {
-        return skipSsl;
-    }
-
-    public void setSkipSsl(boolean skipSsl) {
-        this.skipSsl = skipSsl;
-    }
-
     public String getExecutionMode() {
         return executionMode;
     }
 
     public void setExecutionMode(String executionMode) {
         this.executionMode = executionMode;
-    }
-
-    public CyodaLight getCyodaLight() {
-        return cyodaLight;
-    }
-
-    public void setCyodaLight(CyodaLight cyodaLight) {
-        this.cyodaLight = cyodaLight;
     }
 
     public String getEntityBasePackage() {
@@ -346,47 +358,4 @@ public class Config {
                 .toList();
     }
 
-    /**
-     * Configuration for the cyoda-light in-memory digital twin sidecar.
-     * When active, {@link CyodaLightConfigCustomizer} injects property overrides
-     * into the Spring Environment so Config binds directly to the sidecar's endpoints.
-     */
-    public static class CyodaLight {
-        private boolean active = false;
-        private String httpUrl = "http://cyoda-light:8080";
-        private String grpcHost = "cyoda-light";
-        private int grpcPort = 50051;
-
-        public boolean isActive() {
-            return active;
-        }
-
-        public void setActive(boolean active) {
-            this.active = active;
-        }
-
-        public String getHttpUrl() {
-            return httpUrl;
-        }
-
-        public void setHttpUrl(String httpUrl) {
-            this.httpUrl = httpUrl;
-        }
-
-        public String getGrpcHost() {
-            return grpcHost;
-        }
-
-        public void setGrpcHost(String grpcHost) {
-            this.grpcHost = grpcHost;
-        }
-
-        public int getGrpcPort() {
-            return grpcPort;
-        }
-
-        public void setGrpcPort(int grpcPort) {
-            this.grpcPort = grpcPort;
-        }
-    }
 }

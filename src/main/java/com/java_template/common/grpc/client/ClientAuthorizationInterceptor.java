@@ -1,6 +1,6 @@
 package com.java_template.common.grpc.client;
 
-import com.java_template.common.auth.Authentication;
+import com.java_template.common.auth.CyodaTokenSource;
 import io.grpc.CallOptions;
 import io.grpc.Channel;
 import io.grpc.ClientCall;
@@ -20,10 +20,10 @@ public class ClientAuthorizationInterceptor implements ClientInterceptor {
     private static final Logger LOG = LoggerFactory.getLogger(ClientAuthorizationInterceptor.class);
     private static final Metadata.Key<String> AUTHORIZATION = Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
 
-    private final Authentication authentication;
+    private final CyodaTokenSource tokenSource;
 
-    public ClientAuthorizationInterceptor(Authentication authentication) {
-        this.authentication = authentication;
+    public ClientAuthorizationInterceptor(CyodaTokenSource tokenSource) {
+        this.tokenSource = tokenSource;
     }
 
     @Override
@@ -31,9 +31,9 @@ public class ClientAuthorizationInterceptor implements ClientInterceptor {
         return new ForwardingClientCall.SimpleForwardingClientCall<>(next.newCall(method, callOptions)) {
             @Override
             public void start(Listener<RespT> responseListener, Metadata headers) {
-                final String token;
+                final java.util.Optional<String> token;
                 try {
-                    token = authentication.getAccessToken().getTokenValue();
+                    token = tokenSource.bearerToken();
                 } catch (RuntimeException e) {
                     LOG.error("Cannot obtain M2M token for {} — cancelling the call", method.getFullMethodName(), e);
                     responseListener.onClose(
@@ -41,7 +41,7 @@ public class ClientAuthorizationInterceptor implements ClientInterceptor {
                             new Metadata());
                     return;
                 }
-                headers.put(AUTHORIZATION, "Bearer " + token);
+                token.ifPresent(t -> headers.put(AUTHORIZATION, "Bearer " + t));
                 super.start(responseListener, headers);
             }
         };
