@@ -396,13 +396,15 @@ public class SslUtils {
                     .flowControlWindow(config.getGrpcFlowControlWindow())
                     .initialFlowControlWindow(config.getGrpcFlowControlWindow());  // Set initial window size too
 
-            logger.info("gRPC channel configured: maxInboundMessageSize={}MB, flowControlWindow={}MB, initialFlowControlWindow={}MB, keepAliveTime={}s, keepAliveWithoutCalls=true, threadPools=[processor={}, criteria={}]",
+            logger.info("gRPC channel configured: maxInboundMessageSize={}MB, flowControlWindow={}MB, initialFlowControlWindow={}MB, keepAliveTime={}s, keepAliveWithoutCalls=true, callouts={}",
                     config.getGrpcMaxInboundMessageSize() / (1024 * 1024),
                     config.getGrpcFlowControlWindow() / (1024 * 1024),
                     config.getGrpcFlowControlWindow() / (1024 * 1024),
                     config.getGrpcKeepAliveTimeSeconds(),
-                    config.getProcessorThreadPool(),
-                    config.getCriteriaThreadPool());
+                    "virtual".equals(config.getExecutionMode())
+                            ? "one virtual thread per task"
+                            : "threadPools[processor=" + config.getProcessorThreadPool()
+                                    + ", criteria=" + config.getCriteriaThreadPool() + "]");
 
             return channelBuilder;
         } catch (Exception e) {
