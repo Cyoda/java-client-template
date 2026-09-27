@@ -3,6 +3,7 @@ package com.java_template.common.grpc.client.event_handling;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.workflow.CyodaContextFactory;
 import com.java_template.common.workflow.CyodaEventContext;
 import com.java_template.common.workflow.OperationFactory;
@@ -37,11 +38,11 @@ public abstract class AbstractEventStrategy<
 
     protected AbstractEventStrategy(
             OperationFactory operationFactory,
-            ObjectMapper objectMapper,
+            CyodaObjectMapper wireMapper,
             CyodaContextFactory eventContextFactory
     ) {
         this.operationFactory = operationFactory;
-        this.objectMapper = objectMapper;
+        this.objectMapper = wireMapper.mapper();
         this.eventContextFactory = eventContextFactory;
     }
 

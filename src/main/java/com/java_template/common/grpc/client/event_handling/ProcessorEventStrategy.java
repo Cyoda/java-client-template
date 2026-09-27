@@ -2,6 +2,7 @@ package com.java_template.common.grpc.client.event_handling;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.workflow.*;
 import org.cyoda.cloud.api.event.common.CloudEventType;
 import org.cyoda.cloud.api.event.common.EntityMetadata;
@@ -24,10 +25,10 @@ public class ProcessorEventStrategy extends AbstractEventStrategy<
 
     public ProcessorEventStrategy(
             OperationFactory operationFactory,
-            ObjectMapper objectMapper,
+            CyodaObjectMapper wireMapper,
             CyodaContextFactory eventContextFactory
     ) {
-        super(operationFactory, objectMapper, eventContextFactory);
+        super(operationFactory, wireMapper, eventContextFactory);
     }
 
     @Override

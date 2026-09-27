@@ -3,8 +3,8 @@ package com.example.tests;
 import com.example.application.criterion.ExampleEntityCriterion;
 import com.example.application.entity.example_entity.version_1.ExampleEntity;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.java_template.common.serializer.CriterionSerializer;
 import com.java_template.common.serializer.SerializerFactory;
 import com.java_template.common.serializer.jackson.JacksonCriterionSerializer;
@@ -48,8 +48,8 @@ class ExampleEntityCriterionTest {
     @BeforeEach
     void setUp() {
         autoCloseable = MockitoAnnotations.openMocks(this);
-        objectMapper = new ObjectMapper();
-        objectMapper.registerModule(new JavaTimeModule());
+        // The framework's wire mapper: Jackson defaults plus the cyoda-go contract settings.
+        objectMapper = CyodaObjectMapper.standalone().mapper();
         CriterionSerializer serializer = new JacksonCriterionSerializer(objectMapper);
 
         when(serializerFactory.getDefaultCriteriaSerializer()).thenReturn(serializer);

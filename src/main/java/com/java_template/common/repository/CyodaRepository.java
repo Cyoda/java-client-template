@@ -8,6 +8,7 @@ import com.github.benmanes.caffeine.cache.Expiry;
 import com.google.common.collect.Streams;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.java_template.common.config.Config;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.exception.CyodaOperationException;
 import com.java_template.common.grpc.client.event_handling.CloudEventBuilder;
@@ -65,13 +66,13 @@ public class CyodaRepository implements CrudRepository {
     private final Cache<SearchCacheKey, CompletableFuture<SearchSnapshotStatus>> snapshotCache;
 
     public CyodaRepository(
-            final ObjectMapper objectMapper,
+            final CyodaObjectMapper wireMapper,
             final CloudEventsServiceGrpc.CloudEventsServiceBlockingStub cloudEventsServiceBlockingStub,
             final CloudEventBuilder cloudEventBuilder,
             final CloudEventParser cloudEventParser,
             final Config config
     ) {
-        this.objectMapper = objectMapper;
+        this.objectMapper = wireMapper.mapper();
         this.cloudEventsServiceBlockingStub = cloudEventsServiceBlockingStub;
         this.cloudEventBuilder = cloudEventBuilder;
         this.cloudEventParser = cloudEventParser;

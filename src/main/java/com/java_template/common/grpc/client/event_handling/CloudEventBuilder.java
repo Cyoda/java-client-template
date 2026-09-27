@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.java_template.common.config.Config;
+import com.java_template.common.config.CyodaObjectMapper;
 import io.cloudevents.core.data.PojoCloudEventData;
 import io.cloudevents.core.format.EventFormat;
 import io.cloudevents.v1.proto.CloudEvent;
@@ -25,11 +26,11 @@ public class CloudEventBuilder {
     private final Config config;
 
     public CloudEventBuilder(
-            final ObjectMapper objectMapper,
+            final CyodaObjectMapper wireMapper,
             final EventFormat eventFormat,
             final Config config
     ) {
-        this.objectMapper = objectMapper;
+        this.objectMapper = wireMapper.mapper();
         this.eventFormat = eventFormat;
         this.config = config;
     }

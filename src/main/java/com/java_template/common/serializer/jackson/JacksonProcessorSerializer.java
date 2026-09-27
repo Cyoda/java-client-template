@@ -2,6 +2,7 @@ package com.java_template.common.serializer.jackson;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.serializer.SerializerEnum;
 import com.java_template.common.serializer.ResponseBuilder;
@@ -9,6 +10,7 @@ import com.java_template.common.serializer.ProcessorSerializer;
 import com.java_template.common.workflow.CyodaEntity;
 import org.cyoda.cloud.api.event.processing.EntityProcessorCalculationRequest;
 import org.jetbrains.annotations.NotNull;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -19,6 +21,16 @@ import org.springframework.stereotype.Component;
 public class JacksonProcessorSerializer extends BaseJacksonSerializer<EntityProcessorCalculationRequest>
         implements ProcessorSerializer {
 
+    /** Spring's constructor: payloads are read and written with the framework's wire mapper. */
+    @Autowired
+    public JacksonProcessorSerializer(CyodaObjectMapper wireMapper) {
+        this(wireMapper.mapper());
+    }
+
+    /**
+     * For tests and manual wiring. Pass a mapper that meets the cyoda-go contract, e.g.
+     * {@code CyodaObjectMapper.standalone().mapper()} or {@code CyodaJackson.configure(new ObjectMapper())}.
+     */
     public JacksonProcessorSerializer(ObjectMapper objectMapper) {
         super(objectMapper);
     }

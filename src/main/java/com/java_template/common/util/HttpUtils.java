@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.java_template.common.config.Config;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.util.http.ContentTypeAwareParser;
 import com.java_template.common.util.http.ResponseBodyParser;
 import org.slf4j.LoggerFactory;
@@ -35,9 +36,9 @@ public class HttpUtils {
     private final JsonUtils jsonUtils;
     private final ResponseBodyParser defaultParser;
 
-    public HttpUtils(JsonUtils jsonUtils, ObjectMapper om, Config config) {
+    public HttpUtils(JsonUtils jsonUtils, CyodaObjectMapper wireMapper, Config config) {
         this.jsonUtils = jsonUtils;
-        this.om = om;
+        this.om = wireMapper.mapper();
         this.defaultParser = ContentTypeAwareParser.createDefault(om);
         this.client = SslUtils.createHttpClient(config);
     }

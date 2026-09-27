@@ -1,7 +1,7 @@
 package com.java_template.common.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.repository.CrudRepository;
@@ -63,10 +63,9 @@ class EntityServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        // EntityMetadata's date-time fields are java.time.OffsetDateTime (see build.gradle's
-        // jsonSchema2Pojo dateTimeType); JavaTimeModule is required to (de)serialize them.
-        objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
-        entityService = new EntityServiceImpl(repository, objectMapper);
+        CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
+        objectMapper = wireMapper.mapper();
+        entityService = new EntityServiceImpl(repository, wireMapper);
         testEntityId = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
         testEntityId2 = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
         testEntity = new TestEntity(123L, "Test Entity", "ACTIVE");

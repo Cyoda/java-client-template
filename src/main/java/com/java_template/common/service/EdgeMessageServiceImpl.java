@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.java_template.common.auth.CyodaTokenSource;
 import com.java_template.common.config.Config;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.util.HttpUtils;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.NotNull;
@@ -34,12 +35,12 @@ public class EdgeMessageServiceImpl implements EdgeMessageService {
     public EdgeMessageServiceImpl(
             HttpUtils httpUtils,
             CyodaTokenSource tokenSource,
-            ObjectMapper objectMapper,
+            CyodaObjectMapper wireMapper,
             Config configProperties
     ) {
         this.httpUtils = httpUtils;
         this.tokenSource = tokenSource;
-        this.objectMapper = objectMapper;
+        this.objectMapper = wireMapper.mapper();
         this.cyodaApiUrl = configProperties.getCyodaApiUrl();
     }
 

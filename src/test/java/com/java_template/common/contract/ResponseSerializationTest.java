@@ -2,6 +2,7 @@ package com.java_template.common.contract;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaJackson;
 import org.cyoda.cloud.api.event.common.Error;
 import org.cyoda.cloud.api.event.processing.EntityCriteriaCalculationResponse;
 import org.junit.jupiter.api.Test;
@@ -12,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class ResponseSerializationTest {
 
-    private final ObjectMapper om = new ObjectMapper();
+    private final ObjectMapper om = CyodaJackson.configure(new ObjectMapper());
 
     @Test
     void aSuccessfulAnswerOmitsErrorInsteadOfSendingNull() throws Exception {

@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
 import com.java_template.common.auth.CyodaTokenSource;
 import com.java_template.common.config.Config;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.util.HttpUtils;
 import com.java_template.common.workflow.CyodaEntity;
 import org.cyoda.cloud.api.event.common.ModelSpec;
@@ -56,10 +57,10 @@ public class CyodaInit {
     private final ObjectMapper objectMapper;
     private final Config config;
 
-    public CyodaInit(HttpUtils httpUtils, CyodaTokenSource tokenSource, ObjectMapper objectMapper, Config config) {
+    public CyodaInit(HttpUtils httpUtils, CyodaTokenSource tokenSource, CyodaObjectMapper wireMapper, Config config) {
         this.httpUtils = httpUtils;
         this.tokenSource = tokenSource;
-        this.objectMapper = objectMapper;
+        this.objectMapper = wireMapper.mapper();
         this.config = config;
     }
 

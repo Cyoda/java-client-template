@@ -2,6 +2,7 @@ package com.java_template.common.util;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -14,8 +15,8 @@ import java.util.Map;
 public class JsonUtils {
     private final ObjectMapper objectMapper;
 
-    public JsonUtils(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
+    public JsonUtils(CyodaObjectMapper wireMapper) {
+        this.objectMapper = wireMapper.mapper();
     }
 
     public String mapToJson(Map<String, Object> map) {

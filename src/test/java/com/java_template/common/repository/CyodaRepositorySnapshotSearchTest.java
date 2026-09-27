@@ -1,6 +1,6 @@
 package com.java_template.common.repository;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.config.Config;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.grpc.client.event_handling.CloudEventBuilder;
@@ -20,6 +20,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.OffsetDateTime;
@@ -50,7 +51,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class CyodaRepositorySnapshotSearchTest {
 
-    @Mock ObjectMapper objectMapper;
+    @Spy CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
     @Mock CloudEventsServiceGrpc.CloudEventsServiceBlockingStub stub;
     @Mock CloudEventBuilder cloudEventBuilder;
     @Mock CloudEventParser cloudEventParser;

@@ -1,6 +1,7 @@
 package com.java_template.common.grpc.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.java_template.common.grpc.client.event_handling.AbstractEventStrategy;
 import com.java_template.common.grpc.client.event_handling.ProcessorEventStrategy;
@@ -221,10 +222,11 @@ class AbstractEventStrategyTest {
 
     @Test
     void anErrorResponseCarriesAFreshIdTheRequestIdAndTheEntityId() throws Exception {
-        ObjectMapper om = new ObjectMapper();
+        CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
+        ObjectMapper om = wireMapper.mapper();
         OperationFactory factory = mock(OperationFactory.class);
         lenient().when(factory.getProcessorForModel(any())).thenThrow(new IllegalStateException("boom"));
-        ProcessorEventStrategy strategy = new ProcessorEventStrategy(factory, om, new CyodaContextFactory(om));
+        ProcessorEventStrategy strategy = new ProcessorEventStrategy(factory, wireMapper, new CyodaContextFactory(wireMapper));
 
         String entityId = UUID.randomUUID().toString();
         ObjectNode request = om.createObjectNode();

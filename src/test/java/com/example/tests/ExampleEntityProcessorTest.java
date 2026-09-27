@@ -3,8 +3,8 @@ package com.example.tests;
 import com.example.application.entity.example_entity.version_1.ExampleEntity;
 import com.example.application.processor.ExampleEntityProcessor;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.java_template.common.serializer.ProcessorSerializer;
 import com.java_template.common.serializer.SerializerFactory;
 import com.java_template.common.serializer.jackson.JacksonProcessorSerializer;
@@ -53,8 +53,8 @@ class ExampleEntityProcessorTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        objectMapper = new ObjectMapper();
-        objectMapper.registerModule(new JavaTimeModule());
+        // The framework's wire mapper: Jackson defaults plus the cyoda-go contract settings.
+        objectMapper = CyodaObjectMapper.standalone().mapper();
         serializer = new JacksonProcessorSerializer(objectMapper);
 
         when(serializerFactory.getDefaultProcessorSerializer()).thenReturn(serializer);

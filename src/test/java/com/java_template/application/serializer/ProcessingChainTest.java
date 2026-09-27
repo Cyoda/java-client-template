@@ -2,8 +2,8 @@ package com.java_template.application.serializer;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaJackson;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.serializer.ErrorInfo;
 import com.java_template.common.serializer.ProcessorSerializer;
@@ -74,9 +74,9 @@ class ProcessingChainTest {
 
     @BeforeEach
     void setUp() {
-        // EntityMetadata's date-time fields are java.time.OffsetDateTime (see build.gradle's
-        // jsonSchema2Pojo dateTimeType); JavaTimeModule is required to (de)serialize them.
-        objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        // The framework's wire mapper settings (JavaTimeModule for the OffsetDateTime event fields,
+        // RFC 3339 text dates, blank processor type handler), as CyodaObjectMapper applies them.
+        objectMapper = CyodaJackson.configure(new ObjectMapper());
         serializer = new JacksonProcessorSerializer(objectMapper);
 
         // Create test request with real data

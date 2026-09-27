@@ -3,6 +3,7 @@ package com.java_template.common.workflow;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.java_template.common.auth.CloudEventAuthContext;
+import com.java_template.common.config.CyodaObjectMapper;
 import io.cloudevents.v1.proto.CloudEvent;
 import org.cyoda.cloud.api.event.common.BaseEvent;
 import org.jetbrains.annotations.NotNull;
@@ -21,8 +22,8 @@ public class CyodaContextFactory {
 
     private final ObjectMapper objectMapper;
 
-    public CyodaContextFactory(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
+    public CyodaContextFactory(CyodaObjectMapper wireMapper) {
+        this.objectMapper = wireMapper.mapper();
     }
 
     public <T extends BaseEvent> CyodaEventContext<T> createCyodaEventContext(

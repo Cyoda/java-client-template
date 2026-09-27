@@ -1,6 +1,7 @@
 package com.java_template.common.workflow.ops;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaJackson;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.java_template.common.config.Config;
 import com.java_template.common.serializer.CriterionSerializer;
@@ -25,7 +26,7 @@ import static org.mockito.Mockito.mock;
 
 class AlwaysTrueCriterionTest {
     public static final @NotNull UUID ENTITY_ID = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
-    JacksonCriterionSerializer criterionSerializer = new JacksonCriterionSerializer(new ObjectMapper());
+    JacksonCriterionSerializer criterionSerializer = new JacksonCriterionSerializer(CyodaJackson.configure(new ObjectMapper()));
     SerializerFactory serializerFactory = new SerializerFactory(List.of(), List.of((CriterionSerializer) criterionSerializer));
 
     @Test

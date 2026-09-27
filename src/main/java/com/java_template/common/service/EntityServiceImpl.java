@@ -3,6 +3,7 @@ package com.java_template.common.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.repository.CrudRepository;
@@ -40,10 +41,10 @@ public class EntityServiceImpl implements EntityService {
 
     public EntityServiceImpl(
             final CrudRepository repository,
-            final ObjectMapper objectMapper
+            final CyodaObjectMapper wireMapper
     ) {
         this.repository = repository;
-        this.objectMapper = objectMapper;
+        this.objectMapper = wireMapper.mapper();
     }
 
     // ========================================
