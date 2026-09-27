@@ -31,7 +31,6 @@ import org.springframework.stereotype.Repository;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -160,20 +159,10 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final GroupConditionDto condition,
             @NotNull final SearchAndRetrievalParams params
     ) {
-        OffsetDateTime pointInTime = toOffsetDateTime(params.pointInTime());
+        OffsetDateTime pointInTime = params.pointInTime();
         return params.inMemory()
                 ? findAllByConditionInMemory(modelSpec, params.pageSize(), condition, pointInTime)
                 : findAllByCondition(modelSpec, params.pageSize(), params.pageNumber(), condition, pointInTime, params.searchId(), params.awaitLimitMs(), params.pollIntervalMs());
-    }
-
-    /**
-     * Converts the millisecond-precision {@link Date} carried by {@link SearchAndRetrievalParams}
-     * (kept as {@code Date} at that boundary so callers built against it stay valid) to the
-     * {@link OffsetDateTime} the generated request DTOs now use. {@code null} stays {@code null}.
-     */
-    @Nullable
-    private static OffsetDateTime toOffsetDateTime(@Nullable final Date date) {
-        return date == null ? null : date.toInstant().atOffset(ZoneOffset.UTC);
     }
 
     private CompletableFuture<PageResult<DataPayload>> findAllByCondition(
@@ -284,7 +273,7 @@ public class CyodaRepository implements CrudRepository {
                 .operator(GroupConditionDto.OperatorEnum.AND)
                 .conditions(List.of());
 
-        OffsetDateTime pointInTime = toOffsetDateTime(params.pointInTime());
+        OffsetDateTime pointInTime = params.pointInTime();
         return params.inMemory()
                 ? findAllByConditionInMemory(modelSpec, params.pageSize(), matchAllCondition, pointInTime)
                 : findAllByCondition(modelSpec, params.pageSize(), params.pageNumber(), matchAllCondition, pointInTime, params.searchId(), params.awaitLimitMs(), params.pollIntervalMs());

@@ -1,7 +1,9 @@
 package com.java_template.common.repository;
 
+import com.java_template.common.util.PointInTime;
 import org.jetbrains.annotations.Nullable;
 
+import java.time.OffsetDateTime;
 import java.util.Date;
 import java.util.UUID;
 
@@ -14,7 +16,7 @@ import java.util.UUID;
  * @param inMemory Whether to perform search in memory (default: false)
  * @param awaitLimitMs Maximum time to wait for snapshot creation in milliseconds (default: 10000)
  * @param pollIntervalMs Polling interval for snapshot status checks in milliseconds (default: 500)
- * @param pointInTime Optional timestamp for historical data retrieval
+ * @param pointInTime Optional point in time for historical data retrieval, at full (nanosecond) precision
  * @param searchId Optional search identifier for getting further pages of the same search
  */
 public record SearchAndRetrievalParams(
@@ -23,7 +25,7 @@ public record SearchAndRetrievalParams(
         boolean inMemory,
         int awaitLimitMs,
         int pollIntervalMs,
-        @Nullable Date pointInTime,
+        @Nullable OffsetDateTime pointInTime,
         @Nullable UUID searchId
 ) {
 
@@ -68,7 +70,7 @@ public record SearchAndRetrievalParams(
         private boolean inMemory = DEFAULT_IN_MEMORY;
         private int awaitLimitMs = DEFAULT_AWAIT_LIMIT_MS;
         private int pollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
-        private Date pointInTime = null;
+        private OffsetDateTime pointInTime = null;
         private UUID searchId = null;
 
         private Builder() {
@@ -130,13 +132,26 @@ public record SearchAndRetrievalParams(
         }
 
         /**
-         * Sets the point in time for historical data retrieval.
+         * Sets the point in time for historical data retrieval, keeping its full precision.
+         * Use this overload for a value taken from {@code EntityChangeMeta.getTimeOfChange()}.
          *
-         * @param pointInTime Timestamp for historical data retrieval
+         * @param pointInTime Point in time for historical data retrieval (null for current state)
+         * @return This builder instance
+         */
+        public Builder pointInTime(@Nullable OffsetDateTime pointInTime) {
+            this.pointInTime = pointInTime;
+            return this;
+        }
+
+        /**
+         * Sets the point in time for historical data retrieval from a millisecond {@link Date}.
+         * Prefer {@link #pointInTime(OffsetDateTime)}: a Date cannot carry sub-millisecond precision.
+         *
+         * @param pointInTime Timestamp for historical data retrieval (null for current state)
          * @return This builder instance
          */
         public Builder pointInTime(@Nullable Date pointInTime) {
-            this.pointInTime = pointInTime;
+            this.pointInTime = PointInTime.toOffsetDateTime(pointInTime);
             return this;
         }
 

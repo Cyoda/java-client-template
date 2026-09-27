@@ -24,12 +24,12 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -134,14 +134,14 @@ class ExampleEntityControllerTest {
         ExampleEntity entity = createTestEntity("TEST-001");
         EntityWithMetadata<ExampleEntity> entityWithMetadata = createEntityWithMetadata(entity, entityId);
 
-        when(entityService.getById(eq(entityId), any(ModelSpec.class), eq(ExampleEntity.class), isNull()))
+        when(entityService.getById(eq(entityId), any(ModelSpec.class), eq(ExampleEntity.class), isNull(OffsetDateTime.class)))
                 .thenReturn(entityWithMetadata);
 
         mockMvc.perform(get("/ui/example/{id}", entityId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.entity.exampleId").value("TEST-001"));
 
-        verify(entityService).getById(eq(entityId), any(ModelSpec.class), eq(ExampleEntity.class), isNull());
+        verify(entityService).getById(eq(entityId), any(ModelSpec.class), eq(ExampleEntity.class), isNull(OffsetDateTime.class));
     }
 
     @Test
@@ -149,7 +149,7 @@ class ExampleEntityControllerTest {
     void testGetEntityByIdNotFound() throws Exception {
         UUID entityId = UUID.randomUUID();
 
-        when(entityService.getById(eq(entityId), any(ModelSpec.class), eq(ExampleEntity.class), isNull()))
+        when(entityService.getById(eq(entityId), any(ModelSpec.class), eq(ExampleEntity.class), isNull(OffsetDateTime.class)))
                 .thenReturn(null);
 
         mockMvc.perform(get("/ui/example/{id}", entityId))
@@ -164,16 +164,18 @@ class ExampleEntityControllerTest {
         EntityWithMetadata<ExampleEntity> entityWithMetadata = createEntityWithMetadata(entity, entityId);
         OffsetDateTime pointInTime = OffsetDateTime.now().minusDays(1);
 
-        when(entityService.getById(eq(entityId), any(ModelSpec.class), eq(ExampleEntity.class), any(Date.class)))
+        when(entityService.getById(eq(entityId), any(ModelSpec.class), eq(ExampleEntity.class), any(OffsetDateTime.class)))
                 .thenReturn(entityWithMetadata);
 
         mockMvc.perform(get("/ui/example/{id}", entityId)
                 .param("pointInTime", pointInTime.toString()))
                 .andExpect(status().isOk());
 
-        ArgumentCaptor<Date> dateCaptor = ArgumentCaptor.forClass(Date.class);
-        verify(entityService).getById(eq(entityId), any(ModelSpec.class), eq(ExampleEntity.class), dateCaptor.capture());
-        assertNotNull(dateCaptor.getValue());
+        ArgumentCaptor<OffsetDateTime> pitCaptor = ArgumentCaptor.forClass(OffsetDateTime.class);
+        verify(entityService).getById(eq(entityId), any(ModelSpec.class), eq(ExampleEntity.class), pitCaptor.capture());
+        assertNotNull(pitCaptor.getValue());
+        // Passed through without truncation to milliseconds.
+        assertEquals(pointInTime.toInstant(), pitCaptor.getValue().toInstant());
     }
 
     // ========================================
@@ -187,7 +189,7 @@ class ExampleEntityControllerTest {
         EntityWithMetadata<ExampleEntity> entityWithMetadata = createEntityWithMetadata(entity, UUID.randomUUID());
 
         when(entityService.findByBusinessId(any(ModelSpec.class), eq("TEST-001"), eq("exampleId"),
-                eq(ExampleEntity.class), isNull()))
+                eq(ExampleEntity.class), isNull(OffsetDateTime.class)))
                 .thenReturn(entityWithMetadata);
 
         mockMvc.perform(get("/ui/example/business/{exampleId}", "TEST-001"))
@@ -199,7 +201,7 @@ class ExampleEntityControllerTest {
     @DisplayName("Should return not found when business ID does not exist")
     void testGetEntityByBusinessIdNotFound() throws Exception {
         when(entityService.findByBusinessId(any(ModelSpec.class), eq("NONEXISTENT"), eq("exampleId"),
-                eq(ExampleEntity.class), isNull()))
+                eq(ExampleEntity.class), isNull(OffsetDateTime.class)))
                 .thenReturn(null);
 
         mockMvc.perform(get("/ui/example/business/{exampleId}", "NONEXISTENT"))
@@ -384,14 +386,14 @@ class ExampleEntityControllerTest {
         EntityChangeMeta meta = new EntityChangeMeta();
         changeMetadata.add(meta);
 
-        when(entityService.getEntityChangesMetadata(eq(entityId), isNull()))
+        when(entityService.getEntityChangesMetadata(eq(entityId), isNull(OffsetDateTime.class)))
                 .thenReturn(changeMetadata);
 
         mockMvc.perform(get("/ui/example/{id}/changes", entityId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)));
 
-        verify(entityService).getEntityChangesMetadata(eq(entityId), isNull());
+        verify(entityService).getEntityChangesMetadata(eq(entityId), isNull(OffsetDateTime.class));
     }
 
     @Test
@@ -399,13 +401,13 @@ class ExampleEntityControllerTest {
     void testGetEntityChangeMetadataNotFound() throws Exception {
         UUID entityId = UUID.randomUUID();
 
-        when(entityService.getEntityChangesMetadata(eq(entityId), isNull()))
+        when(entityService.getEntityChangesMetadata(eq(entityId), isNull(OffsetDateTime.class)))
                 .thenReturn(null);
 
         mockMvc.perform(get("/ui/example/{id}/changes", entityId))
                 .andExpect(status().isOk());
 
-        verify(entityService).getEntityChangesMetadata(eq(entityId), isNull());
+        verify(entityService).getEntityChangesMetadata(eq(entityId), isNull(OffsetDateTime.class));
     }
 
     // ========================================

@@ -102,13 +102,6 @@ public class EntityCrudOperations<T extends CyodaEntity> {
     }
 
     /**
-     * Converts OffsetDateTime to Date for Cyoda API.
-     */
-    private Date toDate(OffsetDateTime pointInTime) {
-        return pointInTime != null ? Date.from(pointInTime.toInstant()) : null;
-    }
-
-    /**
      * Creates a new entity with duplicate business ID check.
      *
      * @param entity              The entity to create
@@ -273,7 +266,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
     public ResponseEntity<EntityWithMetadata<T>> getById(UUID id, OffsetDateTime pointInTime) {
         try {
             EntityWithMetadata<T> response = entityService.getById(
-                    id, modelSpec(), entityClass, toDate(pointInTime));
+                    id, modelSpec(), entityClass, pointInTime);
             if (response == null) {
                 return ResponseEntity.notFound().build();
             }
@@ -295,7 +288,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             OffsetDateTime pointInTime) {
         try {
             EntityWithMetadata<T> response = entityService.findByBusinessId(
-                    modelSpec(), businessId, businessIdField, entityClass, toDate(pointInTime));
+                    modelSpec(), businessId, businessIdField, entityClass, pointInTime);
 
             if (response == null) {
                 return ResponseEntity.notFound().build();
@@ -319,7 +312,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             OffsetDateTime pointInTime) {
         try {
             List<EntityChangeMeta> changes = entityService.getEntityChangesMetadata(
-                    id, toDate(pointInTime));
+                    id, pointInTime);
             return ResponseEntity.ok(changes);
         } catch (Exception e) {
             if (CyodaExceptionUtil.isNotFound(e)) {
@@ -374,7 +367,6 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             String stateFilter,
             OffsetDateTime pointInTime) {
         try {
-            Date pointInTimeDate = toDate(pointInTime);
             List<GroupConditionDtoAllOfConditions> conditions = new ArrayList<>();
 
             // Build search conditions from filters
@@ -403,7 +395,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
                         modelSpec(), entityClass, SearchAndRetrievalParams.builder()
                                 .pageSize(pageSize)
                                 .pageNumber(pageNumber)
-                                .pointInTime(pointInTimeDate)
+                                .pointInTime(pointInTime)
                                 .inMemory(false)
                                 .searchId(searchId)
                                 .build()
@@ -417,7 +409,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
                         modelSpec(), groupCondition, entityClass, SearchAndRetrievalParams.builder()
                                 .pageSize(pageSize)
                                 .pageNumber(pageNumber)
-                                .pointInTime(pointInTimeDate)
+                                .pointInTime(pointInTime)
                                 .inMemory(false)
                                 .searchId(searchId)
                                 .build()
@@ -458,7 +450,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
                     modelSpec(), groupCondition, entityClass, SearchAndRetrievalParams.builder()
                             .pageSize(pageSize)
                             .pageNumber(pageNumber)
-                            .pointInTime(toDate(pointInTime))
+                            .pointInTime(pointInTime)
                             .inMemory(false)
                             .searchId(searchId)
                             .build()

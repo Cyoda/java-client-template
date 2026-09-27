@@ -1161,4 +1161,65 @@ class EntityServiceImplTest {
         assertTrue(result.isEmpty());
         verify(repository).getEntityStatsByState(eq(createTestModelSpec()), isNull());
     }
+
+    // ========================================
+    // LOSSLESS POINT-IN-TIME OVERLOADS
+    // ========================================
+
+    private static final OffsetDateTime NANO_PIT = OffsetDateTime.parse("2026-09-27T10:11:12.123456789+02:00");
+
+    @Test
+    @DisplayName("getById(OffsetDateTime) passes a nanosecond point in time to the repository unchanged")
+    void getByIdOffsetDateTimeReachesRepositoryUnchanged() {
+        when(repository.findById(eq(testEntityId), any()))
+                .thenReturn(CompletableFuture.completedFuture(createTestDataPayload(testEntity, testEntityId)));
+
+        entityService.getById(testEntityId, createTestModelSpec(), TestEntity.class, NANO_PIT);
+
+        verify(repository).findById(eq(testEntityId), same(NANO_PIT));
+    }
+
+    @Test
+    @DisplayName("getById(Date) still works and converts to a UTC OffsetDateTime")
+    void getByIdDateStillConvertsToUtc() {
+        Date pointInTime = new Date(1_790_000_000_123L);
+        when(repository.findById(eq(testEntityId), any()))
+                .thenReturn(CompletableFuture.completedFuture(createTestDataPayload(testEntity, testEntityId)));
+
+        entityService.getById(testEntityId, createTestModelSpec(), TestEntity.class, pointInTime);
+
+        verify(repository).findById(eq(testEntityId), eq(pointInTime.toInstant().atOffset(ZoneOffset.UTC)));
+    }
+
+    @Test
+    @DisplayName("count, stats and change-history OffsetDateTime overloads pass the point in time unchanged")
+    void metadataOffsetDateTimeOverloadsReachRepositoryUnchanged() {
+        List<String> states = List.of("DRAFT");
+        when(repository.getEntityCount(eq(createTestModelSpec()), same(NANO_PIT)))
+                .thenReturn(CompletableFuture.completedFuture(4L));
+        when(repository.getEntityStatsByState(eq(createTestModelSpec()), same(NANO_PIT)))
+                .thenReturn(CompletableFuture.completedFuture(Map.of("DRAFT", 4L)));
+        when(repository.getEntityStatsByState(eq(createTestModelSpec()), eq(states), same(NANO_PIT)))
+                .thenReturn(CompletableFuture.completedFuture(Map.of("DRAFT", 4L)));
+        when(repository.getEntityChangesMetadata(eq(testEntityId), same(NANO_PIT)))
+                .thenReturn(CompletableFuture.completedFuture(List.of()));
+
+        assertEquals(4L, entityService.getEntityCount(createTestModelSpec(), NANO_PIT));
+        assertEquals(Map.of("DRAFT", 4L), entityService.getEntityStatsByState(createTestModelSpec(), NANO_PIT));
+        assertEquals(Map.of("DRAFT", 4L), entityService.getEntityStatsByState(createTestModelSpec(), states, NANO_PIT));
+        assertEquals(List.of(), entityService.getEntityChangesMetadata(testEntityId, NANO_PIT));
+    }
+
+    @Test
+    @DisplayName("findByBusinessId(OffsetDateTime) searches at the exact point in time")
+    void findByBusinessIdOffsetDateTimeSearchesAtTheExactInstant() {
+        when(repository.findAllByCriteria(eq(createTestModelSpec()), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                        PageResult.of(null, List.of(createTestDataPayload(testEntity, testEntityId)), 0, 1, 1L)));
+
+        entityService.findByBusinessId(createTestModelSpec(), "TEST-123", BUSINESS_ID_FIELD, TestEntity.class, NANO_PIT);
+
+        verify(repository).findAllByCriteria(eq(createTestModelSpec()), any(),
+                argThat(params -> NANO_PIT.equals(params.pointInTime())));
+    }
 }

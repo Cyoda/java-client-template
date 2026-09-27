@@ -24,7 +24,6 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import java.net.URI;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -135,10 +134,7 @@ public class ExampleEntityController {
             @RequestParam(required = false) OffsetDateTime pointInTime) {
         try {
             ModelSpec modelSpec = new ModelSpec().withName(ExampleEntity.ENTITY_NAME).withVersion(ExampleEntity.ENTITY_VERSION);
-            Date pointInTimeDate = pointInTime != null
-                ? Date.from(pointInTime.toInstant())
-                : null;
-            EntityWithMetadata<ExampleEntity> response = entityService.getById(id, modelSpec, ExampleEntity.class, pointInTimeDate);
+            EntityWithMetadata<ExampleEntity> response = entityService.getById(id, modelSpec, ExampleEntity.class, pointInTime);
             if (response == null) {
                 return ResponseEntity.notFound().build();
             }
@@ -165,11 +161,8 @@ public class ExampleEntityController {
             @RequestParam(required = false) OffsetDateTime pointInTime) {
         try {
             ModelSpec modelSpec = new ModelSpec().withName(ExampleEntity.ENTITY_NAME).withVersion(ExampleEntity.ENTITY_VERSION);
-            Date pointInTimeDate = pointInTime != null
-                ? Date.from(pointInTime.toInstant())
-                : null;
             EntityWithMetadata<ExampleEntity> response = entityService.findByBusinessId(
-                    modelSpec, exampleId, "exampleId", ExampleEntity.class, pointInTimeDate);
+                    modelSpec, exampleId, "exampleId", ExampleEntity.class, pointInTime);
 
             if (response == null) {
                 return ResponseEntity.notFound().build();
@@ -193,11 +186,8 @@ public class ExampleEntityController {
             @PathVariable UUID id,
             @RequestParam(required = false) OffsetDateTime pointInTime) {
         try {
-            Date pointInTimeDate = pointInTime != null
-                ? Date.from(pointInTime.toInstant())
-                : null;
             List<EntityChangeMeta> changes =
-                    entityService.getEntityChangesMetadata(id, pointInTimeDate);
+                    entityService.getEntityChangesMetadata(id, pointInTime);
             return ResponseEntity.ok(changes);
         } catch (Exception e) {
             // Check if it's a NOT_FOUND error (entity doesn't exist)
@@ -259,9 +249,6 @@ public class ExampleEntityController {
             @RequestParam(required = false) OffsetDateTime pointInTime) {
         try {
             ModelSpec modelSpec = new ModelSpec().withName(ExampleEntity.ENTITY_NAME).withVersion(ExampleEntity.ENTITY_VERSION);
-            Date pointInTimeDate = pointInTime != null
-                ? Date.from(pointInTime.toInstant())
-                : null;
 
             SimpleConditionDto categoryCondition = new SimpleConditionDto()
                     .jsonPath("$.category")
@@ -281,7 +268,7 @@ public class ExampleEntityController {
                     SearchAndRetrievalParams.builder()
                             .pageSize(1000)
                             .pageNumber(0)
-                            .pointInTime(pointInTimeDate)
+                            .pointInTime(pointInTime)
                             .inMemory(true)
                             .build());
 
@@ -321,9 +308,6 @@ public class ExampleEntityController {
             @RequestParam(required = false) OffsetDateTime pointInTime) {
         try {
             ModelSpec modelSpec = new ModelSpec().withName(ExampleEntity.ENTITY_NAME).withVersion(ExampleEntity.ENTITY_VERSION);
-            Date pointInTimeDate = pointInTime != null
-                ? Date.from(pointInTime.toInstant())
-                : null;
 
             List<GroupConditionDtoAllOfConditions> conditions = new ArrayList<>();
 
@@ -345,7 +329,7 @@ public class ExampleEntityController {
                     SearchAndRetrievalParams.builder()
                             .pageSize(size)
                             .pageNumber(page)
-                            .pointInTime(pointInTimeDate)
+                            .pointInTime(pointInTime)
                             .searchId(searchId)
                             .build();
 
@@ -400,9 +384,7 @@ public class ExampleEntityController {
             @RequestBody(required = false) SearchRequest searchRequest) {
         try {
             ModelSpec modelSpec = new ModelSpec().withName(ExampleEntity.ENTITY_NAME).withVersion(ExampleEntity.ENTITY_VERSION);
-            Date pointInTimeDate = searchRequest != null && searchRequest.getPointInTime() != null
-                ? Date.from(searchRequest.getPointInTime().toInstant())
-                : null;
+            OffsetDateTime pointInTime = searchRequest != null ? searchRequest.getPointInTime() : null;
 
             // Build search condition if criteria provided
             GroupConditionDto condition = null;
@@ -439,7 +421,7 @@ public class ExampleEntityController {
                         entityService.streamAll(modelSpec, ExampleEntity.class,
                                 SearchAndRetrievalParams.builder()
                                         .pageSize(100)
-                                        .pointInTime(pointInTimeDate)
+                                        .pointInTime(pointInTime)
                                         .build())) {
 
                     // Process each entity as it's retrieved (no memory pressure)
@@ -452,7 +434,7 @@ public class ExampleEntityController {
                                 SearchAndRetrievalParams.builder()
                                         .pageSize(100)
                                         .inMemory(false)
-                                        .pointInTime(pointInTimeDate)
+                                        .pointInTime(pointInTime)
                                         .build())) {
 
                     // Process each entity as it's retrieved (no memory pressure)
