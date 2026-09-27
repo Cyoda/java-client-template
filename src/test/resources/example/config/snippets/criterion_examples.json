@@ -4,7 +4,7 @@
     "example": {
       "type": "simple",
       "jsonPath": "$.customerType",
-      "operation": "EQUALS",
+      "operatorType": "EQUALS",
       "value": "premium"
     }
   },
@@ -17,13 +17,13 @@
         {
           "type": "simple",
           "jsonPath": "$.creditScore",
-          "operation": "GREATER_OR_EQUAL",
+          "operatorType": "GREATER_OR_EQUAL",
           "value": 700
         },
         {
           "type": "simple",
           "jsonPath": "$.annualRevenue",
-          "operation": "GREATER_THAN",
+          "operatorType": "GREATER_THAN",
           "value": 1000000
         }
       ]
@@ -40,12 +40,6 @@
           "calculationNodesTags": "validation,criteria",
           "responseTimeoutMs": 5000,
           "retryPolicy": "FIXED"
-        },
-        "criterion": {
-          "type": "simple",
-          "jsonPath": "$.sampleFieldB",
-          "operation": "GREATER_THAN",
-          "value": 100
         }
       }
     }

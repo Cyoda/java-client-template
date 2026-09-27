@@ -20,7 +20,7 @@
         "attachEntity": true,
         "calculationNodesTags": "async_processing",
         "responseTimeoutMs": 5000,
-        "retryPolicy": "EXPONENTIAL_BACKOFF"
+        "retryPolicy": "FIXED"
       }
     },
     "async_new_tx_processor": {
@@ -31,7 +31,7 @@
         "attachEntity": false,
         "calculationNodesTags": "background_processing",
         "responseTimeoutMs": 10000,
-        "retryPolicy": "LINEAR_BACKOFF"
+        "retryPolicy": "NONE"
       }
     }
   },
@@ -44,7 +44,7 @@
     "attachEntity": "Whether to attach entity data to the request (boolean)",
     "calculationNodesTags": "Tags for calculation node selection (string)",
     "responseTimeoutMs": "Response timeout in milliseconds (integer)",
-    "retryPolicy": "Retry policy for failed executions (FIXED, EXPONENTIAL_BACKOFF, LINEAR_BACKOFF)"
+    "retryPolicy": "Retry policy for failed executions (NONE, FIXED)"
   },
   "processor_chain_example": {
     "description": "Multiple processors in a single transition",
@@ -68,7 +68,7 @@
           "attachEntity": true,
           "calculationNodesTags": "business_logic",
           "responseTimeoutMs": 8000,
-          "retryPolicy": "EXPONENTIAL_BACKOFF"
+          "retryPolicy": "FIXED"
         }
       },
       {
@@ -79,7 +79,7 @@
           "attachEntity": false,
           "calculationNodesTags": "notifications",
           "responseTimeoutMs": 5000,
-          "retryPolicy": "LINEAR_BACKOFF"
+          "retryPolicy": "NONE"
         }
       }
     ]

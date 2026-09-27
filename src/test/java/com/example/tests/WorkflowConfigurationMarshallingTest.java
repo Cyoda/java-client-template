@@ -2,6 +2,7 @@ package com.example.tests;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaJackson;
 import org.cyoda.cloud.api.common.model.WorkflowConfigurationDto;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -12,6 +13,7 @@ import java.net.URISyntaxException;
 import java.util.Arrays;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -27,7 +29,7 @@ class WorkflowConfigurationMarshallingTest {
 
     @BeforeEach
     void setUp() throws URISyntaxException {
-        objectMapper = new ObjectMapper();
+        objectMapper = CyodaJackson.configure(new ObjectMapper());
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true);
 
         workflowConfigDir = new File(
@@ -50,10 +52,11 @@ class WorkflowConfigurationMarshallingTest {
 
         // When/Then - Marshall each file with strict ObjectMapper
         for (File workflowFile : workflowFiles) {
-            assertDoesNotThrow(
+            WorkflowConfigurationDto dto = assertDoesNotThrow(
                     () -> objectMapper.readValue(workflowFile, WorkflowConfigurationDto.class),
                     "Failed to marshall " + workflowFile.getName()
             );
+            assertThat(dto.getVersion()).as(workflowFile.getName()).isEqualTo("1.5");
         }
     }
 }
