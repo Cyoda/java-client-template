@@ -6,9 +6,12 @@ import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.PropertySource;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.core.io.ClassPathResource;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -40,6 +43,22 @@ class ConfigBindingTest {
                     Config c = ctx.getBean(Config.class);
                     assertThat(c.getAuthMode()).isEqualTo(Config.AuthMode.NONE);
                     assertThat(c.isGrpcTls()).isFalse();
+                });
+    }
+
+    /** The README tells Cloud users to pass credentials as these environment variables. */
+    @Test
+    void cloudCredentialsBindFromTheEnvironmentVariablesTheReadmeDocuments() {
+        runner.withInitializer(ctx -> ctx.getEnvironment().getPropertySources().addFirst(
+                        new SystemEnvironmentPropertySource(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, Map.of(
+                                "APP_CONFIG_CYODA_HOST", "tenant.eu.cyoda.net",
+                                "APP_CONFIG_CYODA_CLIENT_ID", "the-id",
+                                "APP_CONFIG_CYODA_CLIENT_SECRET", "the-secret"))))
+                .run(ctx -> {
+                    Config c = ctx.getBean(Config.class);
+                    assertThat(c.getCyodaHost()).isEqualTo("tenant.eu.cyoda.net");
+                    assertThat(c.getCyodaClientId()).isEqualTo("the-id");
+                    assertThat(c.getCyodaClientSecret()).isEqualTo("the-secret");
                 });
     }
 

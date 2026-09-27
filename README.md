@@ -17,17 +17,42 @@ cd java-client-template
 
 ### 2. ⚙️ Configure the Application
 
-Configuration is managed via Spring Boot YAML files. For local development:
+Configuration is managed via Spring Boot YAML files. `application.yml` holds Cloud-shaped defaults.
+
+**Local cyoda-go (the `local` profile).** `src/main/resources/application-local.yml` ships with the
+template and targets a local cyoda-go on its defaults (REST `http://localhost:8080/api`, gRPC
+`localhost:9090`, no TLS, `auth-mode: none`). It moves the app to port **8081** so it does not clash
+with cyoda-go on 8080. It is tracked in git: do not put credentials in it.
 
 ```bash
-# Option 1: Create a local profile
-# For example, create src/main/resources/application-local.yml with your settings
 ./gradlew runApp --args='--spring.profiles.active=local'
+```
 
-# Option 2: Use environment variables
-export APP_CONFIG_CYODA_HOST=your-cyoda-host:8443
+**Cyoda Cloud.** Never commit credentials. Either use environment variables:
+
+```bash
+export APP_CONFIG_CYODA_HOST=your-cyoda-host
 export APP_CONFIG_CYODA_CLIENT_ID=your-client-id
 export APP_CONFIG_CYODA_CLIENT_SECRET=your-client-secret
+./gradlew runApp
+```
+
+or a git-ignored `application-cloud.yml` (every `application-*.yml` except the shipped
+`application-local.yml` is git-ignored). Put it in `config/` at the project root rather than in
+`src/main/resources`, so it is not packaged into the jar; Spring Boot reads `./config/` from the
+working directory:
+
+```yaml
+# config/application-cloud.yml
+app:
+  config:
+    cyoda-host: your-cyoda-host
+    cyoda-client-id: your-client-id
+    cyoda-client-secret: your-client-secret
+```
+
+```bash
+./gradlew runApp --args='--spring.profiles.active=cloud'
 ```
 
 ### 3. 🧰 Run Workflow Import Tool
@@ -56,9 +81,9 @@ java -jar build/libs/java-client-template-1.0-SNAPSHOT-workflow-import.jar --spr
 java -jar build/libs/java-client-template-1.0-SNAPSHOT.jar --spring.profiles.active=local
 ```
 
-> Access the app: [http://localhost:8080/swagger-ui/index.html](http://localhost:8080/swagger-ui/index.html)
+> Access the app (local profile): [http://localhost:8081/api/swagger-ui/index.html](http://localhost:8081/api/swagger-ui/index.html)
 >
-> **Note**: The default port is 8080 as configured in `src/main/resources/application.yml`. You can change this by setting the `server.port` property.
+> **Note**: The app runs on port 8080 by default (`src/main/resources/application.yml`) and on 8081 with the `local` profile, under the `/api` context path. You can change the port by setting the `server.port` property.
 
 ---
 

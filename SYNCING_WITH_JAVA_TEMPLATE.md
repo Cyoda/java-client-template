@@ -283,6 +283,7 @@ The template now implements cyoda-go's contract. Contract files are vendored und
 
 | Area | Before | After |
 |---|---|---|
+| **Warning: `application-local.yml` and `.gitignore` (do this first)** | `.gitignore` ignored every `application-*.yml`, and the README told you to create `application-local.yml` with your settings, including Cloud credentials | the template ships `src/main/resources/application-local.yml` (local cyoda-go profile, no credentials) and un-ignores it. If your repo kept Cloud credentials in `application-local.yml`, move them to environment variables (`APP_CONFIG_CYODA_HOST`, `APP_CONFIG_CYODA_CLIENT_ID`, `APP_CONFIG_CYODA_CLIENT_SECRET`) or to a git-ignored `config/application-cloud.yml` (run with `--spring.profiles.active=cloud`) **before** syncing `.gitignore` and `application-local.yml`; otherwise the next `git add` can commit them |
 | Contract files | `src/main/resources/{proto,schema,api}` | `src/main/resources/cyoda/{proto,schema,openapi}` + `CYODA_VERSION`; transforms in `buildSrc/` |
 | OpenAPI DTO packages | `org.cyoda.cloud.api.{common,workflow,search,audit,iam}.model` | `org.cyoda.cloud.api.common.model` only |
 | Condition operators | `OperatorTypeDto`, `GroupOperatorDto`, `.operation(…)` | `SimpleConditionDto.OperatorTypeEnum`, `LifecycleConditionDto.OperatorTypeEnum`, `GroupConditionDto.OperatorEnum`, `.operatorType(…)` |

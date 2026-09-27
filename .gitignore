@@ -36,8 +36,10 @@ gradle-app.setting
 # agent-safehouse local settings
 .sandbox/
 
+# Profile configs may hold credentials (e.g. config/application-cloud.yml): never commit them.
 application-*.yml
-# Except the template's own local-profile default, which ships as part of the repo.
+application-*.yaml
+# Except the template's own local-profile default, which ships as part of the repo (no credentials).
 !src/main/resources/application-local.yml
 
 # Python version manager
