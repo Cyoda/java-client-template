@@ -3,6 +3,7 @@ package com.java_template.common.grpc.client.event_handling;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.call.CalloutScope;
 import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.workflow.CyodaContextFactory;
 import com.java_template.common.workflow.CyodaEventContext;
@@ -79,7 +80,9 @@ public abstract class AbstractEventStrategy<
 
             logger.debug("Running {} {}: {}", operation.getClass().getSimpleName(), cloudEventType, operationName);
 
-            return executeOperation(operation, request, context);
+            try (CalloutScope ignored = CalloutScope.open(context.txToken())) {
+                return executeOperation(operation, request, context);
+            }
 
         } catch (Exception e) {
             logger.error("Error handling event: {}", CloudEvents.describe(cloudEvent), e);
