@@ -49,8 +49,20 @@ public final class CyodaServer implements AutoCloseable {
 
     public static CyodaServer start(Path binary, Profile profile, Path logDir) {
         try {
-            int[] ports = FreePorts.allocate(3);
             Path work = Files.createTempDirectory("cyoda-" + profile.name() + "-");
+            return start(binary, profile, logDir, work);
+        } catch (IOException e) {
+            throw new UncheckedIOException("cannot start cyoda " + binary, e);
+        }
+    }
+
+    /**
+     * Package-private so tests can supply a known work dir and observe that it is gone after a
+     * startup failure, without adding a public API just for that.
+     */
+    static CyodaServer start(Path binary, Profile profile, Path logDir, Path work) {
+        try {
+            int[] ports = FreePorts.allocate(3);
             Files.createDirectories(logDir);
             Path logFile = logDir.resolve(profile.name() + "-" + TS.format(LocalDateTime.now()) + ".log");
             // The child runs with workDir as its cwd, not this JVM's; a binary path given relative
@@ -66,7 +78,11 @@ public final class CyodaServer implements AutoCloseable {
             log.info("cyoda '{}' up: http={} grpc={} log={}", profile.name(), server.apiUrl(), ports[1], logFile);
             return server;
         } catch (IOException e) {
+            deleteRecursively(work);
             throw new UncheckedIOException("cannot start cyoda " + binary, e);
+        } catch (RuntimeException e) {
+            deleteRecursively(work);
+            throw e;
         }
     }
 
@@ -126,7 +142,9 @@ public final class CyodaServer implements AutoCloseable {
         long deadline = System.nanoTime() + limit.toNanos();
         while (System.nanoTime() < deadline) {
             if (!process.isAlive()) {
-                throw new IllegalStateException("cyoda exited with code " + process.exitValue() + " during startup:\n" + logTail(50));
+                String message = "cyoda exited with code " + process.exitValue() + " during startup:\n" + logTail(50);
+                close();
+                throw new IllegalStateException(message);
             }
             try {
                 if (http.send(health, HttpResponse.BodyHandlers.discarding()).statusCode() == 200) {
@@ -140,8 +158,9 @@ public final class CyodaServer implements AutoCloseable {
             }
             sleep(100);
         }
+        String message = "cyoda did not become healthy within " + limit.toSeconds() + " s:\n" + logTail(50);
         close();
-        throw new IllegalStateException("cyoda did not become healthy within " + limit.toSeconds() + " s:\n" + logTail(50));
+        throw new IllegalStateException(message);
     }
 
     @Override
@@ -157,7 +176,11 @@ public final class CyodaServer implements AutoCloseable {
                 Thread.currentThread().interrupt();
             }
         }
-        try (Stream<Path> files = Files.walk(workDir)) {
+        deleteRecursively(workDir);
+    }
+
+    private static void deleteRecursively(Path dir) {
+        try (Stream<Path> files = Files.walk(dir)) {
             files.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
         } catch (IOException ignored) {
             // temp dir cleanup is best effort
