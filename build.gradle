@@ -173,8 +173,13 @@ test {
     systemProperty 'user.dir', project.projectDir.absolutePath
 }
 
+tasks.register('prepareEventSchemas', com.cyoda.build.PrepareEventSchemasTask) {
+    sourceDir = file('src/main/resources/cyoda/schema')
+    outputDir = layout.buildDirectory.dir('cyoda-schema')
+}
+
 jsonSchema2Pojo {
-    source = files("src/main/resources/schema")
+    source = files(layout.buildDirectory.dir('cyoda-schema'))
     targetDirectory = file("$buildDir/generated-sources/js2p")
     targetPackage = 'org.cyoda.cloud.api.event'
     generateBuilders = true
@@ -189,6 +194,8 @@ jsonSchema2Pojo {
     includeRequiredPropertiesConstructor = false
     includeAllPropertiesConstructor = true
 }
+
+tasks.named('generateJsonSchema2Pojo') { dependsOn 'prepareEventSchemas' }
 
 tasks.register('prepareCyodaProto', com.cyoda.build.PrepareCyodaProtoTask) {
     sourceDir = file('src/main/resources/cyoda/proto')
