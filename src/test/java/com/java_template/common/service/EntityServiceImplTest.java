@@ -251,6 +251,7 @@ class EntityServiceImplTest {
     void testCreateSuccess() {
         UUID savedEntityId = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
         EntityTransactionResponse transactionResponse = createTransactionResponse(savedEntityId);
+        OffsetDateTime timeOfChange = OffsetDateTime.parse("2026-09-27T10:11:12.123456789Z");
         when(repository.save(eq(createTestModelSpec()), any()))
                 .thenReturn(CompletableFuture.completedFuture(transactionResponse));
         when(repository.findById(eq(savedEntityId), any()))
@@ -259,7 +260,7 @@ class EntityServiceImplTest {
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(transactionResponse.getTransactionInfo().getTransactionId())
-                                .withTimeOfChange(OffsetDateTime.now())
+                                .withTimeOfChange(timeOfChange)
                 )));
 
         EntityWithMetadata<TestEntity> result = entityService.create(testEntity);
@@ -270,6 +271,9 @@ class EntityServiceImplTest {
         assertEntityMatches(result.entity(), testEntity);
         assertEquals(savedEntityId, result.metadata().getId());
         verify(repository).save(eq(createTestModelSpec()), any());
+        // Pins that the reload passes EntityChangeMeta.timeOfChange through verbatim, at full
+        // nanosecond precision, rather than losing precision by round-tripping through Date.
+        verify(repository).findById(savedEntityId, timeOfChange);
     }
 
     @Test
@@ -325,6 +329,7 @@ class EntityServiceImplTest {
     @DisplayName("update should pass null transition directly to repository")
     void testUpdateWithNullTransition() {
         EntityTransactionResponse response = createTransactionResponse(testEntityId);
+        OffsetDateTime timeOfChange = OffsetDateTime.parse("2026-09-27T10:11:12.123456789Z");
         when(repository.update(eq(testEntityId), any(), isNull()))
                 .thenReturn(CompletableFuture.completedFuture(response));
         when(repository.findById(eq(testEntityId), any()))
@@ -333,7 +338,7 @@ class EntityServiceImplTest {
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(response.getTransactionInfo().getTransactionId())
-                                .withTimeOfChange(OffsetDateTime.now())
+                                .withTimeOfChange(timeOfChange)
                 )));
 
         EntityWithMetadata<TestEntity> result = entityService.update(testEntityId, testEntity, null);
@@ -344,6 +349,9 @@ class EntityServiceImplTest {
         assertEntityMatches(result.entity(), testEntity);
         assertEquals(testEntityId, result.metadata().getId());
         verify(repository).update(eq(testEntityId), any(), isNull());
+        // Pins that the reload passes EntityChangeMeta.timeOfChange through verbatim, at full
+        // nanosecond precision, rather than losing precision by round-tripping through Date.
+        verify(repository).findById(testEntityId, timeOfChange);
     }
 
     @Test
