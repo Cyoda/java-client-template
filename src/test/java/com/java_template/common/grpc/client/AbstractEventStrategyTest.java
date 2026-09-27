@@ -261,4 +261,58 @@ class AbstractEventStrategyTest {
         assertEquals(java.util.Optional.of("8824c480-c166-11ee-bf9f-ae468cd3ed16"),
                 AbstractEventStrategy.recoverEntityIdFromCloudEvent(cloudEvent));
     }
+
+    @Test
+    void aFailedCalloutIsLoggedWithoutItsTxTokenOrTheCallersIdentity() throws Exception {
+        CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
+        ObjectMapper om = wireMapper.mapper();
+        OperationFactory factory = mock(OperationFactory.class);
+        lenient().when(factory.getProcessorForModel(any())).thenThrow(new IllegalStateException("boom"));
+        ProcessorEventStrategy strategy = new ProcessorEventStrategy(factory, wireMapper, new CyodaContextFactory(wireMapper));
+
+        ObjectNode request = om.createObjectNode();
+        request.put("id", "evt-1");
+        request.put("requestId", "r-1");
+        request.put("entityId", UUID.randomUUID().toString());
+        request.put("processorId", "p-1");
+        request.put("processorName", "SomeProcessor");
+        ObjectNode payload = request.putObject("payload");
+        payload.put("type", "ENTITY");
+        payload.putObject("meta").putObject("modelKey").put("name", "m").put("version", 1);
+        payload.putObject("data");
+        io.cloudevents.v1.proto.CloudEvent ce = io.cloudevents.v1.proto.CloudEvent.newBuilder()
+                .setId("ce-1").setSource("test").setSpecVersion("1.0")
+                .setType("EntityProcessorCalculationRequest")
+                .putAttributes("cyodatxtoken", ceString("secret-tx-token"))
+                .putAttributes("authtype", ceString("user"))
+                .putAttributes("authid", ceString("secret-user-id"))
+                .putAttributes("authclaims", ceString("ROLE_SECRET"))
+                .setTextData(om.writeValueAsString(request)).build();
+
+        ch.qos.logback.classic.Logger log =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(AbstractEventStrategy.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        log.addAppender(appender);
+        try {
+            strategy.handleEvent(ce);
+        } finally {
+            log.detachAppender(appender);
+        }
+
+        assertFalse(appender.list.isEmpty());
+        for (ch.qos.logback.classic.spi.ILoggingEvent event : appender.list) {
+            String line = event.getFormattedMessage();
+            assertFalse(line.contains("secret-tx-token"), line);
+            assertFalse(line.contains("secret-user-id"), line);
+            assertFalse(line.contains("ROLE_SECRET"), line);
+        }
+        assertTrue(appender.list.stream().anyMatch(e -> e.getFormattedMessage().contains("ce-1")
+                && e.getFormattedMessage().contains("r-1")));
+    }
+
+    private static io.cloudevents.v1.proto.CloudEvent.CloudEventAttributeValue ceString(String value) {
+        return io.cloudevents.v1.proto.CloudEvent.CloudEventAttributeValue.newBuilder().setCeString(value).build();
+    }
 }

@@ -13,6 +13,7 @@ import com.java_template.common.dto.PageResult;
 import com.java_template.common.exception.CyodaOperationException;
 import com.java_template.common.grpc.client.event_handling.CloudEventBuilder;
 import com.java_template.common.grpc.client.event_handling.CloudEventParser;
+import com.java_template.common.grpc.client.event_handling.CloudEvents;
 import io.cloudevents.v1.proto.CloudEvent;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
@@ -413,9 +414,9 @@ public class CyodaRepository implements CrudRepository {
         try {
             final CloudEvent requestEvent = cloudEventBuilder.buildEvent(baseEvent);
             return CompletableFuture.supplyAsync(() -> {
-                        logger.debug("Sending event: {}", requestEvent);
+                        logger.debug("Sending event: {}", CloudEvents.describe(requestEvent));
                         CloudEvent cloudEvent = requestAndGetOrThrow(apiCall, requestEvent);
-                        logger.debug("Received event: {}", cloudEvent);
+                        logger.debug("Received event: {}", CloudEvents.describe(cloudEvent));
                         return cloudEvent;
                     })
                     .thenApply(response -> cloudEventParser.parseCloudEvent(response, responsePayloadType))

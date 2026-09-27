@@ -6,6 +6,7 @@ import com.java_template.common.grpc.client.event_handling.CloudEventBuilder;
 import com.java_template.common.grpc.client.event_handling.EventHandler;
 import com.java_template.common.grpc.client.event_handling.EventHandlingStrategy;
 import com.java_template.common.grpc.client.event_handling.EventSender;
+import com.java_template.common.grpc.client.event_handling.CloudEvents;
 import io.cloudevents.v1.proto.CloudEvent;
 import org.cyoda.cloud.api.event.common.BaseEvent;
 import org.cyoda.cloud.api.event.common.CloudEventType;
@@ -53,7 +54,7 @@ class CyodaCalculationMemberClient implements EventHandler {
         try {
             cloudEventType = CloudEventType.fromValue(cloudEvent.getType());
         } catch (Exception e) {
-            log.error("Failed to parse CloudEventType from event: {}", cloudEvent, e);
+            log.error("Failed to parse CloudEventType from event: {}", CloudEvents.describe(cloudEvent), e);
             return;
         }
 
@@ -96,7 +97,7 @@ class CyodaCalculationMemberClient implements EventHandler {
                 }
 
             } catch (Exception e) {
-                log.error("Error processing event: {}", cloudEvent, e);
+                log.error("Error processing event: {}", CloudEvents.describe(cloudEvent), e);
             }
         });
     }

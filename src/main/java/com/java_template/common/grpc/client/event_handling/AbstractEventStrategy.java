@@ -62,7 +62,7 @@ public abstract class AbstractEventStrategy<
         try {
             context = eventContextFactory.createCyodaEventContext(cloudEvent, getRequestClass());
         } catch (JsonProcessingException e) {
-            logger.error("JsonProcessingException when parsing CloudEvent into {}: {}", getRequestClass().getSimpleName(), cloudEvent, e);
+            logger.error("JsonProcessingException when parsing CloudEvent into {}: {}", getRequestClass().getSimpleName(), CloudEvents.describe(cloudEvent), e);
             return returnErrorResponseFor(cloudEvent, e);
         }
 
@@ -77,7 +77,7 @@ public abstract class AbstractEventStrategy<
             return executeOperation(operation, request, context);
 
         } catch (Exception e) {
-            logger.error("Error handling event: {}", cloudEvent, e);
+            logger.error("Error handling event: {}", CloudEvents.describe(cloudEvent), e);
             return returnErrorResponseFor(request, e);
         }
     }
