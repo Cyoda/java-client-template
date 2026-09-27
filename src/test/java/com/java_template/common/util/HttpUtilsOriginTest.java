@@ -133,6 +133,17 @@ class HttpUtilsOriginTest {
     }
 
     @Test
+    void aJoinedCallWithNoCredentialIsStillRefusedAtAForeignOrigin() {
+        HttpUtils http = httpFor("http://cyoda.example.test/api");
+
+        assertThatThrownBy(() -> http.sendGetRequest(CyodaCallContext.none().withTxToken("tx-secret"), local, "entity/x"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("127.0.0.1")
+                .hasMessageNotContaining("tx-secret");
+        assertThat(seen).isEmpty();
+    }
+
+    @Test
     void defaultPortsAndCaseDoNotMakeAnOriginForeign() {
         assertThat(HttpUtils.sameOrigin(URI.create("https://Cyoda.Example/api"), URI.create("https://cyoda.example:443/x"))).isTrue();
         assertThat(HttpUtils.sameOrigin(URI.create("HTTP://cyoda.example/api"), URI.create("http://cyoda.example:80/api"))).isTrue();

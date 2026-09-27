@@ -253,14 +253,15 @@ public class HttpUtils {
     /**
      * Refuses a request that would carry a Cyoda credential (M2M or a forwarded user token) to any origin but
      * the configured {@code cyoda-api-url}: those tokens are Cyoda's, and must never reach another host. Checked
-     * before the token is resolved and before any network I/O. A request with no credential may go anywhere.
+     * before the token is resolved and before any network I/O. A joined call is held to the same rule even with
+     * no credential, because its tx-token is a bearer for the transaction. A request with neither may go anywhere.
      */
     private void requireCyodaOriginForCredential(CyodaCallContext ctx, URI target) {
-        if (ctx.credential() instanceof CyodaCallContext.None) {
+        if (ctx.credential() instanceof CyodaCallContext.None && !ctx.isJoined()) {
             return;
         }
         if (cyodaOrigin == null || !sameOrigin(cyodaOrigin, target)) {
-            throw new IllegalArgumentException("refusing to send a Cyoda credential to " + describeOrigin(target)
+            throw new IllegalArgumentException("refusing to send a Cyoda credential or tx-token to " + describeOrigin(target)
                     + ": credentials go only to the configured app.config.cyoda-api-url origin ("
                     + (cyodaOrigin == null ? "not set" : describeOrigin(cyodaOrigin)) + ")");
         }

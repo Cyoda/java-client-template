@@ -58,7 +58,8 @@ import java.util.stream.Stream;
  * - Failures are thrown as the typed Cyoda exceptions (com.java_template.common.exception), never wrapped in a
  *   CompletionException, so they can be caught directly: CyodaCalloutEndedException (stop working on this
  *   request), CyodaRetryableException, CyodaCommitInJoinedTransactionException (use CalloutScope.unjoined),
- *   CyodaJoinedResponseTooLargeException (page the read), CyodaAccessDeniedException, and otherwise
+ *   CyodaJoinedResponseTooLargeException (narrow the condition; inside a callout a read cannot be paged),
+ *   CyodaAccessDeniedException, and otherwise
  *   CyodaOperationException / CyodaHttpException carrying the cyoda error code. Local argument refusals are
  *   IllegalArgumentException or IllegalStateException, as described below.
  *
@@ -77,6 +78,10 @@ import java.util.stream.Stream;
  *   memory at once, before the stream is returned. A result that fills the 10 000 throws
  *   IllegalStateException when the stream is created, before any entity is streamed, since whether more
  *   exist cannot be told: narrow the condition.
+ * - A joined answer is also bounded in bytes: cyoda-go refuses a joined read whose answer exceeds
+ *   CYODA_CALLOUT_JOINED_RESPONSE_MAX_BYTES (10 MiB by default) with CyodaJoinedResponseTooLargeException.
+ *   With entities larger than about 1 KB that ceiling is reached well before 9 999 matches. The remedy is to
+ *   narrow the condition (or raise the ceiling on the cyoda side); paging is not available inside a callout.
  * - pointInTime must be null on every read (getById, findByBusinessId, search/findAll and the streams,
  *   getEntityCount, getEntityStatsByState, getEntityChangesMetadata): a point-in-time read is not supported
  *   inside a callout's transaction, and a non-null value throws IllegalArgumentException.
@@ -282,8 +287,9 @@ public interface EntityService {
      * Automatically handles pagination internally and streams results.
      * The stream MUST be closed after use (use try-with-resources).
      * Inside a processor or criterion (an open CalloutScope) pageSize is ignored: the stream is ONE direct
-     * search of up to 9 999 entities, read at once, and a larger result throws IllegalStateException (see the
-     * interface Javadoc).
+     * search of up to 9 999 entities, read at once, and a larger result throws IllegalStateException; an answer
+     * above cyoda's joined-response byte ceiling (10 MiB by default) throws CyodaJoinedResponseTooLargeException
+     * (see the interface Javadoc).
      *
      * @param modelSpec Model specification containing name and version
      * @param entityClass Entity class type for deserialization
@@ -330,8 +336,9 @@ public interface EntityService {
      * Automatically handles pagination internally and streams results.
      * The stream MUST be closed after use (use try-with-resources).
      * Inside a processor or criterion (an open CalloutScope) pageSize and inMemory are ignored: the stream is
-     * ONE direct search of up to 9 999 matches, read at once, and a larger result throws IllegalStateException
-     * (see the interface Javadoc).
+     * ONE direct search of up to 9 999 matches, read at once, and a larger result throws IllegalStateException;
+     * an answer above cyoda's joined-response byte ceiling (10 MiB by default) throws
+     * CyodaJoinedResponseTooLargeException (see the interface Javadoc).
      *
      * @param modelSpec Model specification containing name and version
      * @param condition Search condition (use SearchConditionBuilder.group())

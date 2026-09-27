@@ -39,7 +39,9 @@ import java.util.List;
  *   direct search (an async snapshot would not see the transaction's writes).
  * - searchAsStream/streamAll here ignore pageSize and inMemory: they read every match, up to 9 999, in that
  *   one search, into memory at once. A result of 10 000 or more throws IllegalStateException before anything
- *   is streamed, so keep the condition narrow enough to bound the result.
+ *   is streamed, so keep the condition narrow enough to bound the result. The answer is also capped in
+ *   bytes by cyoda (CYODA_CALLOUT_JOINED_RESPONSE_MAX_BYTES, 10 MiB by default): larger entities hit
+ *   CyodaJoinedResponseTooLargeException sooner. Paging is not available inside a callout.
  * - search/findAll read page 0 only (pageSize up to 10 000); asking for a later page throws.
  * - Outside a processor (e.g. in a controller) streams page lazily at pageSize, for large datasets.
  * <p>
