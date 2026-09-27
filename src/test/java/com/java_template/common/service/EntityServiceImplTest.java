@@ -1518,4 +1518,35 @@ class EntityServiceImplTest {
         verify(repository).findById(eq(joined), eq(testEntityId), isNull());
         verify(repository, never()).getEntityChangesMetadata(any(CyodaCallContext.class), any(UUID.class), any());
     }
+
+    @Test
+    @DisplayName("outside a callout scope streams still page at the caller's pageSize")
+    void unjoinedStreamsStillPageAtTheCallersPageSize() {
+        UUID searchId = UUID.randomUUID();
+        when(repository.findAll(any(CyodaCallContext.class), eq(createTestModelSpec()), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                                PageResult.of(searchId, List.of(createTestDataPayload(testEntity, testEntityId)), 0, 1, 2L)),
+                        CompletableFuture.completedFuture(
+                                PageResult.of(searchId, List.of(createTestDataPayload(testEntity2, testEntityId2)), 1, 1, 2L)));
+        when(repository.findAllByCriteria(any(CyodaCallContext.class), eq(createTestModelSpec()), any(GroupConditionDto.class), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                                PageResult.of(searchId, List.of(createTestDataPayload(testEntity, testEntityId)), 0, 1, 2L)),
+                        CompletableFuture.completedFuture(
+                                PageResult.of(searchId, List.of(createTestDataPayload(testEntity2, testEntityId2)), 1, 1, 2L)));
+
+        assertEquals(2, entityService.streamAll(createTestModelSpec(), TestEntity.class,
+                SearchAndRetrievalParams.builder().pageSize(1).build()).toList().size());
+        assertEquals(2, entityService.searchAsStream(createTestModelSpec(), createActiveStatusCondition(), TestEntity.class,
+                SearchAndRetrievalParams.builder().pageSize(1).build()).toList().size());
+
+        ArgumentCaptor<SearchAndRetrievalParams> findAll = ArgumentCaptor.forClass(SearchAndRetrievalParams.class);
+        verify(repository, times(2)).findAll(eq(CyodaCallContext.m2m()), eq(createTestModelSpec()), findAll.capture());
+        assertEquals(List.of(1, 1), findAll.getAllValues().stream().map(SearchAndRetrievalParams::pageSize).toList());
+        assertEquals(List.of(0, 1), findAll.getAllValues().stream().map(SearchAndRetrievalParams::pageNumber).toList());
+        ArgumentCaptor<SearchAndRetrievalParams> search = ArgumentCaptor.forClass(SearchAndRetrievalParams.class);
+        verify(repository, times(2)).findAllByCriteria(eq(CyodaCallContext.m2m()), eq(createTestModelSpec()),
+                any(GroupConditionDto.class), search.capture());
+        assertEquals(List.of(1, 1), search.getAllValues().stream().map(SearchAndRetrievalParams::pageSize).toList());
+        assertEquals(List.of(0, 1), search.getAllValues().stream().map(SearchAndRetrievalParams::pageNumber).toList());
+    }
 }

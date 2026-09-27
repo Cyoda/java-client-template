@@ -9,6 +9,7 @@ import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.repository.CrudRepository;
+import com.java_template.common.repository.CyodaRepository;
 import com.java_template.common.repository.SearchAndRetrievalParams;
 import com.java_template.common.util.Futures;
 import com.java_template.common.workflow.CyodaEntity;
@@ -282,7 +283,10 @@ public class EntityServiceImpl implements EntityService {
         return Futures.joinUnwrapped(repository.getEntityStatsByState(callContexts.current(), modelSpec, states, pointInTime));
     }
 
-    /** Every page, including those fetched lazily as the stream is consumed, uses the context of this call. */
+    /**
+     * Every page, including those fetched lazily as the stream is consumed, uses the context of this call.
+     * Inside a callout scope the stream is one direct search ({@link #joinedStreamParams}).
+     */
     @Override
     public <T extends CyodaEntity> Stream<EntityWithMetadata<T>> streamAll(
             @NotNull final ModelSpec modelSpec,
@@ -290,6 +294,9 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final SearchAndRetrievalParams params
     ) {
         final CyodaCallContext ctx = callContexts.current();
+        if (ctx.isJoined()) {
+            return findAll(ctx, modelSpec, entityClass, joinedStreamParams(params)).data().stream();
+        }
         // Fetch first page to get total size upfront
         PageResult<EntityWithMetadata<T>> firstPage = findAll(
                 ctx,
@@ -370,7 +377,10 @@ public class EntityServiceImpl implements EntityService {
         );
     }
 
-    /** Every page, including those fetched lazily as the stream is consumed, uses the context of this call. */
+    /**
+     * Every page, including those fetched lazily as the stream is consumed, uses the context of this call.
+     * Inside a callout scope the stream is one direct search ({@link #joinedStreamParams}).
+     */
     @Override
     public <T extends CyodaEntity> Stream<EntityWithMetadata<T>> searchAsStream(
             @NotNull final ModelSpec modelSpec,
@@ -379,6 +389,9 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final SearchAndRetrievalParams params
     ) {
         final CyodaCallContext ctx = callContexts.current();
+        if (ctx.isJoined()) {
+            return search(ctx, modelSpec, condition, entityClass, joinedStreamParams(params)).data().stream();
+        }
         // Fetch first page to get total size upfront
         PageResult<EntityWithMetadata<T>> firstPage = search(
                 ctx,
@@ -778,6 +791,25 @@ public class EntityServiceImpl implements EntityService {
             @Nullable final OffsetDateTime pointInTime
     ) {
         return Futures.joinUnwrapped(repository.getEntityChangesMetadata(ctx, entityId, pointInTime));
+    }
+
+    /**
+     * A stream inside a callout scope reads its whole result in ONE direct search of
+     * {@link CyodaRepository#DIRECT_SEARCH_LIMIT} entities, whatever the caller's pageSize: a direct search has
+     * no further pages (an async snapshot would not see the transaction's writes, spec §4.4), so paging at
+     * pageSize would end every stream after its first page. A search that fills the limit fails loudly with
+     * {@link IllegalStateException} in the repository, before anything is streamed, since whether more
+     * entities exist cannot be told. The caller's pointInTime is passed on, so it is still refused.
+     */
+    private static SearchAndRetrievalParams joinedStreamParams(final SearchAndRetrievalParams params) {
+        return SearchAndRetrievalParams.builder()
+                .pageSize(CyodaRepository.DIRECT_SEARCH_LIMIT)
+                .pageNumber(0)
+                .pointInTime(params.pointInTime())
+                .inMemory(params.inMemory())
+                .awaitLimitMs(params.awaitLimitMs())
+                .pollIntervalMs(params.pollIntervalMs())
+                .build();
     }
 
     // ========================================

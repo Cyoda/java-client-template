@@ -70,10 +70,13 @@ import java.util.stream.Stream;
  *   A page request with pageNumber &gt; 0 or a searchId, or a pageSize above 10 000, throws
  *   IllegalStateException before anything is sent.
  * - A page that has more matches than its pageSize reports hasNext(), so reading on (page 1) throws
- *   IllegalStateException rather than silently stopping. streamAll()/searchAsStream() therefore stream
- *   every match when they all fit in one page of params.pageSize(), and throw IllegalStateException
- *   otherwise: pick a pageSize that covers the result, or narrow the condition. A pageSize of exactly
- *   10 000 that comes back full also throws, since whether more exist cannot be told.
+ *   IllegalStateException rather than silently stopping. A pageSize of exactly 10 000 that comes back full
+ *   also throws, since whether more exist cannot be told.
+ * - streamAll()/searchAsStream() ignore params.pageSize() there: each runs ONE direct search of 10 000
+ *   (CyodaRepository.DIRECT_SEARCH_LIMIT) and streams every match, up to 9 999. That result is read into
+ *   memory at once, before the stream is returned. A result that fills the 10 000 throws
+ *   IllegalStateException when the stream is created, before any entity is streamed, since whether more
+ *   exist cannot be told: narrow the condition.
  * - pointInTime must be null on every read (getById, findByBusinessId, search/findAll and the streams,
  *   getEntityCount, getEntityStatsByState, getEntityChangesMetadata): a point-in-time read is not supported
  *   inside a callout's transaction, and a non-null value throws IllegalArgumentException.
@@ -278,6 +281,9 @@ public interface EntityService {
      * Stream all entities for memory-efficient processing.
      * Automatically handles pagination internally and streams results.
      * The stream MUST be closed after use (use try-with-resources).
+     * Inside a processor or criterion (an open CalloutScope) pageSize is ignored: the stream is ONE direct
+     * search of up to 9 999 entities, read at once, and a larger result throws IllegalStateException (see the
+     * interface Javadoc).
      *
      * @param modelSpec Model specification containing name and version
      * @param entityClass Entity class type for deserialization
@@ -323,6 +329,9 @@ public interface EntityService {
      * Stream entities by condition for memory-efficient processing.
      * Automatically handles pagination internally and streams results.
      * The stream MUST be closed after use (use try-with-resources).
+     * Inside a processor or criterion (an open CalloutScope) pageSize and inMemory are ignored: the stream is
+     * ONE direct search of up to 9 999 matches, read at once, and a larger result throws IllegalStateException
+     * (see the interface Javadoc).
      *
      * @param modelSpec Model specification containing name and version
      * @param condition Search condition (use SearchConditionBuilder.group())

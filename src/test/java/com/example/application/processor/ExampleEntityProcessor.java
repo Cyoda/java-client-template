@@ -35,9 +35,13 @@ import java.util.List;
  * - Performance considerations
  * <p>
  * SEARCH PATTERN GUIDANCE (when interacting with OTHER entities):
- * - In-memory search (inMemory=true): Use for small, bounded result sets
- * - Streaming (searchAsStream): Use for processing large datasets without loading into memory
- * - Avoid loading all results into memory with .toList() on streams
+ * - Inside a processor every EntityService call joins the callout's transaction, and a search runs as ONE
+ *   direct search (an async snapshot would not see the transaction's writes).
+ * - searchAsStream/streamAll here ignore pageSize and inMemory: they read every match, up to 9 999, in that
+ *   one search, into memory at once. A result of 10 000 or more throws IllegalStateException before anything
+ *   is streamed, so keep the condition narrow enough to bound the result.
+ * - search/findAll read page 0 only (pageSize up to 10 000); asking for a later page throws.
+ * - Outside a processor (e.g. in a controller) streams page lazily at pageSize, for large datasets.
  * <p>
  * To create a new processor:
  * 1. Copy this file to your processor package
@@ -161,15 +165,13 @@ public class ExampleEntityProcessor implements CyodaProcessor {
      * Process related entities - example of interacting with OTHER entities
      * Only called if EntityService is injected
      *<p>
-     * SEARCH PATTERN: Streaming for processing large datasets
-     * Use searchAsStream() when processing entities without loading all into memory.
-     * This is memory-efficient for large result sets. Process each entity as it's
-     * retrieved rather than loading all results first.
+     * SEARCH PATTERN: a bounded search of related entities
      *<p>
-     * Inside a processor the stream is ONE direct search joined to the callout's transaction: it yields
-     * every match that fits in one page of pageSize (at most 10 000), and throws IllegalStateException if
-     * there are more, rather than silently stopping. Size pageSize for the expected result, and pass no
-     * pointInTime (refused inside a callout's transaction). See EntityService, "INSIDE A PROCESSOR".
+     * Inside a processor the stream is ONE direct search joined to the callout's transaction, whatever the
+     * pageSize: it yields every match, up to 9 999, read into memory at once, and throws
+     * IllegalStateException when the result reaches 10 000 (before anything is streamed), rather than
+     * silently stopping. Keep the condition narrow enough to bound the result, and pass no pointInTime
+     * (refused inside a callout's transaction). See EntityService, "INSIDE A PROCESSOR".
      */
     private void processRelatedEntities(ExampleEntity entity) {
         // Example: Find related entities and update them
@@ -188,13 +190,11 @@ public class ExampleEntityProcessor implements CyodaProcessor {
                 .operator(GroupConditionDto.OperatorEnum.AND)
                 .conditions(List.of(simpleCondition));
 
-        // Use streaming API for memory-efficient processing of related entities
-        // Process each entity as it's retrieved without loading all into memory
+        // Inside a processor this is ONE direct search in the callout's transaction: every match (up to 9 999)
+        // is read at once, and a larger result throws IllegalStateException - keep the condition narrow.
+        // pageSize/inMemory make no difference here, so the defaults are passed.
         try (var stream = entityService.searchAsStream(modelSpec, condition, OtherEntity.class,
-                SearchAndRetrievalParams.builder()
-                        .pageSize(100)
-                        .inMemory(true)
-                        .build())) {
+                SearchAndRetrievalParams.defaults())) {
             stream.forEach(otherEntityWithMetadata -> {
                 OtherEntity otherEntity = otherEntityWithMetadata.entity();
                 otherEntity.setName("new_name");
