@@ -96,6 +96,17 @@ sourceSets {
             srcDirs += "src/test/kotlin"
         }
     }
+    integrationTest {
+        java.srcDir 'src/integrationTest/java'
+        resources.srcDir 'src/integrationTest/resources'
+        compileClasspath += sourceSets.main.output + sourceSets.test.output
+        runtimeClasspath += sourceSets.main.output + sourceSets.test.output
+    }
+}
+
+configurations {
+    integrationTestImplementation.extendsFrom testImplementation
+    integrationTestRuntimeOnly.extendsFrom testRuntimeOnly
 }
 
 dependencies {
@@ -166,6 +177,8 @@ dependencies {
     testFixturesImplementation platform('org.junit:junit-bom:5.13.1')
     testFixturesImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation testFixtures(project)
+
+    integrationTestImplementation testFixtures(project)
 }
 
 test {
@@ -179,6 +192,32 @@ test {
     systemProperties = System.properties
     systemProperty 'user.dir', project.projectDir.absolutePath
 }
+
+def cyodaPin = file('src/main/resources/cyoda/CYODA_VERSION')
+
+tasks.register('integrationTest', Test) {
+    description = 'Tier-1 integration tests against a cyoda-go subprocess (mock IAM, memory storage)'
+    group = 'verification'
+    testClassesDirs = sourceSets.integrationTest.output.classesDirs
+    classpath = sourceSets.integrationTest.runtimeClasspath
+    useJUnitPlatform()
+    shouldRunAfter tasks.named('test')
+    systemProperty 'user.dir', project.projectDir.absolutePath
+    systemProperty 'cyoda.pinFile', cyodaPin.absolutePath
+    systemProperty 'cyoda.logDir', layout.buildDirectory.dir('cyoda-logs').get().asFile.absolutePath
+    ['cyoda.bin', 'cyoda.allowVersionMismatch'].each { key ->
+        if (System.getProperty(key) != null) {
+            systemProperty key, System.getProperty(key)
+        }
+    }
+    inputs.file cyodaPin
+    testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+    }
+}
+
+tasks.named('check') { dependsOn 'integrationTest' }
 
 tasks.register('prepareEventSchemas', com.cyoda.build.PrepareEventSchemasTask) {
     sourceDir = file('src/main/resources/cyoda/schema')
