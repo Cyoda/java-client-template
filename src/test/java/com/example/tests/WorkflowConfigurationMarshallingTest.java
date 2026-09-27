@@ -2,7 +2,7 @@ package com.example.tests;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.cyoda.cloud.api.workflow.model.WorkflowConfigurationDto;
+import org.cyoda.cloud.api.common.model.WorkflowConfigurationDto;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

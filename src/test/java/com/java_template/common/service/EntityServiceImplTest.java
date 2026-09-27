@@ -10,8 +10,6 @@ import com.java_template.common.workflow.OperationSpecification;
 import lombok.Getter;
 import lombok.Setter;
 import org.cyoda.cloud.api.common.model.GroupConditionDto;
-import org.cyoda.cloud.api.common.model.GroupOperatorDto;
-import org.cyoda.cloud.api.common.model.OperatorTypeDto;
 import org.cyoda.cloud.api.common.model.SimpleConditionDto;
 import org.cyoda.cloud.api.event.common.DataPayload;
 import org.cyoda.cloud.api.event.common.EntityChangeMeta;
@@ -117,11 +115,11 @@ class EntityServiceImplTest {
         ObjectMapper objectMapper = new ObjectMapper();
         SimpleConditionDto simpleCondition = new SimpleConditionDto()
                 .jsonPath("$.status")
-                .operation(OperatorTypeDto.EQUALS)
+                .operatorType(SimpleConditionDto.OperatorTypeEnum.EQUALS)
                 .value(objectMapper.valueToTree("ACTIVE"));
 
         return new GroupConditionDto()
-                .operator(GroupOperatorDto.AND)
+                .operator(GroupConditionDto.OperatorEnum.AND)
                 .conditions(List.of(simpleCondition));
     }
 

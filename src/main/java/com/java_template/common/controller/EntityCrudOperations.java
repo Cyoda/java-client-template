@@ -375,14 +375,14 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             OffsetDateTime pointInTime) {
         try {
             Date pointInTimeDate = toDate(pointInTime);
-            List<QueryConditionDto> conditions = new ArrayList<>();
+            List<GroupConditionDtoAllOfConditions> conditions = new ArrayList<>();
 
             // Build search conditions from filters
             for (FieldFilter filter : filters) {
                 if (filter.value() != null && !filter.value().trim().isEmpty()) {
                     SimpleConditionDto condition = new SimpleConditionDto()
                             .jsonPath("$." + filter.fieldName())
-                            .operation(filter.operation())
+                            .operatorType(filter.operation())
                             .value(objectMapper.valueToTree(filter.value()));
                     conditions.add(condition);
                 }
@@ -392,7 +392,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             if (stateFilter != null && !stateFilter.trim().isEmpty()) {
                 LifecycleConditionDto stateCondition = new LifecycleConditionDto()
                         .field("state")
-                        .operation(OperatorTypeDto.EQUALS)
+                        .operatorType(LifecycleConditionDto.OperatorTypeEnum.EQUALS)
                         .value(objectMapper.valueToTree(stateFilter));
                 conditions.add(stateCondition);
             }
@@ -411,7 +411,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             } else {
                 // For filtered results, get all matching results then manually paginate
                 GroupConditionDto groupCondition = new GroupConditionDto()
-                        .operator(GroupOperatorDto.AND)
+                        .operator(GroupConditionDto.OperatorEnum.AND)
                         .conditions(conditions);
                 PageResult<EntityWithMetadata<T>> pageResult = entityService.search(
                         modelSpec(), groupCondition, entityClass, SearchAndRetrievalParams.builder()
@@ -447,11 +447,11 @@ public class EntityCrudOperations<T extends CyodaEntity> {
         try {
             SimpleConditionDto condition = new SimpleConditionDto()
                     .jsonPath("$." + fieldName)
-                    .operation(OperatorTypeDto.CONTAINS)
+                    .operatorType(SimpleConditionDto.OperatorTypeEnum.CONTAINS)
                     .value(objectMapper.valueToTree(searchValue));
 
             GroupConditionDto groupCondition = new GroupConditionDto()
-                    .operator(GroupOperatorDto.AND)
+                    .operator(GroupConditionDto.OperatorEnum.AND)
                     .conditions(List.of(condition));
 
             PageResult<EntityWithMetadata<T>> pageResult = entityService.search(
@@ -636,21 +636,21 @@ public class EntityCrudOperations<T extends CyodaEntity> {
      * @param operation The comparison operation
      * @param value     The value to compare against
      */
-    public record FieldFilter(String fieldName, OperatorTypeDto operation, String value) {
+    public record FieldFilter(String fieldName, SimpleConditionDto.OperatorTypeEnum operation, String value) {
         public static FieldFilter equals(String fieldName, String value) {
-            return new FieldFilter(fieldName, OperatorTypeDto.EQUALS, value);
+            return new FieldFilter(fieldName, SimpleConditionDto.OperatorTypeEnum.EQUALS, value);
         }
 
         public static FieldFilter contains(String fieldName, String value) {
-            return new FieldFilter(fieldName, OperatorTypeDto.CONTAINS, value);
+            return new FieldFilter(fieldName, SimpleConditionDto.OperatorTypeEnum.CONTAINS, value);
         }
 
         public static FieldFilter greaterThan(String fieldName, String value) {
-            return new FieldFilter(fieldName, OperatorTypeDto.GREATER_THAN, value);
+            return new FieldFilter(fieldName, SimpleConditionDto.OperatorTypeEnum.GREATER_THAN, value);
         }
 
         public static FieldFilter lessThan(String fieldName, String value) {
-            return new FieldFilter(fieldName, OperatorTypeDto.LESS_THAN, value);
+            return new FieldFilter(fieldName, SimpleConditionDto.OperatorTypeEnum.LESS_THAN, value);
         }
     }
 }

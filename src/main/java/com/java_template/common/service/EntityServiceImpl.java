@@ -89,11 +89,11 @@ public class EntityServiceImpl implements EntityService {
     ) {
         SimpleConditionDto simpleCondition = new SimpleConditionDto()
                 .jsonPath("$." + businessIdField)
-                .operation(OperatorTypeDto.EQUALS)
+                .operatorType(SimpleConditionDto.OperatorTypeEnum.EQUALS)
                 .value(objectMapper.valueToTree(businessId));
 
         GroupConditionDto condition = new GroupConditionDto()
-                .operator(GroupOperatorDto.AND)
+                .operator(GroupConditionDto.OperatorEnum.AND)
                 .conditions(List.of(simpleCondition));
 
         PageResult<EntityWithMetadata<T>> result = search(
@@ -133,7 +133,7 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final Class<T> entityClass
     ) {
         // Build a list of SimpleConditions for each business key field
-        List<QueryConditionDto> simpleConditions = new ArrayList<>();
+        List<GroupConditionDtoAllOfConditions> simpleConditions = new ArrayList<>();
 
         for (Map.Entry<String, java.util.function.Function<T, Object>> entry : businessIdExtractors.entrySet()) {
             String fieldName = entry.getKey();
@@ -142,7 +142,7 @@ public class EntityServiceImpl implements EntityService {
 
             SimpleConditionDto condition = new SimpleConditionDto()
                     .jsonPath("$." + fieldName)
-                    .operation(OperatorTypeDto.EQUALS)
+                    .operatorType(SimpleConditionDto.OperatorTypeEnum.EQUALS)
                     .value(objectMapper.valueToTree(value));
 
             simpleConditions.add(condition);
@@ -150,7 +150,7 @@ public class EntityServiceImpl implements EntityService {
 
         // Combine all conditions with AND operator
         GroupConditionDto groupCondition = new GroupConditionDto()
-                .operator(GroupOperatorDto.AND)
+                .operator(GroupConditionDto.OperatorEnum.AND)
                 .conditions(simpleConditions);
 
         // Search with the composite condition

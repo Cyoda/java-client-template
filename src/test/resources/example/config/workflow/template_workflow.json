@@ -80,7 +80,7 @@
               {
                 "type": "simple",
                 "jsonPath": "$.sampleFieldA",
-                "operation": "EQUALS",
+                "operatorType": "EQUALS",
                 "value": "template_value_01"
               }
             ]

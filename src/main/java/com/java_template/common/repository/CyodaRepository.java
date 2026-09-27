@@ -16,7 +16,6 @@ import io.cloudevents.v1.proto.CloudEvent;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import org.cyoda.cloud.api.common.model.GroupConditionDto;
-import org.cyoda.cloud.api.common.model.GroupOperatorDto;
 import org.cyoda.cloud.api.event.common.BaseEvent;
 import org.cyoda.cloud.api.event.common.DataPayload;
 import org.cyoda.cloud.api.event.common.ModelSpec;
@@ -250,7 +249,7 @@ public class CyodaRepository implements CrudRepository {
     ) {
         // Create an empty condition to match all entities
         GroupConditionDto matchAllCondition = new GroupConditionDto()
-                .operator(GroupOperatorDto.AND)
+                .operator(GroupConditionDto.OperatorEnum.AND)
                 .conditions(List.of());
 
         return params.inMemory()

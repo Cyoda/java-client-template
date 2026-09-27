@@ -246,97 +246,43 @@ tasks.named('processResources') {
     exclude 'cyoda/cyoda-cloud-api.proto'
 }
 
-// OpenAPI Generator tasks for generating Java models from OpenAPI YAML files
-// Package structure matches Cyoda client library: org.cyoda.cloud.api.*.model with Dto suffix
-def openapiFiles = [
-    [name: 'common', file: 'openapi-common.yml', modelPackage: 'org.cyoda.cloud.api.common.model'],
-    [name: 'workflow', file: 'openapi-workflow.yml', modelPackage: 'org.cyoda.cloud.api.workflow.model',
-        // Schema mappings to reuse common DTOs for criterion and processor types
-        schemaMappings: [
-            'WorkflowConfiguration_criterion': 'QueryConditionDto',
-            'TransitionDefinition_criterion': 'QueryConditionDto',
-            'ScheduledTransitionProcessorDefinition_allOf_config': 'ScheduledTransitionConfigDto',
-        ],
-        extraImportMappings: [
-            'QueryConditionDto': 'org.cyoda.cloud.api.common.model.QueryConditionDto',
-            'ScheduledTransitionConfigDto': 'org.cyoda.cloud.api.common.model.ScheduledTransitionConfigDto',
-        ]
-    ],
-    [name: 'entitySearch', file: 'openapi-entity-search.yml', modelPackage: 'org.cyoda.cloud.api.search.model'],
-    [name: 'audit', file: 'openapi-audit.yml', modelPackage: 'org.cyoda.cloud.api.audit.model'],
-    [name: 'iam', file: 'openapi-iam.yml', modelPackage: 'org.cyoda.cloud.api.iam.model'],
-]
-
-openapiFiles.each { spec ->
-    tasks.register("generateOpenApi${spec.name.capitalize()}", org.openapitools.generator.gradle.plugin.tasks.GenerateTask) {
-        generatorName = 'spring'
-        inputSpec = "$projectDir/src/main/resources/api/${spec.file}"
-        outputDir = "$buildDir/generated-sources/openapi"
-        modelPackage = spec.modelPackage
-        apiPackage = spec.modelPackage
-        modelNameSuffix = 'Dto'
-        generateApiTests = false
-        generateModelTests = false
-        generateApiDocumentation = false
-        generateModelDocumentation = false
-        configOptions = [
-            dateLibrary: 'java8',
-            useJakartaEe: 'true',
-            openApiNullable: 'false',
-            serializationLibrary: 'jackson',
-            interfaceOnly: 'true',
-            useSpringBoot3: 'true',
-            useBeanValidation: 'true',
-        ]
-        globalProperties = [
-            models: '',  // Generate all models
-            apis: 'false',  // Don't generate API classes
-            supportingFiles: '',  // No supporting files needed
-        ]
-        // Map 'any' and 'object' types to JsonNode (matching Cyoda client library)
-        typeMappings = [
-            'object': 'JsonNode',
-            'any': 'JsonNode',
-        ]
-        // Base import mappings
-        def imports = [
-            'JsonNode': 'com.fasterxml.jackson.databind.JsonNode',
-        ]
-        // Add spec-specific import mappings if defined
-        if (spec.extraImportMappings) {
-            imports.putAll(spec.extraImportMappings)
-        }
-        importMappings = imports
-
-        // Add spec-specific schema mappings if defined
-        if (spec.schemaMappings) {
-            schemaMappings = spec.schemaMappings
-        }
-    }
+// OpenAPI DTOs come from cyoda-go's single api/openapi.yaml. PrepareOpenApiTask writes a patched
+// copy (cyoda-go #625 discriminator mappings, #627 array values) that the generator reads.
+tasks.register('prepareOpenApi', com.cyoda.build.PrepareOpenApiTask) {
+    sourceFile = file('src/main/resources/cyoda/openapi/openapi.yaml')
+    outputFile = layout.buildDirectory.file('cyoda-openapi/openapi.yaml')
 }
 
-tasks.register('generateOpenApi') {
-    dependsOn openapiFiles.collect { "generateOpenApi${it.name.capitalize()}" }
-    description = 'Generates Java models from all OpenAPI YAML files'
+tasks.register('generateOpenApi', org.openapitools.generator.gradle.plugin.tasks.GenerateTask) {
+    description = 'Generates Java DTOs from cyoda-go api/openapi.yaml (patched copy)'
     group = 'openapi tools'
-
-    // Post-process to fix @JsonAlias annotation syntax from upstream YAML files
-    // The YAML has: @JsonAlias("a", "b") but valid Java requires: @JsonAlias({"a", "b"})
-    doLast {
-        def openApiDir = file("$buildDir/generated-sources/openapi/src/main/java")
-        if (openApiDir.exists()) {
-            fileTree(openApiDir).matching { include '**/*.java' }.each { javaFile ->
-                def content = javaFile.text
-                def fixed = content.replaceAll(
-                    /@com\.fasterxml\.jackson\.annotation\.JsonAlias\(("[^"]+"),\s*("[^"]+")\)/,
-                    '@com.fasterxml.jackson.annotation.JsonAlias({$1, $2})'
-                )
-                if (fixed != content) {
-                    javaFile.text = fixed
-                }
-            }
-        }
-    }
+    dependsOn 'prepareOpenApi'
+    generatorName = 'spring'
+    inputSpec = layout.buildDirectory.file('cyoda-openapi/openapi.yaml').get().asFile.path
+    outputDir = "$buildDir/generated-sources/openapi"
+    // Drop DTOs left by the former per-area specs (workflow/search/audit/iam packages, *OperatorDto)
+    cleanupOutput = true
+    modelPackage = 'org.cyoda.cloud.api.common.model'
+    apiPackage = 'org.cyoda.cloud.api.common.api'
+    generateApiTests = false
+    generateModelTests = false
+    generateApiDocumentation = false
+    generateModelDocumentation = false
+    configOptions = [
+        dateLibrary: 'java8',
+        useJakartaEe: 'true',
+        openApiNullable: 'false',
+        serializationLibrary: 'jackson',
+        interfaceOnly: 'true',
+        useSpringBoot3: 'true',
+        useBeanValidation: 'true',
+        containerDefaultToNull: 'true',
+    ]
+    globalProperties = [models: '', apis: 'false', supportingFiles: '']
+    typeMappings = [object: 'JsonNode', any: 'JsonNode', AnyType: 'JsonNode']
+    importMappings = [JsonNode: 'com.fasterxml.jackson.databind.JsonNode']
+    // The only inline oneOf wrapper that does not compile (spec §3.3.3)
+    schemaMappings = [TransitionDefinitionDto_processors_inner: 'ExternalizedProcessorDefinitionDto']
 }
 
 ["bootRun", "build", "compileJava", "compileKotlin"].each { taskName ->

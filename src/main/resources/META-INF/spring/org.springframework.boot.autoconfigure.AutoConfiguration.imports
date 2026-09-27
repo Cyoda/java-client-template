@@ -1,2 +1,2 @@
 com.java_template.common.config.SecurityConfig
-
+com.java_template.common.config.CyodaJacksonAutoConfiguration

@@ -12,8 +12,6 @@ import com.java_template.common.workflow.CyodaEventContext;
 import com.java_template.common.workflow.CyodaProcessor;
 import com.java_template.common.workflow.OperationSpecification;
 import org.cyoda.cloud.api.common.model.GroupConditionDto;
-import org.cyoda.cloud.api.common.model.GroupOperatorDto;
-import org.cyoda.cloud.api.common.model.OperatorTypeDto;
 import org.cyoda.cloud.api.common.model.SimpleConditionDto;
 import org.cyoda.cloud.api.event.common.ModelSpec;
 import org.cyoda.cloud.api.event.processing.EntityProcessorCalculationRequest;
@@ -178,11 +176,11 @@ public class ExampleEntityProcessor implements CyodaProcessor {
         ObjectMapper objectMapper = new ObjectMapper();
         SimpleConditionDto simpleCondition = new SimpleConditionDto()
                 .jsonPath("$.someField")
-                .operation(OperatorTypeDto.EQUALS)
+                .operatorType(SimpleConditionDto.OperatorTypeEnum.EQUALS)
                 .value(objectMapper.valueToTree("someValue"));
 
         GroupConditionDto condition = new GroupConditionDto()
-                .operator(GroupOperatorDto.AND)
+                .operator(GroupConditionDto.OperatorEnum.AND)
                 .conditions(List.of(simpleCondition));
 
         // Use streaming API for memory-efficient processing of related entities

@@ -1,0 +1,53 @@
+{
+  "version": "1.5",
+  "name": "roundtrip",
+  "desc": "Every condition type and a processor, with defaults present",
+  "initialState": "none",
+  "active": true,
+  "criterion": {
+    "type": "group",
+    "operator": "AND",
+    "conditions": [
+      {"type": "simple", "jsonPath": "$.amount", "operatorType": "GREATER_THAN", "value": 10},
+      {"type": "lifecycle", "field": "state", "operatorType": "EQUALS", "value": "new"},
+      {"type": "array", "jsonPath": "$.tags[*]", "values": ["a", null, "c"]},
+      {"type": "group", "operator": "OR", "conditions": [
+        {"type": "simple", "jsonPath": "$.name", "operatorType": "EQUALS", "value": "x"}
+      ]}
+    ]
+  },
+  "states": {
+    "none": {
+      "transitions": [
+        {"name": "to_new", "next": "new", "manual": false, "disabled": false}
+      ]
+    },
+    "new": {
+      "transitions": [
+        {
+          "name": "approve",
+          "next": "approved",
+          "manual": true,
+          "disabled": false,
+          "criterion": {
+            "type": "function",
+            "function": {
+              "name": "ItFlagCriterion",
+              "config": {"attachEntity": true, "calculationNodesTags": "t", "responseTimeoutMs": 10000, "retryPolicy": "NONE"}
+            }
+          },
+          "processors": [
+            {
+              "type": "externalized",
+              "name": "ItRecordingProcessor",
+              "executionMode": "SYNC",
+              "startNewTxOnDispatch": false,
+              "config": {"attachEntity": true, "calculationNodesTags": "t", "responseTimeoutMs": 10000, "retryPolicy": "NONE", "idempotent": false}
+            }
+          ]
+        }
+      ]
+    },
+    "approved": {"transitions": []}
+  }
+}

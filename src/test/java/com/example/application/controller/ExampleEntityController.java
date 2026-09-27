@@ -265,11 +265,11 @@ public class ExampleEntityController {
 
             SimpleConditionDto categoryCondition = new SimpleConditionDto()
                     .jsonPath("$.category")
-                    .operation(OperatorTypeDto.EQUALS)
+                    .operatorType(SimpleConditionDto.OperatorTypeEnum.EQUALS)
                     .value(objectMapper.valueToTree(category));
 
             GroupConditionDto condition = new GroupConditionDto()
-                    .operator(GroupOperatorDto.AND)
+                    .operator(GroupConditionDto.OperatorEnum.AND)
                     .conditions(List.of(categoryCondition));
 
             // Use in-memory search for small, bounded result sets
@@ -325,19 +325,19 @@ public class ExampleEntityController {
                 ? Date.from(pointInTime.toInstant())
                 : null;
 
-            List<QueryConditionDto> conditions = new ArrayList<>();
+            List<GroupConditionDtoAllOfConditions> conditions = new ArrayList<>();
 
             if (name != null && !name.trim().isEmpty()) {
                 conditions.add(new SimpleConditionDto()
                         .jsonPath("$.name")
-                        .operation(OperatorTypeDto.CONTAINS)
+                        .operatorType(SimpleConditionDto.OperatorTypeEnum.CONTAINS)
                         .value(objectMapper.valueToTree(name)));
             }
 
             if (minAmount != null) {
                 conditions.add(new SimpleConditionDto()
                         .jsonPath("$.amount")
-                        .operation(OperatorTypeDto.GREATER_OR_EQUAL)
+                        .operatorType(SimpleConditionDto.OperatorTypeEnum.GREATER_OR_EQUAL)
                         .value(objectMapper.valueToTree(minAmount)));
             }
 
@@ -357,7 +357,7 @@ public class ExampleEntityController {
             } else {
                 // With filters: use paginated search with searchId support
                 GroupConditionDto condition = new GroupConditionDto()
-                        .operator(GroupOperatorDto.AND)
+                        .operator(GroupConditionDto.OperatorEnum.AND)
                         .conditions(conditions);
 
                 // inMemory=false enables pagination with searchId support
@@ -407,25 +407,25 @@ public class ExampleEntityController {
             // Build search condition if criteria provided
             GroupConditionDto condition = null;
             if (searchRequest != null) {
-                List<QueryConditionDto> conditions = new ArrayList<>();
+                List<GroupConditionDtoAllOfConditions> conditions = new ArrayList<>();
 
                 if (searchRequest.getName() != null && !searchRequest.getName().trim().isEmpty()) {
                     conditions.add(new SimpleConditionDto()
                             .jsonPath("$.name")
-                            .operation(OperatorTypeDto.CONTAINS)
+                            .operatorType(SimpleConditionDto.OperatorTypeEnum.CONTAINS)
                             .value(objectMapper.valueToTree(searchRequest.getName())));
                 }
 
                 if (searchRequest.getMinAmount() != null) {
                     conditions.add(new SimpleConditionDto()
                             .jsonPath("$.amount")
-                            .operation(OperatorTypeDto.GREATER_OR_EQUAL)
+                            .operatorType(SimpleConditionDto.OperatorTypeEnum.GREATER_OR_EQUAL)
                             .value(objectMapper.valueToTree(searchRequest.getMinAmount())));
                 }
 
                 if (!conditions.isEmpty()) {
                     condition = new GroupConditionDto()
-                            .operator(GroupOperatorDto.AND)
+                            .operator(GroupConditionDto.OperatorEnum.AND)
                             .conditions(conditions);
                 }
             }
