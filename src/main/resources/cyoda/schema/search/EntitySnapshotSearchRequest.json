@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyoda.com/cloud/event/search/EntitySnapshotSearchRequest.json",
+  "title": "EntitySnapshotSearchRequest",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common/BaseEvent.json"
+    }
+  ],
+  "properties": {
+    "model": {
+      "$ref": "../common/ModelSpec.json",
+      "description": "Entity model to use for building this snapshot."
+    },
+    "condition": {
+      "type": "object",
+      "existingJavaType": "org.cyoda.cloud.api.common.model.GroupConditionDto",
+      "description": "Query condition to use for building this snapshot."
+    },
+    "pointInTime": {
+      "type": "string",
+      "format": "date-time",
+      "description": "point in time"
+    },
+    "orderBy": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path":   { "type": "string", "description": "A dotted scalar path in the entity data (`price`, `address.city`; the `$.` leader is optional) or, with `source: \"meta\"`, a canonical meta field name. Array subscripts and projections (`items[*].name`, `items[0].name`) are rejected — an ordering needs a single scalar — as is any character outside `A-Za-z0-9_-`. Refused paths answer `INVALID_FIELD_PATH`." },
+          "source": { "type": "string", "enum": ["data", "meta"], "default": "data" },
+          "desc":   { "type": "boolean", "default": false }
+        },
+        "required": ["path"]
+      }
+    }
+  },
+  "required": [
+    "model",
+    "condition"
+  ]
+}
