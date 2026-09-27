@@ -3,12 +3,13 @@ package com.java_template.common.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.java_template.common.call.CyodaCallContext;
 import com.java_template.common.call.CyodaCallContexts;
 import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaObjectMapper;
+import com.java_template.common.exception.CyodaHttpException;
+import com.java_template.common.util.Futures;
 import com.java_template.common.util.HttpUtils;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.NotNull;
@@ -21,7 +22,12 @@ import java.util.UUID;
 
 /**
  * ABOUTME: Implementation of EdgeMessageService that retrieves EdgeMessage data
- * via the Cyoda HTTP API endpoint /message/get/{messageId}.
+ * via the Cyoda HTTP API endpoint /message/{messageId}.
+ *
+ * <p>Every future is joined with {@link Futures#joinUnwrapped}, so failures leave the public methods as the
+ * typed Cyoda exceptions (spec §4.4). A 404 ({@link CyodaHttpException} with status 404) is the documented
+ * "not found" result of getMessageById/getMessageContent ({@code null}) and deleteMessage ({@code false});
+ * TRANSACTION_NOT_FOUND, also a 404, is a {@code CyodaCalloutEndedException} and propagates.
  */
 @Service
 public class EdgeMessageServiceImpl implements EdgeMessageService {
@@ -51,33 +57,21 @@ public class EdgeMessageServiceImpl implements EdgeMessageService {
         logger.debug("Retrieving EdgeMessage with ID: {}", messageId);
 
         CyodaCallContext ctx = callContexts.current();
-
-        // Construct API path: message/get/{messageId}
         String path = String.format("message/%s", messageId);
-        logger.debug("Using EdgeMessage endpoint: {}", path);
 
-        // Make HTTP GET request to Cyoda API
-        ObjectNode response = httpUtils.sendGetRequest(ctx, cyodaApiUrl, path).join();
-        int statusCode = response.get("status").asInt();
-
-        if (statusCode == 200) {
-            // HttpUtils wraps response in: { "status": 200, "json": {...} }
-            JsonNode body = response.get("json");
-            logger.debug("Successfully retrieved EdgeMessage: {}", messageId);
-            return body;
-        } else if (statusCode == 404) {
-            logger.debug("EdgeMessage not found with ID: {}", messageId);
-            return null;
-        } else {
-            throw new IllegalStateException(
-                    String.format(
-                            "Failed to retrieve EdgeMessage %s: HTTP %d - %s",
-                            messageId,
-                            statusCode,
-                            response.has("json") ? response.get("json").asText() : "Unknown error"
-                    )
-            );
+        final ObjectNode response;
+        try {
+            response = Futures.joinUnwrapped(httpUtils.sendGetRequest(ctx, cyodaApiUrl, path));
+        } catch (CyodaHttpException e) {
+            if (e.status() == 404) {
+                logger.debug("EdgeMessage not found with ID: {}", messageId);
+                return null;
+            }
+            throw e;
         }
+        requireSuccess(response, "retrieve EdgeMessage " + messageId);
+        // HttpUtils wraps the response in: { "status": 200, "json": {...} }
+        return response.get("json");
     }
 
     @Override
@@ -135,94 +129,68 @@ public class EdgeMessageServiceImpl implements EdgeMessageService {
     ) {
         logger.debug("Creating EdgeMessage with subject: {}", subject);
 
-        try {
-            CyodaCallContext ctx = callContexts.current();
+        CyodaCallContext ctx = callContexts.current();
+        String path = String.format("message/new/%s", subject);
 
-            // Construct API path: message/new/{subject}
-            String path = String.format("message/new/%s", subject);
-            logger.debug("Using EdgeMessage creation endpoint: {}", path);
+        // According to OpenAPI spec, the request body must have this structure:
+        // {
+        //   "payload": { ... actual content ... },
+        //   "meta-data": { ... optional flat key-value pairs ... }
+        // }
+        // The "payload" field is required and contains the actual message content
+        ObjectNode requestBody = objectMapper.createObjectNode();
+        requestBody.set("payload", content);
+        requestBody.set("meta-data", metadata);
 
-            // According to OpenAPI spec, the request body must have this structure:
-            // {
-            //   "payload": { ... actual content ... },
-            //   "meta-data": { ... optional flat key-value pairs ... }
-            // }
-            // The "payload" field is required and contains the actual message content
-            ObjectNode requestBody = objectMapper.createObjectNode();
-            requestBody.set("payload", content);
-            requestBody.set("meta-data", metadata);
+        ObjectNode response = Futures.joinUnwrapped(httpUtils.sendPostRequest(ctx, cyodaApiUrl, path, requestBody));
+        requireSuccess(response, "create EdgeMessage with subject '" + subject + "'");
 
-            // Make HTTP POST request to Cyoda API
-            // The API expects Content-Type and Content-Length headers which are set by httpUtils
-            ObjectNode response = httpUtils.sendPostRequest(ctx, cyodaApiUrl, path, requestBody).join();
-            int statusCode = response.get("status").asInt();
-
-            if (statusCode == 200 || statusCode == 201) {
-                // Response format per OpenAPI spec:
-                // [{
-                //   "entityIds": ["8824c480-c166-11ee-bf9f-ae468cd3ed16"],
-                //   "success": true
-                // }]
-                // HttpUtils wraps response in: { "status": 200, "json": {...} }
-                ArrayNode body = (ArrayNode) response.get("json");
-                JsonNode entityIds = body.get(0).get("entityIds");
-
-                if (entityIds == null || !entityIds.isArray() || entityIds.isEmpty()) {
-                    throw new IllegalStateException("EdgeMessage creation response missing entityIds array");
-                }
-
-                String messageIdStr = entityIds.get(0).asText();
-                UUID messageId = UUID.fromString(messageIdStr);
-                logger.info("Successfully created EdgeMessage: {} with subject: {}", messageId, subject);
-                return messageId;
-            } else {
-                throw new IllegalStateException(
-                        String.format(
-                                "Failed to create EdgeMessage: HTTP %d - %s",
-                                statusCode,
-                                response.has("json") ? response.get("json").asText() : "Unknown error"
-                        )
-                );
-            }
-        } catch (Exception e) {
-            throw new IllegalStateException("Failed to create EdgeMessage with subject '" + subject + "': " + e.getMessage(), e);
+        // Response format per OpenAPI spec:
+        // [{
+        //   "entityIds": ["8824c480-c166-11ee-bf9f-ae468cd3ed16"],
+        //   "success": true
+        // }]
+        JsonNode body = response.get("json");
+        JsonNode entityIds = body != null && body.isArray() && !body.isEmpty() ? body.get(0).get("entityIds") : null;
+        if (entityIds == null || !entityIds.isArray() || entityIds.isEmpty()) {
+            throw new IllegalStateException("EdgeMessage creation response missing entityIds array");
         }
+
+        UUID messageId = UUID.fromString(entityIds.get(0).asText());
+        logger.info("Successfully created EdgeMessage: {} with subject: {}", messageId, subject);
+        return messageId;
     }
 
     @Override
     public boolean deleteMessage(@NotNull UUID messageId) {
         logger.debug("Deleting EdgeMessage with ID: {}", messageId);
 
+        CyodaCallContext ctx = callContexts.current();
+        String path = String.format("message/%s", messageId);
+
+        final ObjectNode response;
         try {
-            CyodaCallContext ctx = callContexts.current();
-
-            // Construct API path: message/{messageId}
-            String path = String.format("message/%s", messageId);
-            logger.debug("Using EdgeMessage deletion endpoint: {}", path);
-
-            // Make HTTP DELETE request to Cyoda API
-            ObjectNode response = httpUtils.sendDeleteRequest(ctx, cyodaApiUrl, path).join();
-            int statusCode = response.get("status").asInt();
-
-            if (statusCode == 200 || statusCode == 204) {
-                logger.info("Successfully deleted EdgeMessage: {}", messageId);
-                return true;
-            } else if (statusCode == 404) {
+            response = Futures.joinUnwrapped(httpUtils.sendDeleteRequest(ctx, cyodaApiUrl, path));
+        } catch (CyodaHttpException e) {
+            if (e.status() == 404) {
                 logger.debug("EdgeMessage not found with ID: {}", messageId);
                 return false;
-            } else {
-                throw new IllegalStateException(
-                        String.format(
-                                "Failed to delete EdgeMessage %s: HTTP %d - %s",
-                                messageId,
-                                statusCode,
-                                response.has("json") ? response.get("json").asText() : "Unknown error"
-                        )
-                );
             }
-        } catch (Exception e) {
-            throw new IllegalStateException("Failed to delete EdgeMessage " + messageId + ": " + e.getMessage(), e);
+            throw e;
+        }
+        requireSuccess(response, "delete EdgeMessage " + messageId);
+        logger.info("Successfully deleted EdgeMessage: {}", messageId);
+        return true;
+    }
+
+    /**
+     * HttpUtils throws on every 4xx/5xx (as the typed Cyoda exception), so only a 2xx or 3xx reaches here;
+     * cyoda-go answers these endpoints with neither 3xx nor another non-2xx status.
+     */
+    private static void requireSuccess(ObjectNode response, String operation) {
+        int statusCode = response.path("status").asInt();
+        if (statusCode < 200 || statusCode >= 300) {
+            throw new IllegalStateException(String.format("Failed to %s: unexpected HTTP %d", operation, statusCode));
         }
     }
 }
-
