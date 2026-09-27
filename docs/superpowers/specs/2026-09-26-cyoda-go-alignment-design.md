@@ -395,13 +395,13 @@ Each is checked early; a failed assumption changes the plan, not silently the de
 ## 8. cyoda-go findings
 
 This project never changes cyoda-go. Every finding becomes an issue in `Cyoda/cyoda-go`
-with milestone `v0.9.0`. Issue numbers are recorded here once filed.
+with milestone `v0.9.0`.
 
 | # | Finding | Kind | Issue |
 |---|---|---|---|
-| 1 | `client_credentials` tokens carry roles in `scopes`, not `user_roles` as `cyoda help auth`, `auth tokens` and `auth clients` document. The code is deliberate: the presence of `user_roles` vs `scopes` decides whether the principal is a user or a service. The docs are wrong and never state that rule. The same page calls `caas_org_id` a "string UUID"; a tenant id follows the tenant grammar, and only OIDC federation requires a UUID. | docs | pending |
-| 2 | The `BootstrapConfig.ClientSecret` field comment (`app/config.go:334`) says "optional, generated if empty". The secret is never generated: in jwt mode it must be set together with the client id (both or neither), and in mock mode it is ignored. User-facing docs are correct. | docs (minor) | pending |
-| 3 | An unrecognised first argument (e.g. `cyoda version`, `cyoda serve`) starts the server with the user's real config instead of failing. Extra arguments and flags are silently ignored, although `cyoda help cli` shows `[<flags>]` in the synopsis. | bug | pending |
+| 1 | `client_credentials` tokens carry roles in `scopes`, not `user_roles` as `cyoda help auth`, `auth tokens` and `auth clients` document. The code is deliberate: the presence of `user_roles` vs `scopes` decides whether the principal is a user or a service. The docs are wrong and never state that rule. The same page calls `caas_org_id` a "string UUID"; a tenant id follows the tenant grammar, and only OIDC federation requires a UUID. | docs | [#621](https://github.com/Cyoda/cyoda-go/issues/621) |
+| 2 | The `BootstrapConfig.ClientSecret` field comment (`app/config.go:334`) says "optional, generated if empty". The secret is never generated: in jwt mode it must be set together with the client id (both or neither), and in mock mode it is ignored. User-facing docs are correct. | docs (minor) | [#622](https://github.com/Cyoda/cyoda-go/issues/622) |
+| 3 | An unrecognised first argument (e.g. `cyoda version`, `cyoda serve`) starts the server with the user's real config instead of failing. Extra arguments and flags are silently ignored, although `cyoda help cli` shows `[<flags>]` in the synopsis. | bug | [#623](https://github.com/Cyoda/cyoda-go/issues/623) |
 
 **Impact on this project:**
 - #1: the template never reads roles out of its own M2M token (§4.2), so nothing depends on the claim name.
