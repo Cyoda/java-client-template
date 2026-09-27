@@ -2,9 +2,9 @@ package com.java_template.common.repository;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Expiry;
-import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.google.common.collect.Streams;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.java_template.common.config.Config;
@@ -29,6 +29,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
@@ -55,11 +56,14 @@ public class CyodaRepository implements CrudRepository {
     private final CloudEventBuilder cloudEventBuilder;
     private final CloudEventParser cloudEventParser;
 
+    /** Fallback lifetime for a cached snapshot whose expiration date can't be determined. */
+    static final long DEFAULT_SNAPSHOT_CACHE_TTL_NANOS = TimeUnit.HOURS.toNanos(1);
+
     /**
-     * Cache for snapshot search results. Only caches searches with pointInTime.
-     * Entries are evicted based on the snapshot's expirationDate.
+     * Cache of completed (never RUNNING) snapshot search statuses, keyed by model/condition/
+     * pointInTime/searchId. Entries are evicted based on the snapshot's expirationDate.
      */
-    private final LoadingCache<SearchCacheKey, CompletableFuture<SearchSnapshotStatus>> snapshotCache;
+    private final Cache<SearchCacheKey, CompletableFuture<SearchSnapshotStatus>> snapshotCache;
 
     public CyodaRepository(
             final ObjectMapper objectMapper,
@@ -74,17 +78,22 @@ public class CyodaRepository implements CrudRepository {
         this.cloudEventParser = cloudEventParser;
         this.config = config;
 
-        // Initialize cache with expiry based on snapshot expiration
+        // Initialize cache with expiry based on the snapshot's own expirationDate (wall-clock).
+        // This is a plain Cache, not a LoadingCache: entries are populated explicitly, in
+        // findAllByCondition, only once a snapshot's status is known to be final (SUCCESSFUL) -
+        // never a still-RUNNING creation response. There is no automatic loader, since that used
+        // to create a brand-new, unrelated snapshot search on a cache miss instead of reading the
+        // existing snapshot a caller's searchId names.
         this.snapshotCache = Caffeine.newBuilder()
                 .expireAfter(new Expiry<SearchCacheKey, CompletableFuture<SearchSnapshotStatus>>() {
                     @Override
                     public long expireAfterCreate(SearchCacheKey key, CompletableFuture<SearchSnapshotStatus> value, long currentTime) {
-                        return getExpirationDuration(value, currentTime);
+                        return getExpirationDuration(value);
                     }
 
                     @Override
                     public long expireAfterUpdate(SearchCacheKey key, CompletableFuture<SearchSnapshotStatus> value, long currentTime, long currentDuration) {
-                        return getExpirationDuration(value, currentTime);
+                        return getExpirationDuration(value);
                     }
 
                     @Override
@@ -92,27 +101,33 @@ public class CyodaRepository implements CrudRepository {
                         return currentDuration;
                     }
 
-                    private long getExpirationDuration(CompletableFuture<SearchSnapshotStatus> value, long currentTime) {
+                    private long getExpirationDuration(CompletableFuture<SearchSnapshotStatus> value) {
                         try {
                             SearchSnapshotStatus status = value.getNow(null);
-                            if (status != null && status.getExpirationDate() != null) {
-                                long expirationTime = status.getExpirationDate().toInstant().toEpochMilli();
-                                long currentTimeMillis = TimeUnit.NANOSECONDS.toMillis(currentTime);
-                                long durationMillis = expirationTime - currentTimeMillis;
-                                return durationMillis > 0 ? TimeUnit.MILLISECONDS.toNanos(durationMillis) : 0;
-                            }
+                            OffsetDateTime expirationDate = status != null ? status.getExpirationDate() : null;
+                            return remainingNanosUntil(expirationDate, OffsetDateTime.now());
                         } catch (Exception e) {
                             logger.debug("Could not determine expiration time, using default", e);
+                            return DEFAULT_SNAPSHOT_CACHE_TTL_NANOS;
                         }
-                        // Default to 1 hour if we can't determine expiration
-                        return TimeUnit.HOURS.toNanos(1);
                     }
                 })
-                .build(key -> {
-                    if (key.pointInTime != null) {
-                        return createSnapshotSearch(key.modelSpec, key.condition, key.pointInTime);
-                    } else return null;
-                });
+                .build();
+    }
+
+    /**
+     * Remaining nanoseconds from {@code now} (wall-clock) until {@code expirationDate}, floored at
+     * 0 for an already-expired snapshot. Falls back to {@link #DEFAULT_SNAPSHOT_CACHE_TTL_NANOS}
+     * when {@code expirationDate} is unknown. Caffeine's {@code Expiry} callbacks receive a
+     * ticker time ({@code System.nanoTime()}-based, not epoch) that cannot be compared against an
+     * epoch-millis value directly, so this deliberately ignores that ticker time and only uses
+     * wall-clock instants. Package-private so it can be unit tested directly.
+     */
+    static long remainingNanosUntil(@Nullable final OffsetDateTime expirationDate, @NotNull final OffsetDateTime now) {
+        if (expirationDate == null) {
+            return DEFAULT_SNAPSHOT_CACHE_TTL_NANOS;
+        }
+        return Math.max(0L, Duration.between(now, expirationDate).toNanos());
     }
 
     private CloudEventsServiceGrpc.CloudEventsServiceBlockingStub blocking() {
@@ -169,20 +184,25 @@ public class CyodaRepository implements CrudRepository {
             @Nullable final OffsetDateTime pointInTime,
             @Nullable final UUID searchId, int awaitLimitMs, int pollIntervalMs
     ) {
-        CompletableFuture<SearchSnapshotStatus> snapshot;
+        CompletableFuture<SearchSnapshotStatus> finalStatus;
 
         if (searchId == null) {
-            // New search - create snapshot and don't use cache
-            snapshot = createSnapshotSearch(modelSpec, condition, pointInTime);
+            // New search - create a snapshot and wait for it to reach a final status.
+            finalStatus = createSnapshotSearch(modelSpec, condition, pointInTime)
+                    .thenCompose(created -> resolveFinalStatus(created, awaitLimitMs, pollIntervalMs));
         } else {
-            // Existing search - use cache with searchId as key
+            // A searchId IS the snapshotId of an already-created search (see effectiveSearchId
+            // below). Reuse its cached completed status if we have one; otherwise read that same
+            // snapshot by ID. Never create a second, unrelated snapshot search for a page request.
             SearchCacheKey cacheKey = new SearchCacheKey(modelSpec, condition, pointInTime, searchId);
-            snapshot = Optional.ofNullable(snapshotCache.get(cacheKey))
-                    .orElseGet(() -> createSnapshotSearch(modelSpec, condition, pointInTime));
+            CompletableFuture<SearchSnapshotStatus> cached = snapshotCache.getIfPresent(cacheKey);
+            finalStatus = cached != null
+                    ? cached
+                    : getSnapshotStatus(searchId).thenCompose(fetched -> resolveFinalStatus(fetched, awaitLimitMs, pollIntervalMs));
         }
 
-        return snapshot.thenComposeAsync(snapshotInfo -> {
-                    if (snapshotInfo.getSnapshotId() == null) {
+        return finalStatus.thenComposeAsync(status -> {
+                    if (status.getSnapshotId() == null) {
                         throw new CyodaOperationException(
                                 "MISSING_SNAPSHOT_ID",
                                 "Snapshot search returned no snapshot ID",
@@ -191,37 +211,35 @@ public class CyodaRepository implements CrudRepository {
                     }
 
                     // Use the snapshot ID from Cyoda as the search ID
-                    UUID effectiveSearchId = snapshotInfo.getSnapshotId();
+                    UUID effectiveSearchId = status.getSnapshotId();
 
-                    // Cache the snapshot for subsequent page requests
-                    if (searchId == null && pointInTime != null) {
-                        SearchCacheKey cacheKey = new SearchCacheKey(modelSpec, condition, pointInTime, effectiveSearchId);
-                        snapshotCache.put(cacheKey, CompletableFuture.completedFuture(snapshotInfo));
-                    }
+                    // Cache the final (completed) status for subsequent page requests.
+                    SearchCacheKey cacheKey = new SearchCacheKey(modelSpec, condition, pointInTime, effectiveSearchId);
+                    snapshotCache.put(cacheKey, CompletableFuture.completedFuture(status));
 
-                    return getSnapShotIdCompletableFuture(snapshotInfo, awaitLimitMs, pollIntervalMs)
-                            .thenApply(snapshotId -> new SnapshotWithMetadata(snapshotId, snapshotInfo.getEntitiesCount(), effectiveSearchId));
-                }).thenCompose(snapshotWithMetadata ->
-                        getSearchResult(snapshotWithMetadata.snapshotId, pageSize, pageNumber)
-                                .thenApply(data -> PageResult.of(
-                                        snapshotWithMetadata.searchId,
-                                        data,
-                                        pageNumber,
-                                        pageSize,
-                                        snapshotWithMetadata.totalElements != null ? snapshotWithMetadata.totalElements : 0L
-                                ))
-                )
+                    return getSearchResult(effectiveSearchId, pageSize, pageNumber)
+                            .thenApply(data -> PageResult.of(
+                                    effectiveSearchId,
+                                    data,
+                                    pageNumber,
+                                    pageSize,
+                                    status.getEntitiesCount() != null ? status.getEntitiesCount() : 0L
+                            ));
+                })
                 .exceptionally(this::handleNotFoundOrThrowPageResult);
     }
 
-    private record SnapshotWithMetadata(UUID snapshotId, Long totalElements, UUID searchId) {
-    }
-
+    /**
+     * Resolves the final ({@code SUCCESSFUL}) status for a snapshot search, polling if needed.
+     * If {@code snapshotInfo} is already {@code SUCCESSFUL} - a fast/synchronous search, or one
+     * just fetched fresh by ID - its count is used directly without any extra round trip.
+     */
     @NotNull
-    private CompletableFuture<UUID> getSnapShotIdCompletableFuture(SearchSnapshotStatus snapshotInfo, int awaitLimitMs, int pollIntervalMs) {
-        // NOTE: To avoid redundant polling, if snapshot is already done
+    private CompletableFuture<SearchSnapshotStatus> resolveFinalStatus(
+            @NotNull final SearchSnapshotStatus snapshotInfo, final int awaitLimitMs, final int pollIntervalMs
+    ) {
         if (SearchSnapshotStatus.Status.SUCCESSFUL.equals(snapshotInfo.getStatus())) {
-            return CompletableFuture.completedFuture(snapshotInfo.getSnapshotId());
+            return CompletableFuture.completedFuture(snapshotInfo);
         }
 
         try {
@@ -229,7 +247,7 @@ public class CyodaRepository implements CrudRepository {
                     snapshotInfo.getSnapshotId(),
                     awaitLimitMs,
                     pollIntervalMs
-            ).thenApply(it -> snapshotInfo.getSnapshotId());
+            );
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -537,7 +555,7 @@ public class CyodaRepository implements CrudRepository {
         ).thenApply(EntitySnapshotSearchResponse::getStatus);
     }
 
-    private CompletableFuture<SearchSnapshotStatus.Status> waitForSearchCompletion(
+    private CompletableFuture<SearchSnapshotStatus> waitForSearchCompletion(
             @NotNull final UUID snapshotId,
             final long awaitLimitMillis,
             final long intervalMillis
@@ -546,7 +564,7 @@ public class CyodaRepository implements CrudRepository {
         return pollSnapshotStatus(snapshotId, startTime, awaitLimitMillis, intervalMillis);
     }
 
-    private CompletableFuture<SearchSnapshotStatus.Status> pollSnapshotStatus(
+    private CompletableFuture<SearchSnapshotStatus> pollSnapshotStatus(
             @NotNull final UUID snapshotId,
             final long startTime,
             final long awaitLimitMillis,
@@ -554,13 +572,13 @@ public class CyodaRepository implements CrudRepository {
     ) throws IOException {
         logger.debug("Polling snapshot: {}", snapshotId);
         return getSnapshotStatus(snapshotId).thenCompose(snapshotStatus -> {
-            if (SearchSnapshotStatus.Status.SUCCESSFUL.equals(snapshotStatus)) {
+            if (SearchSnapshotStatus.Status.SUCCESSFUL.equals(snapshotStatus.getStatus())) {
                 logger.debug("Snapshot is ready!");
                 return CompletableFuture.completedFuture(snapshotStatus);
             }
-            if (!SearchSnapshotStatus.Status.RUNNING.equals(snapshotStatus)) {
+            if (!SearchSnapshotStatus.Status.RUNNING.equals(snapshotStatus.getStatus())) {
                 return CompletableFuture.failedFuture(
-                        new RuntimeException("Snapshot search failed: " + snapshotStatus)
+                        new RuntimeException("Snapshot search failed: " + snapshotStatus.getStatus())
                 );
             }
 
@@ -584,13 +602,12 @@ public class CyodaRepository implements CrudRepository {
         });
     }
 
-    private CompletableFuture<SearchSnapshotStatus.Status> getSnapshotStatus(@NotNull final UUID snapshotId) {
+    private CompletableFuture<SearchSnapshotStatus> getSnapshotStatus(@NotNull final UUID snapshotId) {
         return sendAndGet(
                 req -> blocking().entitySearch(req),
                 new SnapshotGetStatusRequest().withId(generateEventId()).withSnapshotId(snapshotId),
                 EntitySnapshotSearchResponse.class
-        ).thenApply(EntitySnapshotSearchResponse::getStatus)
-                .thenApply(SearchSnapshotStatus::getStatus);
+        ).thenApply(EntitySnapshotSearchResponse::getStatus);
     }
 
     private CompletableFuture<List<DataPayload>> getSearchResult(
