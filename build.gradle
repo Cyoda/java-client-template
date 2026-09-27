@@ -11,6 +11,7 @@ plugins {
     id 'se.thinkcode.cucumber-runner' version '0.0.11'
     id 'jacoco'
     id 'org.openapi.generator' version '7.12.0'
+    id 'java-test-fixtures'
 }
 
 java {
@@ -159,6 +160,12 @@ dependencies {
     testImplementation("org.junit.platform:junit-platform-suite")
     testImplementation 'io.opentelemetry:opentelemetry-sdk-testing:1.44.1'
     testImplementation 'org.awaitility:awaitility:4.2.2'
+
+    testFixturesImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testFixturesImplementation 'com.fasterxml.jackson.core:jackson-databind'
+    testFixturesImplementation platform('org.junit:junit-bom:5.13.1')
+    testFixturesImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation testFixtures(project)
 }
 
 test {
@@ -306,8 +313,14 @@ bootJar {
     archiveFileName.set("app.jar")
 }
 
+// java-test-fixtures wires `testImplementation testFixtures(project)` as a project dependency on
+// this project's own testFixtures capability, which transitively resolves main's apiElements /
+// runtimeElements — i.e. the plain jar. Disabling it left that artifact missing and broke
+// compileTestKotlin (Kotlin's build-tools-api classpath snapshot transform silently drops the
+// unresolvable entry, then reports symbols in src/main/kotlin as unresolved in test code).
+// The plain jar is otherwise unused; bootJar (app.jar) remains the shipped artifact.
 jar {
-    enabled = false
+    enabled = true
 }
 
 bootRun {
