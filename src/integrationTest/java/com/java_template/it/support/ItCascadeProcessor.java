@@ -20,20 +20,32 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * amount = remaining cascade depth: creates a child (amount-1, ref = parent id) and fires "cascade" on it.
  * note switches: "fail-after-cascade" throws after the child write; "admin-inside" imports a workflow
- * for model "<model>_admin"; "timeout-param" tries a save with transaction-control parameters.
+ * for model "<model>_admin"; "timeout-param" tries two saves, one per transaction-control parameter, and
+ * records each refusal's message.
+ * <p>
+ * Leaf barrier (test-only, keyed by model, so other tests and reruns are unaffected). When a test registers a
+ * latch for its model, every leaf (amount == 0) counts down and then waits for all the other leaves before it
+ * answers. Every level of every chain then holds a callout thread at the same moment, so peak demand is
+ * exactly chains × (depth + 1) threads. With a bounded pool smaller than that, the missing leaves can never be
+ * scheduled, and the barrier times out for certain, not by chance. With one virtual thread per task it opens.
  */
 @Component
 public class ItCascadeProcessor implements CyodaProcessor {
 
+    static final long LEAF_BARRIER_TIMEOUT_SECONDS = 30;
+
     public final Map<UUID, Integer> childrenSeenBySearch = new ConcurrentHashMap<>();
-    public final Set<UUID> timeoutParamRejected = ConcurrentHashMap.newKeySet();
+    public final Map<UUID, List<String>> transactionControlRejections = new ConcurrentHashMap<>();
+    public final Map<String, CountDownLatch> leafBarriers = new ConcurrentHashMap<>();
 
     private final ProcessorSerializer serializer;
     private final EntityService entityService;
@@ -66,6 +78,8 @@ public class ItCascadeProcessor implements CyodaProcessor {
                                 .value(TextNode.valueOf(parent.getId().toString()))));
                 childrenSeenBySearch.put(parent.getId(),
                         entityService.search(spec, byRef, ItThing.class, SearchAndRetrievalParams.defaults()).data().size());
+            } else {
+                awaitLeafBarrier(model);
             }
             if ("admin-inside".equals(note)) {
                 try {
@@ -77,10 +91,17 @@ public class ItCascadeProcessor implements CyodaProcessor {
                 }
             }
             if ("timeout-param".equals(note)) {
+                List<String> refusals = transactionControlRejections.computeIfAbsent(
+                        parent.getId(), k -> new CopyOnWriteArrayList<>());
                 try {
-                    entityService.save(List.of(ItThing.of(model, "never", 0)), 10, 1000L);
+                    entityService.save(List.of(ItThing.of(model, "never-window", 0)), 10, null);
                 } catch (IllegalArgumentException expected) {
-                    timeoutParamRejected.add(parent.getId());
+                    refusals.add(expected.getMessage());
+                }
+                try {
+                    entityService.save(List.of(ItThing.of(model, "never-timeout", 0)), null, 1000L);
+                } catch (IllegalArgumentException expected) {
+                    refusals.add(expected.getMessage());
                 }
             }
             if ("fail-after-cascade".equals(note)) {
@@ -89,6 +110,24 @@ public class ItCascadeProcessor implements CyodaProcessor {
             thing.setNote("cascaded");
             return parent;
         }).complete();
+    }
+
+    private void awaitLeafBarrier(String model) {
+        CountDownLatch barrier = leafBarriers.get(model);
+        if (barrier == null) {
+            return;
+        }
+        barrier.countDown();
+        try {
+            if (!barrier.await(LEAF_BARRIER_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("leaf barrier for " + model + " timed out after "
+                        + LEAF_BARRIER_TIMEOUT_SECONDS + " s with " + barrier.getCount()
+                        + " leaves missing: callout threads exhausted?");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted at the leaf barrier for " + model, e);
+        }
     }
 
     @Override

@@ -11,6 +11,7 @@ import com.java_template.it.support.ItThing;
 import com.java_template.testing.cyoda.*;
 import org.cyoda.cloud.api.common.model.GroupConditionDto;
 import org.cyoda.cloud.api.common.model.SimpleConditionDto;
+import org.cyoda.cloud.api.event.common.EntityChangeMeta;
 import org.cyoda.cloud.api.event.common.ModelSpec;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.TestInstance;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Duration;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -62,8 +64,25 @@ class CascadeAtomicityIT {
         EntityWithMetadata<ItThing> done = entityService.update(parent.getId(), parent.entity().in(model), "cascade");
 
         assertThat(done.getState()).isEqualTo("cascaded");
-        assertThat(childrenOf(parent.getId())).singleElement().satisfies(c -> assertThat(c.getState()).isEqualTo("cascaded"));
+        List<EntityWithMetadata<ItThing>> children = childrenOf(parent.getId());
+        assertThat(children).singleElement().satisfies(c -> assertThat(c.getState()).isEqualTo("cascaded"));
         assertThat(cascade.childrenSeenBySearch.get(parent.getId())).isEqualTo(1);
+
+        // Direct proof of joining: the child was created in the parent's cascade transaction.
+        List<EntityChangeMeta> parentChanges = entityService.getEntityChangesMetadata(parent.getId());
+        UUID parentCreateTx = only(parentChanges, EntityChangeMeta.ChangeType.CREATE).getTransactionId();
+        UUID parentCascadeTx = parentChanges.stream()
+                .max(Comparator.comparing(EntityChangeMeta::getTimeOfChange)).orElseThrow().getTransactionId();
+        UUID childCreateTx = only(entityService.getEntityChangesMetadata(children.getFirst().getId()),
+                EntityChangeMeta.ChangeType.CREATE).getTransactionId();
+        assertThat(parentCascadeTx).isNotNull().isNotEqualTo(parentCreateTx);
+        assertThat(childCreateTx).isEqualTo(parentCascadeTx);
+    }
+
+    private static EntityChangeMeta only(List<EntityChangeMeta> changes, EntityChangeMeta.ChangeType type) {
+        List<EntityChangeMeta> ofType = changes.stream().filter(c -> c.getChangeType() == type).toList();
+        assertThat(ofType).as("%s changes in %s", type, changes).hasSize(1);
+        return ofType.getFirst();
     }
 
     @Test
@@ -76,7 +95,10 @@ class CascadeAtomicityIT {
                 .hasStackTraceContaining("fail-after-cascade");
 
         assertThat(childrenOf(parent.getId())).isEmpty();
-        assertThat(entityService.getById(parent.getId(), spec, ItThing.class).getState()).isEqualTo("new");
+        EntityWithMetadata<ItThing> read = entityService.getById(parent.getId(), spec, ItThing.class);
+        assertThat(read.getState()).isEqualTo("new");
+        assertThat(read.entity().getNote()).isEqualTo("fail-after-cascade");
+        assertThat(read.entity().getAmount()).isEqualTo(1);
     }
 
     @Test
@@ -101,6 +123,8 @@ class CascadeAtomicityIT {
         EntityWithMetadata<ItThing> done = entityService.update(parent.getId(), parent.entity().in(model), "cascade");
 
         assertThat(done.getState()).isEqualTo("cascaded");
-        assertThat(cascade.timeoutParamRejected).contains(parent.getId());
+        assertThat(cascade.transactionControlRejections.get(parent.getId())).satisfiesExactly(
+                window -> assertThat(window).contains("transactionWindow"),
+                timeout -> assertThat(timeout).contains("transactionTimeoutMs"));
     }
 }
