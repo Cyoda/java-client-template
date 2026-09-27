@@ -29,6 +29,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
 
 import java.io.IOException;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -94,7 +96,7 @@ public class CyodaRepository implements CrudRepository {
                         try {
                             SearchSnapshotStatus status = value.getNow(null);
                             if (status != null && status.getExpirationDate() != null) {
-                                long expirationTime = status.getExpirationDate().getTime();
+                                long expirationTime = status.getExpirationDate().toInstant().toEpochMilli();
                                 long currentTimeMillis = TimeUnit.NANOSECONDS.toMillis(currentTime);
                                 long durationMillis = expirationTime - currentTimeMillis;
                                 return durationMillis > 0 ? TimeUnit.MILLISECONDS.toNanos(durationMillis) : 0;
@@ -123,11 +125,11 @@ public class CyodaRepository implements CrudRepository {
     }
 
     @Override
-    public CompletableFuture<DataPayload> findById(@NotNull final UUID id, @Nullable final Date pointInTime) {
+    public CompletableFuture<DataPayload> findById(@NotNull final UUID id, @Nullable final OffsetDateTime pointInTime) {
         return getById(id, pointInTime);
     }
 
-    private CompletableFuture<DataPayload> getById(final UUID entityId, @Nullable final Date pointInTime) {
+    private CompletableFuture<DataPayload> getById(final UUID entityId, @Nullable final OffsetDateTime pointInTime) {
         return sendAndGet(
                 req -> blocking().entitySearch(req),
                 new EntityGetRequest().withId(UUID.randomUUID().toString())
@@ -143,9 +145,20 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final GroupConditionDto condition,
             @NotNull final SearchAndRetrievalParams params
     ) {
+        OffsetDateTime pointInTime = toOffsetDateTime(params.pointInTime());
         return params.inMemory()
-                ? findAllByConditionInMemory(modelSpec, params.pageSize(), condition, params.pointInTime())
-                : findAllByCondition(modelSpec, params.pageSize(), params.pageNumber(), condition, params.pointInTime(), params.searchId(), params.awaitLimitMs(), params.pollIntervalMs());
+                ? findAllByConditionInMemory(modelSpec, params.pageSize(), condition, pointInTime)
+                : findAllByCondition(modelSpec, params.pageSize(), params.pageNumber(), condition, pointInTime, params.searchId(), params.awaitLimitMs(), params.pollIntervalMs());
+    }
+
+    /**
+     * Converts the millisecond-precision {@link Date} carried by {@link SearchAndRetrievalParams}
+     * (kept as {@code Date} at that boundary so callers built against it stay valid) to the
+     * {@link OffsetDateTime} the generated request DTOs now use. {@code null} stays {@code null}.
+     */
+    @Nullable
+    private static OffsetDateTime toOffsetDateTime(@Nullable final Date date) {
+        return date == null ? null : date.toInstant().atOffset(ZoneOffset.UTC);
     }
 
     private CompletableFuture<PageResult<DataPayload>> findAllByCondition(
@@ -153,7 +166,7 @@ public class CyodaRepository implements CrudRepository {
             final int pageSize,
             final int pageNumber,
             @NotNull final GroupConditionDto condition,
-            @Nullable final Date pointInTime,
+            @Nullable final OffsetDateTime pointInTime,
             @Nullable final UUID searchId, int awaitLimitMs, int pollIntervalMs
     ) {
         CompletableFuture<SearchSnapshotStatus> snapshot;
@@ -226,7 +239,7 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final ModelSpec modelSpec,
             final int pageSize,
             @NotNull final GroupConditionDto condition,
-            @Nullable final Date pointInTime
+            @Nullable final OffsetDateTime pointInTime
     ) {
         return sendAndGetCollection(
                 req -> blocking().entitySearchCollection(req),
@@ -253,9 +266,10 @@ public class CyodaRepository implements CrudRepository {
                 .operator(GroupConditionDto.OperatorEnum.AND)
                 .conditions(List.of());
 
+        OffsetDateTime pointInTime = toOffsetDateTime(params.pointInTime());
         return params.inMemory()
-                ? findAllByConditionInMemory(modelSpec, params.pageSize(), matchAllCondition, params.pointInTime())
-                : findAllByCondition(modelSpec, params.pageSize(), params.pageNumber(), matchAllCondition, params.pointInTime(), params.searchId(), params.awaitLimitMs(), params.pollIntervalMs());
+                ? findAllByConditionInMemory(modelSpec, params.pageSize(), matchAllCondition, pointInTime)
+                : findAllByCondition(modelSpec, params.pageSize(), params.pageNumber(), matchAllCondition, pointInTime, params.searchId(), params.awaitLimitMs(), params.pollIntervalMs());
     }
 
     @Override
@@ -511,7 +525,7 @@ public class CyodaRepository implements CrudRepository {
     private CompletableFuture<SearchSnapshotStatus> createSnapshotSearch(
             final ModelSpec modelSpec,
             final GroupConditionDto condition,
-            @Nullable final Date pointInTime
+            @Nullable final OffsetDateTime pointInTime
     ) {
         return sendAndGet(
                 req -> blocking().entitySearch(req),
@@ -616,7 +630,7 @@ public class CyodaRepository implements CrudRepository {
     }
 
     @Override
-    public CompletableFuture<Long> getEntityCount(@NotNull final ModelSpec modelSpec, @Nullable final Date pointInTime) {
+    public CompletableFuture<Long> getEntityCount(@NotNull final ModelSpec modelSpec, @Nullable final OffsetDateTime pointInTime) {
         return sendAndGetCollection(
                 req -> blocking().entitySearchCollection(req),
                 new EntityStatsGetRequest()
@@ -641,7 +655,7 @@ public class CyodaRepository implements CrudRepository {
     @Override
     public CompletableFuture<Map<String, Long>> getEntityStatsByState(
             @NotNull final ModelSpec modelSpec,
-            @Nullable final Date pointInTime
+            @Nullable final OffsetDateTime pointInTime
     ) {
         return getEntityStatsByState(modelSpec, Collections.emptyList(), pointInTime);
     }
@@ -650,7 +664,7 @@ public class CyodaRepository implements CrudRepository {
     public CompletableFuture<Map<String, Long>> getEntityStatsByState(
             @NotNull final ModelSpec modelSpec,
             @NotNull final List<String> states,
-            @Nullable final Date pointInTime
+            @Nullable final OffsetDateTime pointInTime
     ) {
         return sendAndGetCollection(
                 req -> blocking().entitySearchCollection(req),
@@ -673,7 +687,7 @@ public class CyodaRepository implements CrudRepository {
     @Override
     public CompletableFuture<List<org.cyoda.cloud.api.event.common.EntityChangeMeta>> getEntityChangesMetadata(
             @NotNull final UUID entityId,
-            @Nullable final Date pointInTime
+            @Nullable final OffsetDateTime pointInTime
     ) {
         return sendAndGetCollection(
                 req -> blocking().entitySearchCollection(req),
@@ -691,6 +705,6 @@ public class CyodaRepository implements CrudRepository {
     /**
      * Cache key for snapshot searches. Combines model spec, condition, point in time, and search ID.
      */
-    private record SearchCacheKey(ModelSpec modelSpec, GroupConditionDto condition, Date pointInTime, UUID searchId) {}
+    private record SearchCacheKey(ModelSpec modelSpec, GroupConditionDto condition, OffsetDateTime pointInTime, UUID searchId) {}
 
 }

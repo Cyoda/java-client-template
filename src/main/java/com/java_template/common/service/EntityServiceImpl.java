@@ -21,6 +21,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -55,7 +57,7 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final ModelSpec modelSpec,
             @NotNull final Class<T> entityClass
     ) {
-        return getById(entityId, modelSpec, entityClass, null);
+        return getById(entityId, modelSpec, entityClass, (OffsetDateTime) null);
     }
 
     @Override
@@ -65,8 +67,35 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final Class<T> entityClass,
             @Nullable final Date pointInTime
     ) {
+        return getById(entityId, modelSpec, entityClass, toOffsetDateTime(pointInTime));
+    }
+
+    /**
+     * Internal reload by exact point in time. Called both from the public {@code Date}-typed
+     * {@link #getById(UUID, ModelSpec, Class, Date)} (after conversion) and directly by
+     * create()/update()/updateByBusinessId()/updateAll(), which already have an
+     * {@link OffsetDateTime} from {@link EntityChangeMeta#getTimeOfChange()} and must not lose
+     * its precision by round-tripping it through {@link Date} (spec: exact-instant reload of the
+     * transaction just committed).
+     */
+    private <T extends CyodaEntity> EntityWithMetadata<T> getById(
+            final UUID entityId,
+            final ModelSpec modelSpec,
+            final Class<T> entityClass,
+            @Nullable final OffsetDateTime pointInTime
+    ) {
         DataPayload payload = repository.findById(entityId, pointInTime).join();
         return EntityWithMetadata.fromDataPayload(payload, entityClass, objectMapper);
+    }
+
+    /**
+     * Converts the millisecond-precision {@link Date} the public {@link EntityService} API keeps
+     * for {@code pointInTime} parameters to the {@link OffsetDateTime} the repository layer now
+     * uses. {@code null} stays {@code null}.
+     */
+    @Nullable
+    private static OffsetDateTime toOffsetDateTime(@Nullable final Date date) {
+        return date == null ? null : date.toInstant().atOffset(ZoneOffset.UTC);
     }
 
     @Override
@@ -208,7 +237,7 @@ public class EntityServiceImpl implements EntityService {
 
     @Override
     public long getEntityCount(@NotNull final ModelSpec modelSpec, @Nullable final Date pointInTime) {
-        return repository.getEntityCount(modelSpec, pointInTime).join();
+        return repository.getEntityCount(modelSpec, toOffsetDateTime(pointInTime)).join();
     }
 
     @Override
@@ -221,7 +250,7 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final ModelSpec modelSpec,
             @Nullable final Date pointInTime
     ) {
-        return repository.getEntityStatsByState(modelSpec, pointInTime).join();
+        return repository.getEntityStatsByState(modelSpec, toOffsetDateTime(pointInTime)).join();
     }
 
     @Override
@@ -230,7 +259,7 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final List<String> states,
             @Nullable final Date pointInTime
     ) {
-        return repository.getEntityStatsByState(modelSpec, states, pointInTime).join();
+        return repository.getEntityStatsByState(modelSpec, states, toOffsetDateTime(pointInTime)).join();
     }
 
     @Override
@@ -625,7 +654,7 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final UUID entityId,
             @Nullable final Date pointInTime
     ) {
-        return repository.getEntityChangesMetadata(entityId, pointInTime).join();
+        return repository.getEntityChangesMetadata(entityId, toOffsetDateTime(pointInTime)).join();
     }
 
     // ========================================

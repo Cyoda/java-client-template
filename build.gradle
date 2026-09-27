@@ -239,6 +239,17 @@ jsonSchema2Pojo {
     includeConstructors = false
     includeRequiredPropertiesConstructor = false
     includeAllPropertiesConstructor = true
+    // cyoda-go emits date-time fields (format: date-time) with full nanosecond precision
+    // (Go's time.RFC3339Nano). java.util.Date (the jsonschema2pojo default) only carries
+    // millisecond precision, so round-tripping a server timestamp through it silently floors
+    // sub-millisecond digits. Since cyoda-go v0.9 compares point-in-time reads at native
+    // precision with no millisecond rounding (cyoda-go changelog, issue #349), that floored
+    // value lands strictly before the entity's true commit instant and an exact-instant
+    // reload (EntityServiceImpl.create()/update()) never finds its own just-written version.
+    // OffsetDateTime matches the openapi-generated models (org.cyoda.cloud.api.common.model),
+    // which already use it, and is lossless for RFC3339Nano text. No schema in this project
+    // uses "format": "date" or "format": "time" (date-time only), so dateType is left alone.
+    dateTimeType = 'java.time.OffsetDateTime'
 }
 
 tasks.named('generateJsonSchema2Pojo') { dependsOn 'prepareEventSchemas' }

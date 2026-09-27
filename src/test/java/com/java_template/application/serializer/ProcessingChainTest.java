@@ -3,6 +3,7 @@ package com.java_template.application.serializer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.serializer.ErrorInfo;
 import com.java_template.common.serializer.ProcessorSerializer;
@@ -73,7 +74,9 @@ class ProcessingChainTest {
 
     @BeforeEach
     void setUp() {
-        objectMapper = new ObjectMapper();
+        // EntityMetadata's date-time fields are java.time.OffsetDateTime (see build.gradle's
+        // jsonSchema2Pojo dateTimeType); JavaTimeModule is required to (de)serialize them.
+        objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         serializer = new JacksonProcessorSerializer(objectMapper);
 
         // Create test request with real data

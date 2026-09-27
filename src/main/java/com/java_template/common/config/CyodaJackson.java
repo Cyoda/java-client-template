@@ -1,10 +1,13 @@
 package com.java_template.common.config;
 
 import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.deser.DeserializationProblemHandler;
 import com.fasterxml.jackson.databind.jsontype.TypeIdResolver;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.cyoda.cloud.api.common.model.ExternalizedProcessorDefinitionDto;
 import org.cyoda.cloud.api.common.model.ProcessorDefinitionDto;
 
@@ -19,6 +22,16 @@ public final class CyodaJackson {
 
     public static ObjectMapper configure(ObjectMapper mapper) {
         mapper.addHandler(new ProcessorTypeDefault());
+        // cyoda-go's event DTOs (EntityChangeMeta.timeOfChange, EntityGetRequest.pointInTime, …)
+        // are java.time.OffsetDateTime (see build.gradle's jsonSchema2Pojo dateTimeType), carrying
+        // the same nanosecond precision cyoda-go emits on the wire (Go's time.RFC3339Nano). Without
+        // JavaTimeModule, Jackson cannot (de)serialize OffsetDateTime at all. WRITE_DATES_AS_TIMESTAMPS
+        // must stay off: JavaTimeModule's default with it enabled writes an OffsetDateTime as a
+        // numeric [seconds, nanos] array, not the RFC3339 text cyoda-go's HTTP/gRPC contract expects,
+        // which would break the wire format even though it wouldn't lose precision.
+        mapper.registerModule(new JavaTimeModule());
+        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        mapper.disable(DeserializationFeature.ADJUST_DATES_TO_CONTEXT_TIME_ZONE);
         return mapper;
     }
 

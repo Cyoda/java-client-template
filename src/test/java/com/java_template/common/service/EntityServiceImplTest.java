@@ -1,6 +1,7 @@
 package com.java_template.common.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.repository.CrudRepository;
@@ -27,6 +28,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
@@ -60,7 +63,9 @@ class EntityServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        objectMapper = new ObjectMapper();
+        // EntityMetadata's date-time fields are java.time.OffsetDateTime (see build.gradle's
+        // jsonSchema2Pojo dateTimeType); JavaTimeModule is required to (de)serialize them.
+        objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         entityService = new EntityServiceImpl(repository, objectMapper);
         testEntityId = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
         testEntityId2 = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
@@ -80,7 +85,7 @@ class EntityServiceImplTest {
         EntityMetadata metadata = new EntityMetadata();
         metadata.setId(entityId);
         metadata.setState(state);
-        metadata.setCreationDate(new Date());
+        metadata.setCreationDate(OffsetDateTime.now());
         payload.setMeta(objectMapper.valueToTree(metadata));
 
         return payload;
@@ -254,7 +259,7 @@ class EntityServiceImplTest {
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(transactionResponse.getTransactionInfo().getTransactionId())
-                                .withTimeOfChange(new Date())
+                                .withTimeOfChange(OffsetDateTime.now())
                 )));
 
         EntityWithMetadata<TestEntity> result = entityService.create(testEntity);
@@ -328,7 +333,7 @@ class EntityServiceImplTest {
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(response.getTransactionInfo().getTransactionId())
-                                .withTimeOfChange(new Date())
+                                .withTimeOfChange(OffsetDateTime.now())
                 )));
 
         EntityWithMetadata<TestEntity> result = entityService.update(testEntityId, testEntity, null);
@@ -353,7 +358,7 @@ class EntityServiceImplTest {
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(response.getTransactionInfo().getTransactionId())
-                                .withTimeOfChange(new Date())
+                                .withTimeOfChange(OffsetDateTime.now())
                 )));
 
         EntityWithMetadata<TestEntity> result = entityService.update(testEntityId, testEntity, TRANSITION_ACTIVATE);
@@ -408,7 +413,7 @@ class EntityServiceImplTest {
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(responses.getFirst().getTransactionInfo().getTransactionId())
-                                .withTimeOfChange(new Date())
+                                .withTimeOfChange(OffsetDateTime.now())
                 )));
 
         List<EntityWithMetadata<TestEntity>> result = entityService.updateAll(entities, null);
@@ -599,7 +604,7 @@ class EntityServiceImplTest {
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(updateResponse.getTransactionInfo().getTransactionId())
-                                .withTimeOfChange(new Date())
+                                .withTimeOfChange(OffsetDateTime.now())
                 )));
 
         EntityWithMetadata<TestEntity> result = entityService.updateByBusinessId(testEntity, BUSINESS_ID_FIELD, TRANSITION_ACTIVATE);
@@ -677,7 +682,7 @@ class EntityServiceImplTest {
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(transactionResponse.getTransactionInfo().getTransactionId())
-                                .withTimeOfChange(new Date())
+                                .withTimeOfChange(OffsetDateTime.now())
                 )));
 
         when(repository.findById(eq(testEntityId2), any()))
@@ -686,7 +691,7 @@ class EntityServiceImplTest {
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(transactionResponse.getTransactionInfo().getTransactionId())
-                                .withTimeOfChange(new Date())
+                                .withTimeOfChange(OffsetDateTime.now())
                 )));
 
         List<EntityWithMetadata<TestEntity>> result = entityService.save(entities);
@@ -1095,11 +1100,12 @@ class EntityServiceImplTest {
     @DisplayName("getEntityStatsByState with pointInTime should return stats map when successful")
     void testGetEntityStatsByStateWithPointInTimeSuccess() {
         Date pointInTime = new Date();
+        OffsetDateTime expectedPointInTime = pointInTime.toInstant().atOffset(ZoneOffset.UTC);
         Map<String, Long> expectedStats = Map.of(
                 "DRAFT", 3L,
                 "VALIDATED", 7L
         );
-        when(repository.getEntityStatsByState(eq(createTestModelSpec()), eq(pointInTime)))
+        when(repository.getEntityStatsByState(eq(createTestModelSpec()), eq(expectedPointInTime)))
                 .thenReturn(CompletableFuture.completedFuture(expectedStats));
 
         Map<String, Long> result = entityService.getEntityStatsByState(createTestModelSpec(), pointInTime);
@@ -1108,7 +1114,7 @@ class EntityServiceImplTest {
         assertEquals(2, result.size());
         assertEquals(3L, result.get("DRAFT"));
         assertEquals(7L, result.get("VALIDATED"));
-        verify(repository).getEntityStatsByState(eq(createTestModelSpec()), eq(pointInTime));
+        verify(repository).getEntityStatsByState(eq(createTestModelSpec()), eq(expectedPointInTime));
     }
 
     @Test
@@ -1116,11 +1122,12 @@ class EntityServiceImplTest {
     void testGetEntityStatsByStateWithSpecificStates() {
         List<String> states = List.of("DRAFT", "VALIDATED");
         Date pointInTime = new Date();
+        OffsetDateTime expectedPointInTime = pointInTime.toInstant().atOffset(ZoneOffset.UTC);
         Map<String, Long> expectedStats = Map.of(
                 "DRAFT", 5L,
                 "VALIDATED", 10L
         );
-        when(repository.getEntityStatsByState(eq(createTestModelSpec()), eq(states), eq(pointInTime)))
+        when(repository.getEntityStatsByState(eq(createTestModelSpec()), eq(states), eq(expectedPointInTime)))
                 .thenReturn(CompletableFuture.completedFuture(expectedStats));
 
         Map<String, Long> result = entityService.getEntityStatsByState(createTestModelSpec(), states, pointInTime);
@@ -1130,7 +1137,7 @@ class EntityServiceImplTest {
         assertEquals(5L, result.get("DRAFT"));
         assertEquals(10L, result.get("VALIDATED"));
         assertNull(result.get("ARCHIVED"));
-        verify(repository).getEntityStatsByState(eq(createTestModelSpec()), eq(states), eq(pointInTime));
+        verify(repository).getEntityStatsByState(eq(createTestModelSpec()), eq(states), eq(expectedPointInTime));
     }
 
     @Test

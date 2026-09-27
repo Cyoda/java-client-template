@@ -10,6 +10,7 @@ import org.cyoda.cloud.api.event.common.ModelSpec;
 import org.cyoda.cloud.api.event.entity.EntityTransactionResponse;
 import org.jetbrains.annotations.NotNull;
 
+import java.time.OffsetDateTime;
 import java.util.*;
 
 /**
@@ -66,7 +67,7 @@ public record EntityWithMetadata<T extends CyodaEntity>(@JsonProperty("entity") 
      * @return the creation date, or null if metadata is not available
      */
     @JsonIgnore
-    public Date getCreationDate() {
+    public OffsetDateTime getCreationDate() {
         return metadata != null ? metadata.getCreationDate() : null;
     }
 
