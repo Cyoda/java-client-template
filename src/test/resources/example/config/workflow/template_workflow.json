@@ -9,7 +9,8 @@
       "transitions": [
         {
           "name": "transition_to_01",
-          "next": "state_01"
+          "next": "state_01",
+          "manual": false
         }
       ]
     },
@@ -40,6 +41,7 @@
         {
           "name": "transition_with_criterion_simple",
           "next": "state_criterion_check_01",
+          "manual": false,
           "processors": [
             {
               "name": "example_function_name",
@@ -73,6 +75,7 @@
         {
           "name": "transition_with_criterion_group",
           "next": "state_terminal",
+          "manual": false,
           "criterion": {
             "type": "group",
             "operator": "AND",
@@ -88,8 +91,6 @@
         }
       ]
     },
-    "state_terminal": {
-      "transitions": []
-    }
+    "state_terminal": {}
   }
 }

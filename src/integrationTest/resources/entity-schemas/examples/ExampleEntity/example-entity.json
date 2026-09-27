@@ -1,0 +1,11 @@
+{
+  "exampleId": "EX-1",
+  "name": "Example",
+  "amount": 10.5,
+  "quantity": 2,
+  "description": "sample",
+  "items": [{"itemId": "i1", "itemName": "Item", "price": 1.5, "qty": 1, "category": "c", "itemTotal": 1.5}],
+  "contact": {"name": "n", "email": "e@example.com", "phone": "1", "address": {"line1": "l", "city": "c", "postcode": "p", "country": "x"}},
+  "createdAt": "2026-01-01T00:00:00",
+  "updatedAt": "2026-01-01T00:00:00"
+}
