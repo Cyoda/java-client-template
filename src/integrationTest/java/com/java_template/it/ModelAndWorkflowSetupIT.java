@@ -2,6 +2,7 @@ package com.java_template.it;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaJackson;
@@ -16,8 +17,12 @@ import org.springframework.test.context.TestPropertySource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -47,12 +52,46 @@ class ModelAndWorkflowSetupIT {
 
         CyodaRest rest = CyodaTestEnvironment.rest(Profile.mockMemory());
         JsonNode models = rest.get("model/").requireSuccess().body();
-        assertThat(models.toString()).contains("ExampleEntity").contains("LOCKED");
+        List<JsonNode> exampleEntityModels = StreamSupport.stream(models.spliterator(), false)
+                .filter(m -> "ExampleEntity".equals(m.path("modelName").asText())
+                        && m.path("modelVersion").asInt() == 1)
+                .toList();
+        assertThat(exampleEntityModels).hasSize(1);
+        assertThat(exampleEntityModels.getFirst().path("currentState").asText()).isEqualTo("LOCKED");
 
         JsonNode exported = rest.get("model/ExampleEntity/1/workflow/export").requireSuccess().body();
-        WorkflowConfigurationDto imported = om.treeToValue(workflow, WorkflowConfigurationDto.class);
-        WorkflowConfigurationDto roundTripped = om.treeToValue(exported.get("workflows").get(0), WorkflowConfigurationDto.class);
+        // cyoda-go's export omits an empty array (e.g. a terminal state's "transitions") rather than
+        // emitting "[]"; normalise both sides the same way before comparing so the round trip is
+        // judged on content, not on that omitempty quirk. The equality assertion itself stays strict.
+        WorkflowConfigurationDto imported = om.treeToValue(withoutEmptyArrays(workflow), WorkflowConfigurationDto.class);
+        WorkflowConfigurationDto roundTripped = om.treeToValue(withoutEmptyArrays(exported.get("workflows").get(0)), WorkflowConfigurationDto.class);
         assertThat(roundTripped).isEqualTo(imported);
+    }
+
+    /** Recursively drops any object field whose value is an empty array. */
+    private static JsonNode withoutEmptyArrays(JsonNode node) {
+        if (node.isObject()) {
+            ObjectNode copy = ((ObjectNode) node).deepCopy();
+            Iterator<Map.Entry<String, JsonNode>> fields = copy.properties().iterator();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                JsonNode value = field.getValue();
+                if (value.isArray() && value.isEmpty()) {
+                    fields.remove();
+                } else {
+                    field.setValue(withoutEmptyArrays(value));
+                }
+            }
+            return copy;
+        }
+        if (node.isArray()) {
+            ArrayNode copy = ((ArrayNode) node).deepCopy();
+            for (int i = 0; i < copy.size(); i++) {
+                copy.set(i, withoutEmptyArrays(copy.get(i)));
+            }
+            return copy;
+        }
+        return node;
     }
 
     @Test

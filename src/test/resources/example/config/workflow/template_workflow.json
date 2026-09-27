@@ -91,6 +91,8 @@
         }
       ]
     },
-    "state_terminal": {}
+    "state_terminal": {
+      "transitions": []
+    }
   }
 }
