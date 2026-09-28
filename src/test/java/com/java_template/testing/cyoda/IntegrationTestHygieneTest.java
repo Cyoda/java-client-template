@@ -14,12 +14,14 @@ class IntegrationTestHygieneTest {
 
     @Test
     void integrationTestsDeclareNoMockBeans() throws Exception {
-        Path root = Path.of("src/integrationTest/java");
-        if (!Files.exists(root)) {
-            return;
-        }
+        // Resolved from the project directory (the test task sets user.dir to it), never the raw working directory.
+        Path root = Path.of(System.getProperty("user.dir")).resolve("src/integrationTest/java");
+        assertThat(root).as("the integration-test sources must be found, or this check proves nothing")
+                .isDirectory();
         try (Stream<Path> files = Files.walk(root)) {
-            List<Path> offenders = files.filter(p -> p.toString().endsWith(".java")).filter(p -> {
+            List<Path> sources = files.filter(p -> p.toString().endsWith(".java")).toList();
+            assertThat(sources).as("integration-test sources under " + root).isNotEmpty();
+            List<Path> offenders = sources.stream().filter(p -> {
                 try {
                     String src = Files.readString(p);
                     return src.contains("@MockitoBean") || src.contains("@MockBean");
