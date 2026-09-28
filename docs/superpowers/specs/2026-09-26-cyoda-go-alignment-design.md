@@ -29,7 +29,7 @@ template has no workarounds for it (§9.2).
    nothing needs to be running beforehand.
 2. CI runs the same on every push and pull request.
 3. Running a local cyoda (`cyoda init && cyoda`) and then
-   `./gradlew runApp --args='--spring.profiles.active=local'` works without further
+   `./gradlew runApp --args='--spring.profiles.active=cyoda-local'` works without further
    configuration. The app:
    - starts on port 8081;
    - joins as a compute member (the greet is received and logged);
@@ -299,8 +299,10 @@ removed. "cyoda-light" was cyoda-go's earlier name.
 - `auth-mode=client-credentials` with a missing client id or secret fails startup with a
   message naming both properties.
 
-**New `application-local.yml`:**
+**New `application-cyoda-local.yml` (profile `cyoda-local`):**
 - `server.port: 8081`, because cyoda-go's HTTP default is 8080;
+- `server.address: 127.0.0.1`: with mock IAM the app runs without credentials, so it is not
+  reachable from other hosts;
 - `cyoda-api-url: http://localhost:8080/api`;
 - `grpc-address: localhost`, `grpc-server-port: 9090`, `grpc-tls: false`;
 - `auth-mode: none`.
@@ -309,7 +311,7 @@ removed. "cyoda-light" was cyoda-go's earlier name.
 
 | Old key | New |
 |---|---|
-| `app.config.cyoda-light.*` | Removed. Set `cyoda-api-url` and `grpc-*`, or use the `local` profile. |
+| `app.config.cyoda-light.*` | Removed. Set `cyoda-api-url` and `grpc-*`, or use the `cyoda-local` profile. |
 | `app.config.skip-ssl` | `app.config.grpc-tls` (inverted) |
 | `execution.mode` (read by `@ConditionalOnProperty`) and `app.config.execution-mode` | One key, `app.config.execution-mode`, whose default changes to `virtual` |
 | top-level `cyoda.api.url` | Removed (unused) |

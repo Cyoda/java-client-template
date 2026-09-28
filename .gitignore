@@ -39,8 +39,8 @@ gradle-app.setting
 # Profile configs may hold credentials (e.g. config/application-cloud.yml): never commit them.
 application-*.yml
 application-*.yaml
-# Except the template's own local-profile default, which ships as part of the repo (no credentials).
-!src/main/resources/application-local.yml
+# Except the template's own cyoda-local profile, which ships as part of the repo (no credentials).
+!src/main/resources/application-cyoda-local.yml
 
 # The cyoda binary scripts/install-cyoda.sh installs for the integration tests
 .cyoda/

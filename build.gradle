@@ -388,6 +388,7 @@ task bootJarWorkflowImport(type: org.springframework.boot.gradle.tasks.bundling.
     dependsOn configurations.runtimeClasspath
 }
 
+// Against a local cyoda-go (mock IAM, app on 127.0.0.1:8081): ./gradlew runApp --args='--spring.profiles.active=cyoda-local'
 tasks.register('runApp', JavaExec) {
     group = 'application'
     description = 'Run arbitrary main class'

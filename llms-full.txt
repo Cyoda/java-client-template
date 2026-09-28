@@ -81,13 +81,13 @@ cd java-client-template
 
 Configuration is managed via Spring Boot YAML files. `application.yml` holds Cloud-shaped defaults.
 
-**Local cyoda-go (the `local` profile).** `src/main/resources/application-local.yml` ships with the
-template and targets a local cyoda-go on its defaults (REST `http://localhost:8080/api`, gRPC
+**Local cyoda-go (the `cyoda-local` profile).** `src/main/resources/application-cyoda-local.yml` ships
+with the template and targets a local cyoda-go on its defaults (REST `http://localhost:8080/api`, gRPC
 `localhost:9090`, no TLS, `auth-mode: none`). It moves the app to port **8081** so it does not clash
-with cyoda-go on 8080. It is tracked in git: do not put credentials in it.
+with cyoda-go on 8080, and binds it to `127.0.0.1` only. It is tracked in git: do not put credentials in it.
 
 ```bash
-./gradlew runApp --args='--spring.profiles.active=local'
+./gradlew runApp --args='--spring.profiles.active=cyoda-local'
 ```
 
 **Cyoda Cloud.** Never commit credentials. Either use environment variables:
@@ -100,7 +100,7 @@ export APP_CONFIG_CYODA_CLIENT_SECRET=your-client-secret
 ```
 
 or a git-ignored `application-cloud.yml` (every `application-*.yml` except the shipped
-`application-local.yml` is git-ignored). Put it in `config/` at the project root rather than in
+`application-cyoda-local.yml` is git-ignored, including an `application-local.yml` you may already have). Put it in `config/` at the project root rather than in
 `src/main/resources`, so it is not packaged into the jar; Spring Boot reads `./config/` from the
 working directory:
 
@@ -121,31 +121,31 @@ app:
 
 #### Option 1: Run via Gradle (recommended for local development)
 ```bash
-./gradlew runApp -PmainClass=com.java_template.common.tool.WorkflowImportTool --args='--spring.profiles.active=local'
+./gradlew runApp -PmainClass=com.java_template.common.tool.WorkflowImportTool --args='--spring.profiles.active=cyoda-local'
 ```
 
 #### Option 2: Build and Run JAR (recommended for CI or scripting)
 ```bash
 ./gradlew bootJarWorkflowImport
-java -jar build/libs/java-client-template-1.0-SNAPSHOT-workflow-import.jar --spring.profiles.active=local
+java -jar build/libs/java-client-template-1.0-SNAPSHOT-workflow-import.jar --spring.profiles.active=cyoda-local
 ```
 
 ### 4. ▶️ Run the Application
 
 #### Option 1: Run via Gradle
 ```bash
-./gradlew runApp --args='--spring.profiles.active=local'
+./gradlew runApp --args='--spring.profiles.active=cyoda-local'
 ```
 
 #### Option 2: Run Manually After Build
 ```bash
 ./gradlew bootJar
-java -jar build/libs/app.jar --spring.profiles.active=local
+java -jar build/libs/app.jar --spring.profiles.active=cyoda-local
 ```
 
-> Access the app (local profile): [http://localhost:8081/api/swagger-ui/index.html](http://localhost:8081/api/swagger-ui/index.html)
+> Access the app (cyoda-local profile): [http://localhost:8081/api/swagger-ui/index.html](http://localhost:8081/api/swagger-ui/index.html)
 >
-> **Note**: The app runs on port 8080 by default (`src/main/resources/application.yml`) and on 8081 with the `local` profile, under the `/api` context path. You can change the port by setting the `server.port` property.
+> **Note**: The app runs on port 8080 by default (`src/main/resources/application.yml`) and on 127.0.0.1:8081 with the `cyoda-local` profile, under the `/api` context path. You can change the port by setting the `server.port` property.
 
 ### 5. 🧪 Run the Tests
 

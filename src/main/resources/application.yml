@@ -50,7 +50,7 @@ app:
     # URL pattern to apply CORS to
     path-pattern: /**
   config:
-    # Cyoda connection. Cloud-shaped defaults; see application-local.yml for a local cyoda-go.
+    # Cyoda connection. Cloud-shaped defaults; see application-cyoda-local.yml (profile cyoda-local) for a local cyoda-go.
     cyoda-host:
     cyoda-api-url: https://${app.config.cyoda-host}/api
     # client-credentials: M2M token from {cyoda-api-url}/oauth/token (cyoda-go jwt mode, Cyoda Cloud)

@@ -1,0 +1,15 @@
+# Local cyoda-go with its defaults after `cyoda init && cyoda` (mock IAM, REST 8080, gRPC 9090).
+# Run with: ./gradlew runApp --args='--spring.profiles.active=cyoda-local'
+# Shipped with the template and tracked in git: never put credentials here.
+server:
+  port: 8081
+  # With mock IAM (auth-mode: none) the app talks to Cyoda without credentials, so it listens on loopback only.
+  address: 127.0.0.1
+
+app:
+  config:
+    cyoda-api-url: http://localhost:8080/api
+    grpc-address: localhost
+    grpc-server-port: 9090
+    grpc-tls: false
+    auth-mode: none

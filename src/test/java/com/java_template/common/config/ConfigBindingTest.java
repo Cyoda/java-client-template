@@ -63,12 +63,13 @@ class ConfigBindingTest {
     }
 
     @Test
-    void localProfileTargetsADefaultLocalCyoda() throws Exception {
+    void cyodaLocalProfileTargetsADefaultLocalCyoda() throws Exception {
         List<PropertySource<?>> sources = new YamlPropertySourceLoader()
-                .load("local", new ClassPathResource("application-local.yml"));
+                .load("cyoda-local", new ClassPathResource("application-cyoda-local.yml"));
         PropertySource<?> local = sources.getFirst();
 
         assertThat(local.getProperty("server.port")).isEqualTo(8081);
+        assertThat(local.getProperty("server.address")).isEqualTo("127.0.0.1");
         assertThat(local.getProperty("app.config.cyoda-api-url")).isEqualTo("http://localhost:8080/api");
         assertThat(local.getProperty("app.config.grpc-address")).isEqualTo("localhost");
         assertThat(local.getProperty("app.config.grpc-server-port")).isEqualTo(9090);

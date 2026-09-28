@@ -281,7 +281,7 @@ The template now implements cyoda-go's contract. Contract files are vendored und
 
 | Area | Before | After |
 |---|---|---|
-| **Warning: `application-local.yml` and `.gitignore` (do this first)** | `.gitignore` ignored every `application-*.yml`, and the README told you to create `application-local.yml` with your settings, including Cloud credentials | the template ships `src/main/resources/application-local.yml` (local cyoda-go profile, no credentials) and un-ignores it. If your repo kept Cloud credentials in `application-local.yml`, move them to environment variables (`APP_CONFIG_CYODA_HOST`, `APP_CONFIG_CYODA_CLIENT_ID`, `APP_CONFIG_CYODA_CLIENT_SECRET`) or to a git-ignored `config/application-cloud.yml` (run with `--spring.profiles.active=cloud`) **before** syncing `.gitignore` and `application-local.yml`; otherwise the next `git add` can commit them |
+| Local profile file | `.gitignore` ignored every `application-*.yml`; the README told you to create `application-local.yml` with your own settings | the template ships `src/main/resources/application-cyoda-local.yml` (profile `cyoda-local`: a local cyoda-go with mock IAM, app on `127.0.0.1:8081`, no credentials), the only `application-*.yml` that `.gitignore` un-ignores. An existing `application-local.yml` is untouched and still ignored, so settings in it stay out of git |
 | Contract files | `src/main/resources/{proto,schema,api}` | `src/main/resources/cyoda/{proto,schema,openapi}` + `CYODA_VERSION`; transforms in `buildSrc/` |
 | OpenAPI DTO packages | `org.cyoda.cloud.api.{common,workflow,search,audit,iam}.model` | `org.cyoda.cloud.api.common.model` only |
 | Condition operators | `OperatorTypeDto`, `GroupOperatorDto`, `.operation(…)` | `SimpleConditionDto.OperatorTypeEnum`, `LifecycleConditionDto.OperatorTypeEnum`, `GroupConditionDto.OperatorEnum`, `.operatorType(…)` |
@@ -306,7 +306,7 @@ The template now implements cyoda-go's contract. Contract files are vendored und
 | `deleteAll` | chunked (`transactionSize` 1000) | one transaction by default: the template no longer sends `transactionSize` (cyoda-go still honours it when sent, #379); `pageSize` removed from `EntityDeleteAllRequest` |
 | Snapshot search paging | a page request with a searchId could silently start a new search, and `totalElements` was the running count (often 0) | a searchId (= snapshotId) always pages the same snapshot, and `totalElements` is the final count. An expired or unknown searchId fails instead of re-searching |
 | Config | `app.config.cyoda-light.*`, `skip-ssl`, `execution.mode`, `cyoda.api.url` | removed; use `cyoda-api-url`, `grpc-*`, `grpc-tls`, `app.config.execution-mode` (default `virtual`), `auth-mode` |
-| Local cyoda-go | cyoda-light toggle | `--spring.profiles.active=local` (app on 8081, `auth-mode: none`) |
+| Local cyoda-go | cyoda-light toggle | `--spring.profiles.active=cyoda-local` (app on `127.0.0.1:8081`, `auth-mode: none`) |
 | OBO | `app.obo.*`, `OboAwareAuthentication`, `OboKeyRegistrationService`, … | removed; compute calls Cyoda as M2M |
 | Event user resolver | `app.event.auth-context.*`, `EventAuthContextHandler`, … | removed |
 | `authtype` values | `user`, `service_account` | `user`, `service`, `system` |
