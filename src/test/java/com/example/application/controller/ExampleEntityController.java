@@ -2,6 +2,7 @@ package com.example.application.controller;
 
 import com.example.application.entity.example_entity.version_1.ExampleEntity;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.controller.ErrorResponses;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.repository.SearchAndRetrievalParams;
@@ -40,7 +41,7 @@ import java.util.stream.Stream;
  * - Pagination support for large datasets
  * - Business identifier duplicate checking
  * - Workflow transition support
- * - Error handling with ProblemDetail (RFC 7807)
+ * - Error handling with ProblemDetail (RFC 7807): a generic detail and correlation id, never the exception message
  * - Logging best practices
  * - Location header for created resources
  * <p>
@@ -113,11 +114,8 @@ public class ExampleEntityController {
 
             return ResponseEntity.created(location).body(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to create entity: %s", e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to create entity", e);
         }
     }
 
@@ -140,11 +138,8 @@ public class ExampleEntityController {
             }
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to retrieve entity with ID '%s': %s", id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to retrieve entity " + id, e);
         }
     }
 
@@ -169,11 +164,8 @@ public class ExampleEntityController {
             }
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to retrieve entity with business ID '%s': %s", exampleId, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to retrieve entity by business ID", e);
         }
     }
 
@@ -194,11 +186,8 @@ public class ExampleEntityController {
             if (CyodaExceptionUtil.isNotFound(e)) {
                 return ResponseEntity.notFound().build();
             }
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to retrieve change history for entity with ID '%s': %s", id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to retrieve change history for entity " + id, e);
         }
     }
 
@@ -220,11 +209,8 @@ public class ExampleEntityController {
             logger.info("ExampleEntity updated with ID: {}", id);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to update entity with ID '%s': %s", id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to update entity " + id, e);
         }
     }
 
@@ -275,11 +261,8 @@ public class ExampleEntityController {
             logger.info("Found {} entities in category '{}'", result.data().size(), category);
             return ResponseEntity.ok(result.data());
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to search entities by category '%s': %s", category, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to search entities by category", e);
         }
     }
 
@@ -355,11 +338,8 @@ public class ExampleEntityController {
             // Return PageResult directly - client can use searchId for next page
             return ResponseEntity.ok(pageResult);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to search entities: %s", e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to search entities", e);
         }
     }
 
@@ -445,11 +425,8 @@ public class ExampleEntityController {
             logger.info("Exported {} entities", count);
             return ResponseEntity.ok(String.format("Exported %d entities", count));
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to export entities: %s", e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to export entities", e);
         }
     }
 
@@ -471,11 +448,8 @@ public class ExampleEntityController {
             logger.info("ExampleEntity approved with ID: {}", id);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to approve entity with ID '%s': %s", id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to approve entity " + id, e);
         }
     }
 
@@ -490,11 +464,8 @@ public class ExampleEntityController {
             logger.info("ExampleEntity deleted with ID: {}", id);
             return ResponseEntity.noContent().build();
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to delete entity with ID '%s': %s", id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to delete entity " + id, e);
         }
     }
 
@@ -515,11 +486,8 @@ public class ExampleEntityController {
             logger.info("ExampleEntity deleted with business ID: {}", exampleId);
             return ResponseEntity.noContent().build();
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to delete entity with business ID '%s': %s", exampleId, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to delete entity by business ID", e);
         }
     }
 
@@ -538,11 +506,8 @@ public class ExampleEntityController {
             logger.warn("Deleted all ExampleEntities - count: {}", deletedCount);
             return ResponseEntity.ok().body(String.format("Deleted %d entities", deletedCount));
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to delete all entities: %s", e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to delete all entities", e);
         }
     }
 

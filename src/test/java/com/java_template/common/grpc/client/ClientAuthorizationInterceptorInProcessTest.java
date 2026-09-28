@@ -111,7 +111,10 @@ class ClientAuthorizationInterceptorInProcessTest {
         assertThatThrownBy(() -> stub.entityManage(CloudEvent.getDefaultInstance()))
                 .isInstanceOfSatisfying(StatusRuntimeException.class, e -> {
                     assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.UNAUTHENTICATED);
-                    assertThat(e.getStatus().getDescription()).contains("token endpoint down");
+                    // The status description is generic; the token source's message stays in the cause, for
+                    // server-side logs only.
+                    assertThat(e.getStatus().getDescription()).isEqualTo("failed to obtain a Cyoda token");
+                    assertThat(e.getStatus().getCause()).hasMessage("token endpoint down");
                 });
         assertThat(serverCalls).hasValue(0);
     }

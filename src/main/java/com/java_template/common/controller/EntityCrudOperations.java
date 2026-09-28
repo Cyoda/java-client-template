@@ -145,11 +145,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
 
             return ResponseEntity.created(location).body(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to create %s: %s", entityName, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to create " + entityName, e);
         }
     }
 
@@ -184,11 +180,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
 
             return ResponseEntity.created(location).body(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to create %s: %s", entityName, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to create " + entityName, e);
         }
     }
 
@@ -243,11 +235,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
 
             return ResponseEntity.created(location).body(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to create %s: %s", entityName, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to create " + entityName, e);
         }
     }
 
@@ -272,11 +260,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             }
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to retrieve %s with ID '%s': %s", entityName, id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to retrieve " + entityName + " " + id, e);
         }
     }
 
@@ -295,12 +279,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             }
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to retrieve %s with business ID '%s': %s",
-                            entityName, businessId, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to retrieve " + entityName + " by business ID", e);
         }
     }
 
@@ -318,12 +297,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             if (CyodaExceptionUtil.isNotFound(e)) {
                 return ResponseEntity.notFound().build();
             }
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to retrieve change history for %s with ID '%s': %s",
-                            entityName, id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to retrieve change history for " + entityName + " " + id, e);
         }
     }
 
@@ -339,11 +313,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             logger.info("{} updated with ID: {}", entityName, id);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to update %s with ID '%s': %s", entityName, id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to update " + entityName + " " + id, e);
         }
     }
 
@@ -418,11 +388,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
                 return ResponseEntity.ok(pageResult);
             }
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to list %ss: %s", entityName, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to list " + entityName + "s", e);
         }
     }
 
@@ -457,12 +423,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             );
             return ResponseEntity.ok(pageResult);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to search %ss by %s '%s': %s",
-                            entityName, fieldName, searchValue, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to search " + entityName + "s", e);
         }
     }
 
@@ -478,12 +439,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             logger.info("{} transitioned with ID: {} using transition: {}", entityName, id, transitionName);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to execute transition '%s' on %s with ID '%s': %s",
-                            transitionName, entityName, id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to execute a transition on " + entityName + " " + id, e);
         }
     }
 
@@ -496,11 +452,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             logger.info("{} deleted with ID: {}", entityName, id);
             return ResponseEntity.noContent().build();
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to delete %s with ID '%s': %s", entityName, id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to delete " + entityName + " " + id, e);
         }
     }
 
@@ -519,12 +471,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             logger.info("{} deleted with business ID: {}", entityName, businessId);
             return ResponseEntity.noContent().build();
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to delete %s with business ID '%s': %s",
-                            entityName, businessId, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to delete " + entityName + " by business ID", e);
         }
     }
 
@@ -537,11 +484,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             logger.warn("Deleted all {}s - count: {}", entityName, deletedCount);
             return ResponseEntity.ok().body(String.format("Deleted %d %ss", deletedCount, entityName));
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to delete all %ss: %s", entityName, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to delete all " + entityName + "s", e);
         }
     }
 
@@ -572,11 +515,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             logger.info("Created {} {}s", responses.size(), entityName);
             return ResponseEntity.status(HttpStatus.CREATED).body(responses);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to create %ss: %s", entityName, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to create " + entityName + "s", e);
         }
     }
 
@@ -613,11 +552,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             logger.info("Updated {} {}s", responses.size(), entityName);
             return ResponseEntity.ok(responses);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to update %ss: %s", entityName, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to update " + entityName + "s", e);
         }
     }
 

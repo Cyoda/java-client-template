@@ -38,7 +38,8 @@ public class ClientAuthorizationInterceptor implements ClientInterceptor {
             LOG.warn("Cannot obtain M2M token for {}; failing the call with UNAUTHENTICATED: {}",
                     method.getFullMethodName(), e.toString());
             return new FailedClientCall<>(
-                    Status.UNAUTHENTICATED.withDescription("M2M token unavailable: " + e.getMessage()).withCause(e));
+                    // Generic description: it can reach a REST client; the cause is for server-side logs only.
+                    Status.UNAUTHENTICATED.withDescription("failed to obtain a Cyoda token").withCause(e));
         }
         return new ForwardingClientCall.SimpleForwardingClientCall<>(next.newCall(method, callOptions)) {
             @Override

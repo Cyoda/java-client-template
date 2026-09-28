@@ -123,6 +123,32 @@ class ExampleEntityControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    @DisplayName("A failure's internal message never reaches the response body")
+    void testFailureBodyIsGeneric() throws Exception {
+        String internal = "connect to http://cyoda.internal:8080/api failed: secret-detail";
+        when(entityService.getById(any(), any(), eq(ExampleEntity.class), nullable(OffsetDateTime.class)))
+                .thenThrow(new RuntimeException(internal));
+        when(entityService.getById(any(), any(), eq(ExampleEntity.class)))
+                .thenThrow(new RuntimeException(internal));
+        when(entityService.create(any())).thenThrow(new RuntimeException(internal));
+        when(entityService.deleteById(any())).thenThrow(new RuntimeException(internal));
+
+        UUID id = UUID.randomUUID();
+        for (var request : List.of(
+                get("/ui/example/" + id),
+                post("/ui/example").contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(createTestEntity("TEST-002"))),
+                delete("/ui/example/" + id))) {
+            String body = mockMvc.perform(request)
+                    .andExpect(status().is4xxClientError())
+                    .andExpect(jsonPath("$.correlationId").exists())
+                    .andReturn().getResponse().getContentAsString();
+            org.assertj.core.api.Assertions.assertThat(body)
+                    .doesNotContain("cyoda.internal").doesNotContain("secret-detail");
+        }
+    }
+
     // ========================================
     // GET BY ID TESTS
     // ========================================
@@ -164,7 +190,7 @@ class ExampleEntityControllerTest {
         EntityWithMetadata<ExampleEntity> entityWithMetadata = createEntityWithMetadata(entity, entityId);
         OffsetDateTime pointInTime = OffsetDateTime.now().minusDays(1);
 
-        when(entityService.getById(eq(entityId), any(ModelSpec.class), eq(ExampleEntity.class), any(OffsetDateTime.class)))
+        when(entityService.getById(eq(entityId), any(ModelSpec.class), eq(ExampleEntity.class), nullable(OffsetDateTime.class)))
                 .thenReturn(entityWithMetadata);
 
         mockMvc.perform(get("/ui/example/{id}", entityId)
