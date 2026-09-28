@@ -12,9 +12,13 @@ import org.junit.jupiter.api.Test;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.ArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -35,6 +39,7 @@ class HttpUtilsJoinedRetryTest {
     private volatile String refusalCode = "TOO_MANY_JOINED_REQUESTS";
     private HttpUtils http;
     private String base;
+    private final List<Thread> tokenFetchThreads = Collections.synchronizedList(new ArrayList<>());
 
     @BeforeEach
     void start() throws Exception {
@@ -53,7 +58,10 @@ class HttpUtilsJoinedRetryTest {
         server.start();
         base = "http://127.0.0.1:" + server.getAddress().getPort() + "/api";
         CyodaTokenSource tokens = mock(CyodaTokenSource.class);
-        when(tokens.bearerToken()).thenReturn(Optional.of("m2m"));
+        when(tokens.bearerToken()).thenAnswer(inv -> {
+            tokenFetchThreads.add(Thread.currentThread());
+            return Optional.of("m2m");
+        });
         CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
         Config config = new Config();
         config.setCyodaApiUrl(base);
@@ -86,6 +94,19 @@ class HttpUtilsJoinedRetryTest {
                 .isInstanceOf(CyodaRetryableException.class)
                 .satisfies(e -> assertThat(((CyodaRetryableException) e).getErrorCode()).isEqualTo("TOO_MANY_JOINED_REQUESTS"));
         assertThat(requests).hasValue(4);
+    }
+
+    @Test
+    void theRetriedAttemptRunsOnAVirtualThreadNotTheCommonPool() {
+        refusals = 1;
+
+        assertThat(http.sendPostRequest(joined(), base, "entity/JSON/thing/1", Map.of("a", 1)).join()
+                .path("json").path("ok").asBoolean()).isTrue();
+
+        assertThat(tokenFetchThreads).hasSizeGreaterThanOrEqualTo(2);
+        Thread retriedAttemptThread = tokenFetchThreads.get(tokenFetchThreads.size() - 1);
+        assertThat(retriedAttemptThread.isVirtual()).isTrue();
+        assertThat(retriedAttemptThread).isNotInstanceOf(ForkJoinWorkerThread.class);
     }
 
     @Test

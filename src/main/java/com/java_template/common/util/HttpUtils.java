@@ -135,8 +135,13 @@ public class HttpUtils {
             if (cause instanceof CyodaRetryableException retryable
                     && "TOO_MANY_JOINED_REQUESTS".equals(retryable.getErrorCode())
                     && attempt < CyodaGrpcCalls.JOINED_RETRIES) {
+                // A plain delayedExecutor() runs its callback on ForkJoinPool.commonPool, and the
+                // retried sendOnce -> createRequest can block that thread on an M2M token fetch,
+                // stalling the app's parallel streams and default async tasks. Run it on a fresh
+                // virtual thread instead (spec §4.5).
                 Executor delayed = CompletableFuture.delayedExecutor(
-                        CyodaGrpcCalls.joinedRetryBackoffMs(attempt), TimeUnit.MILLISECONDS);
+                        CyodaGrpcCalls.joinedRetryBackoffMs(attempt), TimeUnit.MILLISECONDS,
+                        r -> Thread.ofVirtual().name("cyoda-rest-retry").start(r));
                 return CompletableFuture.supplyAsync(() -> null, delayed)
                         .thenCompose(ignored -> sendRequest(ctx, url, path, method, data, parser, attempt + 1));
             }
