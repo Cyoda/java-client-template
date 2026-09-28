@@ -27,9 +27,11 @@ import java.util.concurrent.CompletableFuture;
  * credential and tx-token of every call it makes, including every stage of a multi-step search. Build it
  * with {@code CyodaCallContexts.current()} once per operation; never re-derive it per call.
  *
- * <p>When {@code ctx} is joined to a callout's transaction, every read refuses a non-null {@code pointInTime}
- * with {@link IllegalArgumentException} before sending: point-in-time reads are not supported inside a
- * callout's transaction (spec clarification 3).
+ * <p>When {@code ctx} is joined to a callout's transaction, a non-null {@code pointInTime} on any read is
+ * sent to cyoda through unchanged, not refused: cyoda-go defines it as a historical read of committed
+ * state, so it returns what was committed as at that time and does not see the callout's own uncommitted
+ * writes, however recent. Reading without {@code pointInTime} is the only way to see the transaction's own
+ * writes.
  */
 public interface CrudRepository {
 
