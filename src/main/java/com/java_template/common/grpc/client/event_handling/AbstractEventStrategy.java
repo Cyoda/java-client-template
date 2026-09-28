@@ -32,6 +32,11 @@ public abstract class AbstractEventStrategy<
 
     private static final Logger logger = LoggerFactory.getLogger(AbstractEventStrategy.class);
 
+    // Used only to test whether recovery text is valid JSON and, if so, to read its top-level
+    // fields directly. A plain mapper (not the wire mapper) is deliberate: this is a best-effort
+    // fallback for text that may not even be a CloudEvent payload, not a DTO round trip.
+    private static final ObjectMapper RECOVERY_MAPPER = new ObjectMapper();
+
     protected final OperationFactory operationFactory;
     protected final ObjectMapper objectMapper;
     protected final CyodaContextFactory eventContextFactory;
@@ -130,7 +135,11 @@ public abstract class AbstractEventStrategy<
 
     /**
      * ABOUTME: Attempts to recover the requestId from a CloudEvent when JSON parsing fails.
-     * Uses string-based regex patterns to search for the requestId field in potentially corrupted JSON.
+     * Text that is itself valid JSON is read as a tree and its top-level requestId field is used
+     * directly, so a same-named field nested under payload/data (cyoda-go serialises fields
+     * alphabetically, so "payload" precedes "requestId" on the wire) can never be picked up
+     * instead of the real one. Only text that does not parse as JSON falls back to the
+     * string-based regex patterns below.
      *
      * @param cloudEvent the CloudEvent containing potentially corrupted JSON data
      * @return RequestIdRecoveryResult containing the requestId if found and any error message
@@ -145,11 +154,20 @@ public abstract class AbstractEventStrategy<
             return new RequestIdRecoveryResult(Optional.empty(), "CloudEvent text data is empty, cannot recover requestId");
         }
 
+        JsonNode parsed = tryParseAsJson(textData);
+        if (parsed != null) {
+            JsonNode requestId = parsed.get("requestId");
+            if (requestId != null && requestId.isTextual()) {
+                return new RequestIdRecoveryResult(Optional.of(requestId.asText()), null);
+            }
+            return new RequestIdRecoveryResult(Optional.empty(),
+                    "Could not recover requestId from CloudEvent text data. No matching patterns found.");
+        }
+
         // Pattern to match "requestId" field with various quote styles and whitespace
         // Matches: "requestId": "value", 'requestId': 'value', "requestId":"value", etc.
         Pattern requestIdPattern = Pattern.compile(
-                "[\"']?requestId[\"']?\\s*:\\s*[\"']([^\"'\\s,}]+)[\"']?",
-                Pattern.CASE_INSENSITIVE
+                "[\"']?requestId[\"']?\\s*:\\s*[\"']([^\"'\\s,}]+)[\"']?"
         );
 
         Matcher matcher = requestIdPattern.matcher(textData);
@@ -161,8 +179,7 @@ public abstract class AbstractEventStrategy<
         // Fallback: try to find any UUID-like pattern near "requestId" text
         // This handles cases where quotes might be corrupted but the value is still readable
         Pattern fallbackPattern = Pattern.compile(
-                "requestId[^a-zA-Z0-9-]*([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})",
-                Pattern.CASE_INSENSITIVE
+                "requestId[^a-zA-Z0-9-]*([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})"
         );
 
         Matcher fallbackMatcher = fallbackPattern.matcher(textData);
@@ -173,8 +190,7 @@ public abstract class AbstractEventStrategy<
 
         // Final fallback: look for any string value after "requestId" that looks like an identifier
         Pattern generalPattern = Pattern.compile(
-                "requestId[^a-zA-Z0-9-]*([a-zA-Z0-9][a-zA-Z0-9-_]{2,})",
-                Pattern.CASE_INSENSITIVE
+                "requestId[^a-zA-Z0-9-]*([a-zA-Z0-9][a-zA-Z0-9-_]{2,})"
         );
 
         Matcher generalMatcher = generalPattern.matcher(textData);
@@ -188,8 +204,9 @@ public abstract class AbstractEventStrategy<
 
     /**
      * ABOUTME: Attempts to recover the entityId from a CloudEvent when JSON parsing fails.
-     * Uses a string-based regex pattern to search for a UUID-shaped entityId field in
-     * potentially corrupted JSON.
+     * Text that is itself valid JSON is read as a tree and its top-level entityId field is used
+     * directly, for the same reason as {@link #recoverRequestIdFromCloudEvent}. Only text that
+     * does not parse as JSON falls back to the UUID-shaped regex below.
      *
      * @param cloudEvent the CloudEvent containing potentially corrupted JSON data
      * @return the recovered entityId, if any
@@ -198,10 +215,32 @@ public abstract class AbstractEventStrategy<
         if (cloudEvent == null || cloudEvent.getTextData() == null || cloudEvent.getTextData().isBlank()) {
             return Optional.empty();
         }
+        String textData = cloudEvent.getTextData();
+
+        JsonNode parsed = tryParseAsJson(textData);
+        if (parsed != null) {
+            JsonNode entityId = parsed.get("entityId");
+            return (entityId != null && entityId.isTextual()) ? Optional.of(entityId.asText()) : Optional.empty();
+        }
+
         Matcher m = Pattern.compile(
                 "[\"']?entityId[\"']?\\s*:\\s*[\"']?([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})")
-                .matcher(cloudEvent.getTextData());
+                .matcher(textData);
         return m.find() ? Optional.of(m.group(1)) : Optional.empty();
+    }
+
+    /**
+     * Parses {@code text} as JSON, returning {@code null} (rather than throwing) when it is not
+     * valid JSON or its root is not an object, so callers can tell "valid JSON with no such
+     * field" apart from "not JSON at all".
+     */
+    private static JsonNode tryParseAsJson(String text) {
+        try {
+            JsonNode node = RECOVERY_MAPPER.readTree(text);
+            return (node != null && node.isObject()) ? node : null;
+        } catch (JsonProcessingException e) {
+            return null;
+        }
     }
 
     /**

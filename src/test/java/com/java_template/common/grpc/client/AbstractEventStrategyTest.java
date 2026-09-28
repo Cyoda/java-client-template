@@ -139,8 +139,11 @@ class AbstractEventStrategyTest {
     }
 
     @Test
-    void testRecoverRequestIdFromCloudEvent_CaseInsensitive() {
-        // Given
+    void testRecoverRequestIdFromCloudEvent_WrongCaseFieldNameInValidJsonIsNotRecovered() {
+        // Valid JSON is now parsed as a tree and looked up by its exact field name; a field
+        // named "REQUESTID" is not "requestId", so this is treated the same as a valid document
+        // with no requestId field at all (T8: dropping CASE_INSENSITIVE removes the ambiguity
+        // that let an unrelated field win when cyoda-go's alphabetical serialisation put it first).
         String jsonData = "{\"REQUESTID\": \"case-insensitive-id-404\", \"entityId\": \"entity123\"}";
         when(cloudEvent.getTextData()).thenReturn(jsonData);
 
@@ -148,9 +151,27 @@ class AbstractEventStrategyTest {
         AbstractEventStrategy.RequestIdRecoveryResult result = AbstractEventStrategy.recoverRequestIdFromCloudEvent(cloudEvent);
 
         // Then
+        assertFalse(result.requestId().isPresent());
+        assertEquals("Could not recover requestId from CloudEvent text data. No matching patterns found.", result.error());
+    }
+
+    @Test
+    void testRecoverRequestIdFromCloudEvent_TopLevelFieldWinsOverANestedFieldOfTheSameName() {
+        // cyoda-go serialises fields alphabetically, so "payload" precedes "requestId" in the
+        // wire text. A naive regex over the raw text finds the nested (wrong) value first; the
+        // JSON-tree lookup must return the top-level field regardless of byte order (T8).
+        String wrongEntityId = UUID.randomUUID().toString();
+        String rightEntityId = UUID.randomUUID().toString();
+        String jsonData = "{\"payload\":{\"data\":{\"requestId\":\"wrong\",\"entityId\":\"" + wrongEntityId + "\"}},"
+                + "\"requestId\":\"right\",\"entityId\":\"" + rightEntityId + "\"}";
+        when(cloudEvent.getTextData()).thenReturn(jsonData);
+
+        AbstractEventStrategy.RequestIdRecoveryResult result = AbstractEventStrategy.recoverRequestIdFromCloudEvent(cloudEvent);
+
         assertTrue(result.requestId().isPresent());
-        assertEquals("case-insensitive-id-404", result.requestId().get());
+        assertEquals("right", result.requestId().get());
         assertNull(result.error());
+        assertEquals(java.util.Optional.of(rightEntityId), AbstractEventStrategy.recoverEntityIdFromCloudEvent(cloudEvent));
     }
 
     @Test
