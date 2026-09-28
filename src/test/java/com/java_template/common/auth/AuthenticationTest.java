@@ -70,4 +70,14 @@ class AuthenticationTest {
         assertThat(authentication.getAccessToken().getTokenValue()).isEqualTo("tok-1");
         assertThat(issued).hasValue(1);
     }
+
+    @Test
+    void invalidateForcesANewFetch() {
+        assertThat(authentication.bearerToken()).contains("tok-1");
+
+        authentication.invalidate();
+
+        assertThat(authentication.bearerToken()).contains("tok-2");
+        assertThat(issued).hasValue(2);
+    }
 }

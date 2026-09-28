@@ -34,7 +34,13 @@ public class Authentication implements CyodaTokenSource {
 
     private static final Logger logger = LoggerFactory.getLogger(Authentication.class);
 
+    private static final String REGISTRATION_ID = "cyoda";
+    private static final String PRINCIPAL_NAME = "cyoda-client";
+
     private final OAuth2AuthorizedClientManager authorizedClientManager;
+    // The manager stores the authorized client here and hands it back while its token is unexpired, so
+    // invalidation must remove it here too, or the "refetch" would return the token Cyoda just rejected.
+    private final OAuth2AuthorizedClientService authorizedClientService;
     private final ConcurrentMap<String, CachedToken> tokenCache = new ConcurrentHashMap<>();
     private final Config config;
 
@@ -48,7 +54,7 @@ public class Authentication implements CyodaTokenSource {
                     + "when app.config.auth-mode=client-credentials (use auth-mode=none for cyoda-go mock IAM)");
         }
 
-        ClientRegistration registration = ClientRegistration.withRegistrationId("cyoda")
+        ClientRegistration registration = ClientRegistration.withRegistrationId(REGISTRATION_ID)
                 .tokenUri(config.getCyodaApiUrl() + "/oauth/token")
                 .clientId(config.getCyodaClientId())
                 .clientSecret(config.getCyodaClientSecret())
@@ -58,6 +64,7 @@ public class Authentication implements CyodaTokenSource {
 
         var registrationRepo = new InMemoryClientRegistrationRepository(registration);
         var clientService = new InMemoryOAuth2AuthorizedClientService(registrationRepo);
+        this.authorizedClientService = clientService;
         AuthorizedClientServiceOAuth2AuthorizedClientManager acm = new AuthorizedClientServiceOAuth2AuthorizedClientManager(
                 registrationRepo, clientService
         );
@@ -101,8 +108,8 @@ public class Authentication implements CyodaTokenSource {
             }
 
             logger.info("Fetching new OAuth2 access token");
-            OAuth2AuthorizeRequest request = OAuth2AuthorizeRequest.withClientRegistrationId("cyoda")
-                    .principal("cyoda-client")
+            OAuth2AuthorizeRequest request = OAuth2AuthorizeRequest.withClientRegistrationId(REGISTRATION_ID)
+                    .principal(PRINCIPAL_NAME)
                     .build();
 
             OAuth2AuthorizedClient client = authorizedClientManager.authorize(request);
@@ -125,6 +132,7 @@ public class Authentication implements CyodaTokenSource {
      */
     public void invalidateTokens() {
         tokenCache.remove(CACHE_KEY);
+        authorizedClientService.removeAuthorizedClient(REGISTRATION_ID, PRINCIPAL_NAME);
         logger.info("Manually invalidated cached token");
     }
 
