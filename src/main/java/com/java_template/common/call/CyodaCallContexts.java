@@ -42,7 +42,8 @@ public class CyodaCallContexts {
             return CyodaCallContext.m2m().withTxToken(scope.txToken());
         }
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth instanceof JwtAuthenticationToken jwt) {                            // rule 3
+        if (isForwardingUserToken(auth)) {                                          // rule 3
+            JwtAuthenticationToken jwt = (JwtAuthenticationToken) auth;
             String value = jwt.getToken().getTokenValue();
             if (value == null || value.isBlank()) {
                 throw new CyodaCredentialException("the authenticated JWT has a blank token value; refusing to call Cyoda");
@@ -58,5 +59,21 @@ public class CyodaCallContexts {
 
     public CyodaCallContext forMemberStream() {
         return config.getAuthMode() == Config.AuthMode.NONE ? CyodaCallContext.none() : CyodaCallContext.m2m();
+    }
+
+    /**
+     * Whether the current thread's {@code SecurityContext} holds an authenticated
+     * {@link JwtAuthenticationToken} — the condition under which {@link #current()}'s rule 3 forwards the
+     * caller's own token to Cyoda, rather than an M2M credential. A {@link CalloutScope} clears the thread's
+     * {@code SecurityContext} while open (rule 2), so this is {@code false} inside one. Used by error mapping
+     * to tell whether a Cyoda-side authentication rejection is the client's own expired login, or this
+     * service's M2M/none credential (a server-side fault).
+     */
+    public static boolean isForwardingUserToken() {
+        return isForwardingUserToken(SecurityContextHolder.getContext().getAuthentication());
+    }
+
+    private static boolean isForwardingUserToken(Authentication auth) {
+        return auth instanceof JwtAuthenticationToken;
     }
 }

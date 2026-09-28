@@ -757,10 +757,16 @@ refusals are `IllegalArgumentException` or `IllegalStateException`.
 exception's message (which can carry internal hosts, URLs or Cyoda error text) in a
 response. `ErrorResponses` answers with a ProblemDetail whose `detail` is a fixed, generic
 description plus a correlation id (also its `correlationId` property), and logs the
-exception at `ERROR` under that id. The status is the caller's (`400`), except `500` for a
-credential that cannot be determined or obtained (`CyodaCredentialException`) or that Cyoda
-rejects (gRPC `UNAUTHENTICATED`, REST `401`): the inbound request was already accepted, so
-that is the service's own fault, not the client's.
+exception at `ERROR` under that id. The status is the caller's (`400`), except:
+- a credential that cannot be determined or obtained (`CyodaCredentialException`) always
+  answers `500`: a refused or unsupported principal, a blank token, and so on, are this
+  service's own fault, never an expired login;
+- Cyoda rejecting a call as unauthenticated (gRPC `UNAUTHENTICATED`, REST `401`) answers
+  `500` when this service's own request used its M2M credential (the inbound request was
+  already accepted, so that is the service's own fault, not the client's), but `401`, with
+  a `WWW-Authenticate: Bearer error="invalid_token"` header, when it forwarded the
+  logged-in user's own IdP token (`CyodaCallContexts.isForwardingUserToken()`, §4.2 rule
+  3), so a BFF's frontend can re-authenticate.
 
 **Point in time.**
 - Event DTO date-times are `OffsetDateTime` (§3.3.2), and so is
