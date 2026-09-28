@@ -77,7 +77,7 @@ app:
     grpc-keep-alive-timeout-seconds: 10
     grpc-idle-timeout-seconds: 300
 
-    # Processor/criteria threads: virtual (one virtual thread per task) or platform (fixed pools below)
+    # Processor/criteria/control threads: virtual or platform. Either way each is a fixed pool of the size below.
     execution-mode: virtual
     processor-thread-pool: 20
     criteria-thread-pool: 20

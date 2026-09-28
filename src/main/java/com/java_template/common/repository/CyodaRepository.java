@@ -139,7 +139,7 @@ public class CyodaRepository implements CrudRepository {
         return Math.max(0L, Duration.between(now, expirationDate).toNanos());
     }
 
-    /** Stub for unary calls: each carries grpc-call-deadline-ms (spec §4.5, "every unary call"). */
+    /** Stub for unary calls: each carries grpc-call-deadline-ms (spec §4.1, "every unary Cyoda call"). */
     private CloudEventsServiceGrpc.CloudEventsServiceBlockingStub unary() {
         return cloudEventsServiceBlockingStub.withDeadlineAfter(config.getGrpcCallDeadlineMs(), TimeUnit.MILLISECONDS);
     }
