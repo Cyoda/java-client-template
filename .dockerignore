@@ -1,0 +1,37 @@
+# The builder stage runs `./gradlew bootJar` inside the container, so it needs the source tree,
+# the Gradle wrapper, buildSrc and resources. Everything below is unneeded local/CI state that
+# `COPY . .` would otherwise send into the build context.
+
+# Version control
+.git
+.github
+
+# Build outputs: the builder stage regenerates these itself. buildSrc has real source packages
+# named `build` (com.cyoda.build), so keep those.
+**/build/
+!src/**/build/
+!buildSrc/src/**/build/
+
+# Gradle cache: the builder stage runs its own Gradle, so a host cache is both useless and huge.
+.gradle
+
+# The cyoda binary scripts/install-cyoda.sh installs for the integration tests (~70 MB). The image
+# build only runs bootJar, which needs neither the binary nor an integration-test run.
+.cyoda
+
+# Agent/IDE/editor metadata not read by the Gradle build.
+.idea
+*.iml
+.vscode
+.kotlin
+.ai
+.augment
+.augmentignore
+.superpowers
+.sandbox
+.playwright-mcp
+.DS_Store
+
+# Documentation and deployment assets not read by the Gradle build.
+docs
+helm
