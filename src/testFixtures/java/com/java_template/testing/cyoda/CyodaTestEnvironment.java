@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -26,6 +27,11 @@ public final class CyodaTestEnvironment {
 
     public static CyodaRest rest(Profile profile) {
         return new CyodaRest(server(profile).apiUrl());
+    }
+
+    /** The tail of a started server's log; empty when that profile's server was never started in this JVM. */
+    static Optional<String> logTailIfStarted(String profileName, int lines) {
+        return Optional.ofNullable(SERVERS.get(profileName)).map(server -> server.logTail(lines));
     }
 
     public static synchronized void closeAll() {

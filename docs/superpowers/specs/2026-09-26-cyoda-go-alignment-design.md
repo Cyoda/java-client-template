@@ -669,7 +669,9 @@ distinct profile.
 if the process exits first. The limit is 30 s.
 
 **Logs.** Output goes to `build/cyoda-logs/<profile>-<timestamp>.log`. The last 50 lines are
-attached to any startup or test failure.
+attached to any startup or test failure: a startup failure's message includes them, and
+`CyodaServerExtension` adds them to a failing test or lifecycle method as a suppressed
+exception.
 
 **Shutdown.** A JUnit root-store `CloseableResource` stops the server at the end of the test
 engine run: SIGTERM, 5 s grace, then kill. This happens **before** Spring's cached test
