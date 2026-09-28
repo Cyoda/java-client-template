@@ -3,15 +3,16 @@
 #   scripts/install-cyoda.sh                       released pin: download; -dev pin: build pinned commit from GitHub
 #   scripts/install-cyoda.sh --from-src [<ref>]    build from GitHub at <ref> (default: the pinned commit)
 #   scripts/install-cyoda.sh --src-dir <checkout>  build an existing local checkout (its HEAD must be the pinned commit)
-#   --dest <dir>                                   output directory (default: build/cyoda-bin)
-# Prints the binary path on stdout (use it as CYODA_BIN). Never runs `cyoda init`.
+#   --dest <dir>                                   output directory (default: .cyoda/bin, git-ignored)
+# The default location survives `./gradlew clean`, and the tests find the binary there without configuration.
+# Prints the binary path on stdout (use it as CYODA_BIN for a --dest elsewhere). Never runs `cyoda init`.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PIN="$ROOT/src/main/resources/cyoda/CYODA_VERSION"
 VERSION="$(sed -n 1p "$PIN")"
 COMMIT="$(sed -n 2p "$PIN" | sed 's/^commit=//')"
-DEST="$ROOT/build/cyoda-bin"
+DEST="$ROOT/.cyoda/bin"
 MODE=""
 REF=""
 SRC_DIR=""

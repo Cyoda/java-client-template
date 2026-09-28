@@ -621,8 +621,11 @@ framework-owned, listed in the sync guide, and usable by `test`, `integrationTes
 tier 2 and downstream apps.
 
 **`CyodaBinary`**
-- Finds the binary from `-Dcyoda.bin`, then `$CYODA_BIN`, then `cyoda` on `PATH`.
-- Enforces the pin (§3.4).
+- Finds the binary from `-Dcyoda.bin`, then `$CYODA_BIN`, then `<project>/.cyoda/bin/cyoda`
+  (the default install location, §7.4), then `cyoda` on `PATH`. The project directory is
+  `-Dcyoda.projectDir`, else `user.dir`.
+- Enforces the pin (§3.4), with `CyodaVersion` parsing the pin file and the `--version`
+  output.
 - Only ever runs `--version`: an unrecognised argument would start a server
   (cyoda-go #623).
 - If no binary is found, it fails with the `install-cyoda.sh` command to run.
@@ -745,7 +748,9 @@ source set has `sourceSets.test.output` on its classpath. `@CyodaIntegrationTest
 - **`integrationTest`:**
   - its classpath includes `sourceSets.test.output`;
   - the task is part of `check`;
-  - it passes `cyoda.bin`, `cyodaVersion` and the log directory.
+  - it passes `cyoda.pinFile`, `cyoda.logDir`, `cyoda.projectDir` (the project directory,
+    where the harness looks for `.cyoda/bin/cyoda`) and, when set, `cyoda.bin` and
+    `cyoda.allowVersionMismatch`.
   - Without a cyoda binary, it fails with the install command.
   - On machines without cyoda, run `./gradlew build -x integrationTest` (documented).
 - **Integration-test check:** a test fails when an integration-test class declares
@@ -766,7 +771,11 @@ source set has `sourceSets.test.output` on its classpath. `@CyodaIntegrationTest
 
 ### 7.4 Installing cyoda
 
-`scripts/install-cyoda.sh [--from-src [<git-ref>]] [--dest <dir>]` reads `CYODA_VERSION`.
+`scripts/install-cyoda.sh [--from-src [<git-ref>] | --src-dir <checkout>] [--dest <dir>]`
+reads `CYODA_VERSION` and installs the binary to `<dest>/cyoda`. The default `<dest>` is
+`.cyoda/bin` in the project root: it is git-ignored, survives `./gradlew clean`, and the
+harness finds it there with no configuration (§6.1). A binary installed elsewhere is named
+with `CYODA_BIN` or `-Dcyoda.bin`.
 
 - **For a released version:** it downloads the release archive for this OS and architecture
   from `github.com/Cyoda/cyoda-go/releases/v<version>` and verifies its checksum.

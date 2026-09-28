@@ -172,6 +172,8 @@ tasks.register('integrationTest', Test) {
     useJUnitPlatform()
     shouldRunAfter tasks.named('test')
     systemProperty 'user.dir', project.projectDir.absolutePath
+    // CyodaBinary looks for scripts/install-cyoda.sh's default install, <project>/.cyoda/bin/cyoda, here
+    systemProperty 'cyoda.projectDir', project.projectDir.absolutePath
     systemProperty 'cyoda.pinFile', cyodaPin.absolutePath
     systemProperty 'cyoda.logDir', layout.buildDirectory.dir('cyoda-logs').get().asFile.absolutePath
     ['cyoda.bin', 'cyoda.allowVersionMismatch'].each { key ->

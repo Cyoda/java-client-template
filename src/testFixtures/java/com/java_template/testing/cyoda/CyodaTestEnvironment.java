@@ -10,7 +10,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * One lazily started cyoda server per profile per test JVM, shared by every test class.
  * System properties (set by the integrationTest Gradle task): cyoda.pinFile, cyoda.logDir,
- * cyoda.bin, cyoda.allowVersionMismatch.
+ * cyoda.projectDir, cyoda.bin, cyoda.allowVersionMismatch.
  */
 public final class CyodaTestEnvironment {
 

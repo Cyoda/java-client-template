@@ -9,24 +9,40 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
- * Finds the cyoda binary (-Dcyoda.bin, then $CYODA_BIN, then PATH) and checks it against the pin.
+ * Finds the cyoda binary (-Dcyoda.bin, then $CYODA_BIN, then the project's {@code .cyoda/bin/cyoda}, where
+ * scripts/install-cyoda.sh installs it by default, then PATH) and checks it against the pin.
  * The binary is only ever run with --version here: an unrecognised argument would start a server (cyoda-go #623).
  */
 public final class CyodaBinary {
+
+    /** Where scripts/install-cyoda.sh installs the binary by default, relative to the project directory. */
+    public static final String PROJECT_INSTALL = ".cyoda/bin/cyoda";
 
     private CyodaBinary() {
     }
 
     public static Path locate() {
-        return locate(System.getProperty("cyoda.bin"), System.getenv("CYODA_BIN"), System.getenv("PATH"));
+        return locate(System.getProperty("cyoda.bin"), System.getenv("CYODA_BIN"), projectDir(), System.getenv("PATH"));
     }
 
-    public static Path locate(String sysProp, String envVar, String pathEnv) {
+    /**
+     * The project directory: {@code -Dcyoda.projectDir}, which the integrationTest task sets, else
+     * {@code user.dir}, which the Gradle test tasks also point at the project directory.
+     */
+    public static Path projectDir() {
+        return Path.of(System.getProperty("cyoda.projectDir", System.getProperty("user.dir")));
+    }
+
+    public static Path locate(String sysProp, String envVar, Path projectDir, String pathEnv) {
         if (sysProp != null && !sysProp.isBlank()) {
             return requireExecutable(Path.of(sysProp), "-Dcyoda.bin");
         }
         if (envVar != null && !envVar.isBlank()) {
             return requireExecutable(Path.of(envVar), "CYODA_BIN");
+        }
+        Path installed = projectDir == null ? null : projectDir.toAbsolutePath().resolve(PROJECT_INSTALL);
+        if (installed != null && Files.isExecutable(installed)) {
+            return installed;
         }
         if (pathEnv != null) {
             for (String dir : pathEnv.split(File.pathSeparator)) {
@@ -36,7 +52,8 @@ public final class CyodaBinary {
                 }
             }
         }
-        throw new IllegalStateException("No cyoda binary found (-Dcyoda.bin, CYODA_BIN, PATH). " + CyodaVersion.INSTALL_HINT);
+        throw new IllegalStateException("No cyoda binary found (-Dcyoda.bin, CYODA_BIN, "
+                + (installed == null ? PROJECT_INSTALL : installed) + ", PATH). " + CyodaVersion.INSTALL_HINT);
     }
 
     public static CyodaVersion version(Path binary) {

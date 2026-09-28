@@ -66,7 +66,7 @@ public final class CyodaServer implements AutoCloseable {
             Files.createDirectories(logDir);
             Path logFile = logDir.resolve(profile.name() + "-" + TS.format(LocalDateTime.now()) + ".log");
             // The child runs with workDir as its cwd, not this JVM's; a binary path given relative
-            // to this JVM's cwd (e.g. -Dcyoda.bin=build/cyoda-bin/cyoda) must be made absolute first.
+            // to this JVM's cwd (e.g. -Dcyoda.bin=.cyoda/bin/cyoda) must be made absolute first.
             ProcessBuilder pb = new ProcessBuilder(binary.toAbsolutePath().toString())
                     .directory(work.toFile())
                     .redirectErrorStream(true)

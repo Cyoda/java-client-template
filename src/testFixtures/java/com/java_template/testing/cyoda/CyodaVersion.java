@@ -13,8 +13,9 @@ import java.util.regex.Pattern;
 public record CyodaVersion(String version, String commit) {
 
     public static final String INSTALL_HINT = "Install the pinned cyoda with: scripts/install-cyoda.sh "
-            + "(or scripts/install-cyoda.sh --src-dir <cyoda-go checkout>), then export CYODA_BIN=<printed path> "
-            + "or pass -Dcyoda.bin=<path>.";
+            + "(or scripts/install-cyoda.sh --src-dir <cyoda-go checkout>). By default it installs to "
+            + "<project>/.cyoda/bin/cyoda, which survives ./gradlew clean and is found without configuration. "
+            + "For a binary elsewhere, export CYODA_BIN=<path> or pass -Dcyoda.bin=<path>.";
 
     private static final Pattern BINARY_LINE = Pattern.compile("cyoda version (\\S+) \\(commit (\\S+), built [^)]*\\)");
 

@@ -42,5 +42,8 @@ application-*.yaml
 # Except the template's own local-profile default, which ships as part of the repo (no credentials).
 !src/main/resources/application-local.yml
 
+# The cyoda binary scripts/install-cyoda.sh installs for the integration tests
+.cyoda/
+
 # Python version manager
 .python-version
