@@ -94,10 +94,6 @@ has no workarounds for it (§9.2).
   `EntityCrudIT`, `SearchIT`, `ProcessorIT` and `CriterionIT`;
 - CI.
 
-Within PR 1 alone, every Cyoda call goes out as M2M, or with no header under
-`auth-mode=none`, and a call made while an authenticated user is on the calling thread is
-refused (`CyodaCredentialException`) rather than sent as M2M.
-
 **PR 2 (#59, stacked on PR 1): credentials, callout scope, threading.** It covers:
 - §4.2, the decision point, and the retry rules;
 - §4.4, `CalloutScope`, the tx-token, reads inside a callout, refusal mapping, and the auth
