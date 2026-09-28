@@ -98,8 +98,10 @@ After PR 1, every Cyoda call goes out as M2M, or with no header under `auth-mode
 one exception fails closed: while the calling thread's `SecurityContext` holds an
 authenticated, non-anonymous user, the M2M token is refused (`CyodaCredentialException`;
 on gRPC the call fails with `UNAUTHENTICATED`), so a user's request never runs with the
-service account's rights. `CyodaRepository` runs each gRPC call with the caller's
-`SecurityContext`, so the interceptor sees it on the pool thread.
+service account's rights. Each public `CyodaRepository` method captures the caller's
+`SecurityContext` once, on the caller's thread, and runs every gRPC call of that operation
+with it, including continuations on pool threads (snapshot-cache hits, status polls, page
+fetches), so the interceptor always sees the operation's own context.
 
 **PR 2: credentials, callout scope, threading.** It covers:
 - §4.2, the decision point;

@@ -154,16 +154,19 @@ public class CyodaRepository implements CrudRepository {
 
     @Override
     public CompletableFuture<DataPayload> findById(@NotNull final UUID id) {
-        return getById(id, null);
+        final SecurityContext caller = callersSecurityContext();
+        return getById(caller, id, null);
     }
 
     @Override
     public CompletableFuture<DataPayload> findById(@NotNull final UUID id, @Nullable final OffsetDateTime pointInTime) {
-        return getById(id, pointInTime);
+        final SecurityContext caller = callersSecurityContext();
+        return getById(caller, id, pointInTime);
     }
 
-    private CompletableFuture<DataPayload> getById(final UUID entityId, @Nullable final OffsetDateTime pointInTime) {
+    private CompletableFuture<DataPayload> getById(final SecurityContext caller, final UUID entityId, @Nullable final OffsetDateTime pointInTime) {
         return sendAndGet(
+                caller,
                 req -> unary().entitySearch(req),
                 new EntityGetRequest().withId(UUID.randomUUID().toString())
                         .withEntityId(entityId)
@@ -178,13 +181,15 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final GroupConditionDto condition,
             @NotNull final SearchAndRetrievalParams params
     ) {
+        final SecurityContext caller = callersSecurityContext();
         OffsetDateTime pointInTime = params.pointInTime();
         return params.inMemory()
-                ? findAllByConditionInMemory(modelSpec, params.pageSize(), condition, pointInTime)
-                : findAllByCondition(modelSpec, params.pageSize(), params.pageNumber(), condition, pointInTime, params.searchId(), params.awaitLimitMs(), params.pollIntervalMs());
+                ? findAllByConditionInMemory(caller, modelSpec, params.pageSize(), condition, pointInTime)
+                : findAllByCondition(caller, modelSpec, params.pageSize(), params.pageNumber(), condition, pointInTime, params.searchId(), params.awaitLimitMs(), params.pollIntervalMs());
     }
 
     private CompletableFuture<PageResult<DataPayload>> findAllByCondition(
+            final SecurityContext caller,
             @NotNull final ModelSpec modelSpec,
             final int pageSize,
             final int pageNumber,
@@ -196,8 +201,8 @@ public class CyodaRepository implements CrudRepository {
 
         if (searchId == null) {
             // New search - create a snapshot and wait for it to reach a final status.
-            finalStatus = createSnapshotSearch(modelSpec, condition, pointInTime)
-                    .thenCompose(created -> resolveFinalStatus(created, awaitLimitMs, pollIntervalMs));
+            finalStatus = createSnapshotSearch(caller, modelSpec, condition, pointInTime)
+                    .thenCompose(created -> resolveFinalStatus(caller, created, awaitLimitMs, pollIntervalMs));
         } else {
             // A searchId IS the snapshotId of an already-created search (see effectiveSearchId
             // below). Reuse its cached completed status if we have one; otherwise read that same
@@ -206,7 +211,7 @@ public class CyodaRepository implements CrudRepository {
             CompletableFuture<SearchSnapshotStatus> cached = snapshotCache.getIfPresent(cacheKey);
             finalStatus = cached != null
                     ? cached
-                    : getSnapshotStatus(searchId).thenCompose(fetched -> resolveFinalStatus(fetched, awaitLimitMs, pollIntervalMs));
+                    : getSnapshotStatus(caller, searchId).thenCompose(fetched -> resolveFinalStatus(caller, fetched, awaitLimitMs, pollIntervalMs));
         }
 
         return finalStatus.thenComposeAsync(status -> {
@@ -225,7 +230,7 @@ public class CyodaRepository implements CrudRepository {
                     SearchCacheKey cacheKey = new SearchCacheKey(modelSpec, condition, pointInTime, effectiveSearchId);
                     snapshotCache.put(cacheKey, CompletableFuture.completedFuture(status));
 
-                    return getSearchResult(effectiveSearchId, pageSize, pageNumber)
+                    return getSearchResult(caller, effectiveSearchId, pageSize, pageNumber)
                             .thenApply(data -> PageResult.of(
                                     effectiveSearchId,
                                     data,
@@ -244,6 +249,7 @@ public class CyodaRepository implements CrudRepository {
      */
     @NotNull
     private CompletableFuture<SearchSnapshotStatus> resolveFinalStatus(
+            final SecurityContext caller,
             @NotNull final SearchSnapshotStatus snapshotInfo, final int awaitLimitMs, final int pollIntervalMs
     ) {
         if (SearchSnapshotStatus.Status.SUCCESSFUL.equals(snapshotInfo.getStatus())) {
@@ -251,7 +257,7 @@ public class CyodaRepository implements CrudRepository {
         }
 
         try {
-            return waitForSearchCompletion(
+            return waitForSearchCompletion(caller,
                     snapshotInfo.getSnapshotId(),
                     awaitLimitMs,
                     pollIntervalMs
@@ -262,12 +268,14 @@ public class CyodaRepository implements CrudRepository {
     }
 
     private CompletableFuture<PageResult<DataPayload>> findAllByConditionInMemory(
+            final SecurityContext caller,
             @NotNull final ModelSpec modelSpec,
             final int pageSize,
             @NotNull final GroupConditionDto condition,
             @Nullable final OffsetDateTime pointInTime
     ) {
         return sendAndGetCollection(
+                caller,
                 req -> streaming().entitySearchCollection(req),
                 new EntitySearchRequest().withId(generateEventId())
                         .withModel(modelSpec)
@@ -287,6 +295,7 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final ModelSpec modelSpec,
             @NotNull final SearchAndRetrievalParams params
     ) {
+        final SecurityContext caller = callersSecurityContext();
         // Create an empty condition to match all entities
         GroupConditionDto matchAllCondition = new GroupConditionDto()
                 .operator(GroupConditionDto.OperatorEnum.AND)
@@ -294,8 +303,8 @@ public class CyodaRepository implements CrudRepository {
 
         OffsetDateTime pointInTime = params.pointInTime();
         return params.inMemory()
-                ? findAllByConditionInMemory(modelSpec, params.pageSize(), matchAllCondition, pointInTime)
-                : findAllByCondition(modelSpec, params.pageSize(), params.pageNumber(), matchAllCondition, pointInTime, params.searchId(), params.awaitLimitMs(), params.pollIntervalMs());
+                ? findAllByConditionInMemory(caller, modelSpec, params.pageSize(), matchAllCondition, pointInTime)
+                : findAllByCondition(caller, modelSpec, params.pageSize(), params.pageNumber(), matchAllCondition, pointInTime, params.searchId(), params.awaitLimitMs(), params.pollIntervalMs());
     }
 
     @Override
@@ -303,7 +312,8 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final ModelSpec modelSpec,
             @NotNull final ENTITY_TYPE entity
     ) {
-        return saveNewEntities(modelSpec, entity);
+        final SecurityContext caller = callersSecurityContext();
+        return saveNewEntities(caller, modelSpec, entity);
     }
 
     @Override
@@ -311,7 +321,8 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final ModelSpec modelSpec,
             @NotNull final Collection<ENTITY_TYPE> entities
     ) {
-        return saveNewEntities(modelSpec, entities);
+        final SecurityContext caller = callersSecurityContext();
+        return saveNewEntities(caller, modelSpec, entities);
     }
 
     @Override
@@ -321,7 +332,8 @@ public class CyodaRepository implements CrudRepository {
             @Nullable final Integer transactionWindow,
             @Nullable final Long transactionTimeoutMs
     ) {
-        return saveNewEntitiesWithTransactionParams(modelSpec, entities, transactionWindow, transactionTimeoutMs);
+        final SecurityContext caller = callersSecurityContext();
+        return saveNewEntitiesWithTransactionParams(caller, modelSpec, entities, transactionWindow, transactionTimeoutMs);
     }
 
     @Override
@@ -329,7 +341,9 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final UUID entityId,
             @NotNull final String transitionName
     ) {
+        final SecurityContext caller = callersSecurityContext();
         return sendAndGet(
+                caller,
                 req -> unary().entityManage(req),
                 new EntityTransitionRequest().withId(generateEventId())
                         .withEntityId(entityId)
@@ -344,7 +358,9 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final ENTITY_TYPE entity,
             @Nullable final String transition
     ) {
+        final SecurityContext caller = callersSecurityContext();
         return sendAndGet(
+                caller,
                 req -> unary().entityManage(req),
                 new EntityUpdateRequest().withId(generateEventId())
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
@@ -372,6 +388,7 @@ public class CyodaRepository implements CrudRepository {
             @Nullable final Integer transactionWindow,
             @Nullable final Long transactionTimeoutMs
     ) {
+        final SecurityContext caller = callersSecurityContext();
         final var entitiesByIds = entities.stream()
                 .map(objectMapper::valueToTree)
                 .map(entity -> (JsonNode) entity)
@@ -382,6 +399,7 @@ public class CyodaRepository implements CrudRepository {
                 );
 
         return sendAndGetCollection(
+                caller,
                 req -> streaming().entityManageCollection(req),
                 new EntityUpdateCollectionRequest().withId(generateEventId())
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
@@ -399,27 +417,34 @@ public class CyodaRepository implements CrudRepository {
 
     @Override
     public CompletableFuture<EntityDeleteResponse> deleteById(@NotNull final UUID id) {
-        return deleteEntity(id);
+        final SecurityContext caller = callersSecurityContext();
+        return deleteEntity(caller, id);
     }
 
     @Override
     public CompletableFuture<List<EntityDeleteAllResponse>> deleteAll(
             @NotNull final ModelSpec modelSpec
     ) {
-        return deleteAllByModel(modelSpec);
+        final SecurityContext caller = callersSecurityContext();
+        return deleteAllByModel(caller, modelSpec);
     }
 
     private <RESPONSE_PAYLOAD_TYPE extends BaseEvent> CompletableFuture<RESPONSE_PAYLOAD_TYPE> sendAndGet(
+            final SecurityContext caller,
             final Function<CloudEvent, CloudEvent> apiCall,
             final BaseEvent baseEvent,
             final Class<RESPONSE_PAYLOAD_TYPE> responsePayloadType
     ) {
         try {
             final CloudEvent requestEvent = cloudEventBuilder.buildEvent(baseEvent);
-            return CompletableFuture.supplyAsync(withCallersSecurityContext(() -> {
-                        logger.debug("Sending event: {}", CloudEvents.describe(requestEvent));
+            return CompletableFuture.supplyAsync(withSecurityContext(caller, () -> {
+                        if (logger.isDebugEnabled()) {
+                            logger.debug("Sending event: {}", CloudEvents.describe(requestEvent));
+                        }
                         CloudEvent cloudEvent = requestAndGetOrThrow(apiCall, requestEvent);
-                        logger.debug("Received event: {}", CloudEvents.describe(cloudEvent));
+                        if (logger.isDebugEnabled()) {
+                            logger.debug("Received event: {}", CloudEvents.describe(cloudEvent));
+                        }
                         return cloudEvent;
                     }))
                     .thenApply(response -> cloudEventParser.parseCloudEvent(response, responsePayloadType))
@@ -430,13 +455,14 @@ public class CyodaRepository implements CrudRepository {
     }
 
     private <RESPONSE_PAYLOAD_TYPE extends BaseEvent> CompletableFuture<Stream<RESPONSE_PAYLOAD_TYPE>> sendAndGetCollection(
+            final SecurityContext caller,
             final Function<CloudEvent, Iterator<CloudEvent>> apiCall,
             final BaseEvent baseEvent,
             final Class<RESPONSE_PAYLOAD_TYPE> responsePayloadClass
     ) {
         try {
             final var requestEvent = cloudEventBuilder.buildEvent(baseEvent);
-            return CompletableFuture.supplyAsync(withCallersSecurityContext(() -> requestAndGetOrThrow(apiCall, requestEvent)))
+            return CompletableFuture.supplyAsync(withSecurityContext(caller, () -> requestAndGetOrThrow(apiCall, requestEvent)))
                     .thenApply(response -> processCollection(Streams.stream(response), responsePayloadClass));
         } catch (InvalidProtocolBufferException e) {
             throw new RuntimeException(e);
@@ -454,15 +480,23 @@ public class CyodaRepository implements CrudRepository {
     }
 
     /**
-     * Runs {@code call} on the pool thread with the calling thread's SecurityContext, restoring the pool thread's
-     * own afterwards. The auth interceptor runs on that pool thread, and it must see who the call is for: a call
-     * made for an authenticated user is refused there, never sent with the M2M token.
+     * The SecurityContext of one repository operation, captured once, on the caller's thread, when the public
+     * method is entered: a copy, so later changes to the caller's thread-local cannot reach it. Every Cyoda call
+     * the operation makes, including continuations on pool threads (snapshot-cache hits, status polls, page
+     * fetches), runs with this context, never with whatever the pool thread holds. The auth interceptor sees it
+     * there, so a call made for an authenticated user is refused, never sent with the M2M token.
      */
-    private static <T> Supplier<T> withCallersSecurityContext(final Supplier<T> call) {
-        final SecurityContext callers = SecurityContextHolder.getContext();
+    private static SecurityContext callersSecurityContext() {
+        SecurityContext copy = SecurityContextHolder.createEmptyContext();
+        copy.setAuthentication(SecurityContextHolder.getContext().getAuthentication());
+        return copy;
+    }
+
+    /** Runs {@code call} with {@code caller} as the SecurityContext, restoring the thread's own afterwards. */
+    private static <T> Supplier<T> withSecurityContext(final SecurityContext caller, final Supplier<T> call) {
         return () -> {
             final SecurityContext previous = SecurityContextHolder.getContext();
-            SecurityContextHolder.setContext(callers);
+            SecurityContextHolder.setContext(caller);
             try {
                 return call.get();
             } finally {
@@ -501,10 +535,12 @@ public class CyodaRepository implements CrudRepository {
     }
 
     private <PAYLOAD_TYPE> CompletableFuture<EntityTransactionResponse> saveNewEntities(
+            final SecurityContext caller,
             @NotNull final ModelSpec modelSpec,
             @NotNull final PAYLOAD_TYPE entities
     ) {
         return sendAndGet(
+                caller,
                 req -> unary().entityManage(req),
                 new EntityCreateRequest().withId(generateEventId())
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
@@ -516,6 +552,7 @@ public class CyodaRepository implements CrudRepository {
     }
 
     private <PAYLOAD_TYPE> CompletableFuture<List<EntityTransactionResponse>> saveNewEntitiesWithTransactionParams(
+            final SecurityContext caller,
             @NotNull final ModelSpec modelSpec,
             @NotNull final PAYLOAD_TYPE entities,
             @Nullable final Integer transactionWindow,
@@ -533,6 +570,7 @@ public class CyodaRepository implements CrudRepository {
                 .toList();
 
         return sendAndGetCollection(
+                caller,
                 req -> streaming().entityManageCollection(req),
                 new EntityCreateCollectionRequest().withId(generateEventId())
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
@@ -543,8 +581,9 @@ public class CyodaRepository implements CrudRepository {
         ).thenApply(Stream::toList);
     }
 
-    private CompletableFuture<EntityDeleteResponse> deleteEntity(@NotNull final UUID id) {
+    private CompletableFuture<EntityDeleteResponse> deleteEntity(final SecurityContext caller, @NotNull final UUID id) {
         return sendAndGet(
+                caller,
                 req -> unary().entityManage(req),
                 new EntityDeleteRequest().withId(generateEventId()).withEntityId(id),
                 EntityDeleteResponse.class
@@ -552,9 +591,11 @@ public class CyodaRepository implements CrudRepository {
     }
 
     private CompletableFuture<List<EntityDeleteAllResponse>> deleteAllByModel(
+            final SecurityContext caller,
             @NotNull final ModelSpec modelSpec
     ) {
         return sendAndGetCollection(
+                caller,
                 req -> streaming().entityManageCollection(req),
                 new EntityDeleteAllRequest().withId(generateEventId())
                         .withModel(modelSpec),
@@ -567,11 +608,13 @@ public class CyodaRepository implements CrudRepository {
     }
 
     private CompletableFuture<SearchSnapshotStatus> createSnapshotSearch(
+            final SecurityContext caller,
             final ModelSpec modelSpec,
             final GroupConditionDto condition,
             @Nullable final OffsetDateTime pointInTime
     ) {
         return sendAndGet(
+                caller,
                 req -> unary().entitySearch(req),
                 new EntitySnapshotSearchRequest().withId(generateEventId())
                         .withModel(modelSpec)
@@ -582,22 +625,24 @@ public class CyodaRepository implements CrudRepository {
     }
 
     private CompletableFuture<SearchSnapshotStatus> waitForSearchCompletion(
+            final SecurityContext caller,
             @NotNull final UUID snapshotId,
             final long awaitLimitMillis,
             final long intervalMillis
     ) throws IOException {
         final var startTime = System.currentTimeMillis();
-        return pollSnapshotStatus(snapshotId, startTime, awaitLimitMillis, intervalMillis);
+        return pollSnapshotStatus(caller, snapshotId, startTime, awaitLimitMillis, intervalMillis);
     }
 
     private CompletableFuture<SearchSnapshotStatus> pollSnapshotStatus(
+            final SecurityContext caller,
             @NotNull final UUID snapshotId,
             final long startTime,
             final long awaitLimitMillis,
             final long intervalMillis
     ) throws IOException {
         logger.debug("Polling snapshot: {}", snapshotId);
-        return getSnapshotStatus(snapshotId).thenCompose(snapshotStatus -> {
+        return getSnapshotStatus(caller, snapshotId).thenCompose(snapshotStatus -> {
             if (SearchSnapshotStatus.Status.SUCCESSFUL.equals(snapshotStatus.getStatus())) {
                 logger.debug("Snapshot is ready!");
                 return CompletableFuture.completedFuture(snapshotStatus);
@@ -620,7 +665,7 @@ public class CyodaRepository implements CrudRepository {
                     CompletableFuture.delayedExecutor(intervalMillis, TimeUnit.MILLISECONDS)
             ).thenCompose(ignored -> {
                 try {
-                    return pollSnapshotStatus(snapshotId, startTime, awaitLimitMillis, intervalMillis);
+                    return pollSnapshotStatus(caller, snapshotId, startTime, awaitLimitMillis, intervalMillis);
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
@@ -628,8 +673,9 @@ public class CyodaRepository implements CrudRepository {
         });
     }
 
-    private CompletableFuture<SearchSnapshotStatus> getSnapshotStatus(@NotNull final UUID snapshotId) {
+    private CompletableFuture<SearchSnapshotStatus> getSnapshotStatus(final SecurityContext caller, @NotNull final UUID snapshotId) {
         return sendAndGet(
+                caller,
                 req -> unary().entitySearch(req),
                 new SnapshotGetStatusRequest().withId(generateEventId()).withSnapshotId(snapshotId),
                 EntitySnapshotSearchResponse.class
@@ -637,11 +683,13 @@ public class CyodaRepository implements CrudRepository {
     }
 
     private CompletableFuture<List<DataPayload>> getSearchResult(
+            final SecurityContext caller,
             @NotNull final UUID snapshotId,
             final int pageSize,
             final int pageNumber
     ) {
         return sendAndGetCollection(
+                caller,
                 req -> streaming().entitySearchCollection(req),
                 new SnapshotGetRequest().withId(generateEventId())
                         .withSnapshotId(snapshotId)
@@ -674,7 +722,9 @@ public class CyodaRepository implements CrudRepository {
 
     @Override
     public CompletableFuture<Long> getEntityCount(@NotNull final ModelSpec modelSpec, @Nullable final OffsetDateTime pointInTime) {
+        final SecurityContext caller = callersSecurityContext();
         return sendAndGetCollection(
+                caller,
                 req -> streaming().entitySearchCollection(req),
                 new EntityStatsGetRequest()
                         .withId(generateEventId())
@@ -709,7 +759,9 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final List<String> states,
             @Nullable final OffsetDateTime pointInTime
     ) {
+        final SecurityContext caller = callersSecurityContext();
         return sendAndGetCollection(
+                caller,
                 req -> streaming().entitySearchCollection(req),
                 new EntityStatsByStateGetRequest()
                         .withId(generateEventId())
@@ -732,7 +784,9 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final UUID entityId,
             @Nullable final OffsetDateTime pointInTime
     ) {
+        final SecurityContext caller = callersSecurityContext();
         return sendAndGetCollection(
+                caller,
                 req -> streaming().entitySearchCollection(req),
                 new EntityChangesMetadataGetRequest()
                         .withId(generateEventId())

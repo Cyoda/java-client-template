@@ -27,12 +27,17 @@ import org.cyoda.cloud.api.event.common.BaseEvent;
 import org.cyoda.cloud.api.event.common.DataPayload;
 import org.cyoda.cloud.api.event.common.ModelSpec;
 import org.cyoda.cloud.api.event.search.EntityResponse;
+import org.cyoda.cloud.api.event.search.EntitySnapshotSearchResponse;
+import org.cyoda.cloud.api.event.search.SearchSnapshotStatus;
 import org.cyoda.cloud.api.grpc.CloudEventsServiceGrpc;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -57,6 +62,9 @@ class CyodaRepositoryCallerCredentialTest {
     private static final Metadata.Key<String> AUTHORIZATION = Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
 
     private final List<String> authorizationHeaders = new CopyOnWriteArrayList<>();
+    /** The Authentication on the thread each time the token source is asked (null = no user on that thread). */
+    private final List<Optional<org.springframework.security.core.Authentication>> seenByTokenSource = new CopyOnWriteArrayList<>();
+    private CloudEventParser parser;
     private Server server;
     private ManagedChannel channel;
     private CyodaRepository repository;
@@ -90,6 +98,7 @@ class CyodaRepositoryCallerCredentialTest {
 
         CyodaTokenSource guarded = new CyodaTokenSource() {
             @Override public Optional<String> bearerToken() {
+                seenByTokenSource.add(Optional.ofNullable(SecurityContextHolder.getContext().getAuthentication()));
                 AuthenticatedCallerGuard.refuseM2mForAuthenticatedUser();
                 return Optional.of("m2m");
             }
@@ -99,10 +108,11 @@ class CyodaRepositoryCallerCredentialTest {
                 .withInterceptors(new ClientAuthorizationInterceptor(guarded));
         CloudEventBuilder builder = mock(CloudEventBuilder.class);
         when(builder.buildEvent(any(BaseEvent.class))).thenReturn(CloudEvent.getDefaultInstance());
-        CloudEventParser parser = mock(CloudEventParser.class);
+        parser = mock(CloudEventParser.class);
         when(parser.parseCloudEvent(any(), eq(EntityResponse.class)))
                 .thenReturn(new EntityResponse().withPayload(new DataPayload()));
         Config config = new Config();
+        config.setGrpcCallDeadlineMs(10_000);
         repository = new CyodaRepository(CyodaObjectMapper.standalone(), stub, builder, parser, config);
     }
 
@@ -160,6 +170,70 @@ class CyodaRepositoryCallerCredentialTest {
 
     private static boolean unauthenticated(Throwable e) {
         for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof StatusRuntimeException sre && sre.getStatus().getCode() == Status.Code.UNAUTHENTICATED) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static EntitySnapshotSearchResponse snapshot(SearchSnapshotStatus.Status status, UUID snapshotId) {
+        return new EntitySnapshotSearchResponse().withStatus(new SearchSnapshotStatus().withStatus(status)
+                .withSnapshotId(snapshotId).withEntitiesCount(0L).withExpirationDate(OffsetDateTime.now().plusHours(1)));
+    }
+
+    private final ModelSpec model = new ModelSpec().withName("thing").withVersion(1);
+    private final GroupConditionDto all = new GroupConditionDto().operator(GroupConditionDto.OperatorEnum.AND).conditions(List.of());
+
+    /**
+     * A page request whose searchId is in the snapshot cache runs its page fetch as a continuation on a pool
+     * thread. That fetch must still be refused for an authenticated user, not sent with the M2M token.
+     */
+    @Test
+    void aCachedSnapshotPageForAnAuthenticatedUserIsRefused() {
+        UUID snapshotId = UUID.randomUUID();
+        when(parser.parseCloudEvent(any(), eq(EntitySnapshotSearchResponse.class)))
+                .thenReturn(snapshot(SearchSnapshotStatus.Status.SUCCESSFUL, snapshotId));
+        // Seed the cache from a call without a user: create the snapshot, fetch page 0.
+        repository.findAllByCriteria(model, all, SearchAndRetrievalParams.builder().pageSize(10).build()).join();
+        int sentBefore = authorizationHeaders.size();
+        assertThat(sentBefore).isEqualTo(2);
+
+        SecurityContextHolder.getContext().setAuthentication(AuthenticatedCallerGuardTestSupport.jwtUser());
+        assertThatThrownBy(() -> repository.findAllByCriteria(model, all,
+                SearchAndRetrievalParams.builder().pageSize(10).pageNumber(1).searchId(snapshotId).build()).join())
+                .satisfies(e -> assertThat(refused(e)).as("refused: " + e).isTrue());
+
+        assertThat(authorizationHeaders).hasSize(sentBefore);
+    }
+
+    /**
+     * A snapshot still RUNNING is polled after a delay, on a pool thread; every poll must carry the operation's
+     * own SecurityContext (here an anonymous request's), never the pool thread's empty one.
+     */
+    @Test
+    void aPollContinuationRunsWithTheOperationsSecurityContext() {
+        UUID snapshotId = UUID.randomUUID();
+        when(parser.parseCloudEvent(any(), eq(EntitySnapshotSearchResponse.class)))
+                .thenReturn(snapshot(SearchSnapshotStatus.Status.RUNNING, snapshotId),
+                        snapshot(SearchSnapshotStatus.Status.RUNNING, snapshotId),
+                        snapshot(SearchSnapshotStatus.Status.SUCCESSFUL, snapshotId));
+        AnonymousAuthenticationToken anonymous = new AnonymousAuthenticationToken(
+                "key", "anonymousUser", AuthorityUtils.createAuthorityList("ROLE_ANONYMOUS"));
+        SecurityContextHolder.getContext().setAuthentication(anonymous);
+
+        repository.findAllByCriteria(model, all,
+                SearchAndRetrievalParams.builder().pageSize(10).pollIntervalMs(10).build()).join();
+
+        // create, two status polls, one page fetch
+        assertThat(seenByTokenSource).hasSize(4).allMatch(seen -> seen.equals(Optional.of(anonymous)));
+    }
+
+    private static boolean refused(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof CyodaCredentialException) {
+                return true;
+            }
             if (t instanceof StatusRuntimeException sre && sre.getStatus().getCode() == Status.Code.UNAUTHENTICATED) {
                 return true;
             }
