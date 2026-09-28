@@ -127,6 +127,7 @@ cyoda-go's files are vendored **unmodified** under one root:
 ```
 src/main/resources/cyoda/
   CYODA_VERSION
+  CYODA_SHA256SUMS          # released pins only: the release archives' SHA-256 (§3.2, §7.4)
   proto/cyoda/cyoda-cloud-api.proto
   proto/cloudevents/cloudevents.proto
   schema/**/*.json          # the whole event-schema tree, incl. common/statemachine/
@@ -142,13 +143,17 @@ The template's current `proto/`, `schema/` and `api/` resource directories are d
 ### 3.2 Sync
 
 The command is
-`scripts/sync-cyoda-contract.sh --from-src <cyoda-go checkout> --version <x.y.z[-dev]>`.
+`scripts/sync-cyoda-contract.sh --from-src <cyoda-go checkout> --version <x.y.z[-dev]> [--sha256sums <file>]`.
 
 - It copies the files listed in §3.1 from `proto/`, `docs/cyoda/schema/` (JSON files only;
   the tree's `.go` files are excluded) and `api/openapi.yaml`.
 - It writes `CYODA_VERSION`: the version comes from `--version`, and the commit from
   `git rev-parse HEAD` of the checkout. (`git describe` on the release branch yields
   `cyoda-0.8.4-…`, so the version cannot be derived.)
+- For a released version it writes `CYODA_SHA256SUMS`: the `cyoda_<version>_<os>_<arch>.tar.gz`
+  lines of the release's `SHA256SUMS`, downloaded from the GitHub release or read from
+  `--sha256sums <file>`. It fails, before changing anything, if there are none. For a `-dev`
+  version it removes the file.
 - It is idempotent. The resulting `git diff` is the contract change.
 
 There is no binary mode. The binary re-serialises the files, so switching modes would show
@@ -800,14 +805,17 @@ source set has `sourceSets.test.output` on its classpath. `@CyodaIntegrationTest
 
 ### 7.4 Installing cyoda
 
-`scripts/install-cyoda.sh [--from-src [<git-ref>] | --src-dir <checkout>] [--dest <dir>]`
+`scripts/install-cyoda.sh [--from-src [<git-ref>] | --src-dir <checkout>] [--dest <dir>] [--archive <file>]`
 reads `CYODA_VERSION` and installs the binary to `<dest>/cyoda`. The default `<dest>` is
 `.cyoda/bin` in the project root: it is git-ignored, survives `./gradlew clean`, and the
 harness finds it there with no configuration (§6.1). A binary installed elsewhere is named
 with `CYODA_BIN` or `-Dcyoda.bin`.
 
 - **For a released version:** it downloads the release archive for this OS and architecture
-  from `github.com/Cyoda/cyoda-go/releases/v<version>` and verifies its checksum.
+  from `github.com/Cyoda/cyoda-go/releases/v<version>` (or takes the local `--archive`) and
+  verifies it against the release's `SHA256SUMS` and against the SHA-256 committed in
+  `CYODA_SHA256SUMS`. A missing `CYODA_SHA256SUMS`, or no line for this platform, fails the
+  install. A `-dev` pin is a source build and needs no checksum file.
   - It does not use the project's `install.sh`, which runs `cyoda init` and writes the
     user's `~/.config/cyoda/cyoda.env`.
 - **With `--from-src`:** it clones `https://github.com/Cyoda/cyoda-go` at `<git-ref>`

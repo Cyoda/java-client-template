@@ -69,6 +69,20 @@ class ScriptArgumentsTest {
     }
 
     @Test
+    void syncCyodaContractTrailingSha256sumsFailsWithUsage() throws Exception {
+        Result result = run("sync-cyoda-contract.sh", "--sha256sums");
+        assertThat(result.exitCode()).isNotZero();
+        assertThat(result.stderr()).containsIgnoringCase("usage");
+    }
+
+    @Test
+    void installCyodaTrailingArchiveFailsNamingTheFlag() throws Exception {
+        Result result = run("install-cyoda.sh", "--archive");
+        assertThat(result.exitCode()).isNotZero();
+        assertThat(result.stderr()).contains("--archive");
+    }
+
+    @Test
     void installCyodaTrailingSrcDirFailsNamingTheFlag() throws Exception {
         Result result = run("install-cyoda.sh", "--src-dir");
         assertThat(result.exitCode()).isNotZero();

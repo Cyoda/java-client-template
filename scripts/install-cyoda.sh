@@ -4,18 +4,25 @@
 #   scripts/install-cyoda.sh --from-src [<ref>]    build from GitHub at <ref> (default: the pinned commit)
 #   scripts/install-cyoda.sh --src-dir <checkout>  build an existing local checkout (its HEAD must be the pinned commit)
 #   --dest <dir>                                   output directory (default: .cyoda/bin, git-ignored)
+#   --archive <file>                               released pin only: install this local release archive instead
+#                                                  of downloading it (still verified against CYODA_SHA256SUMS)
+# A released pin's archive must match the SHA-256 committed in src/main/resources/cyoda/CYODA_SHA256SUMS
+# (written by scripts/sync-cyoda-contract.sh), not only the release's own SHA256SUMS; without that file the
+# install fails. A -dev pin is built from source at the pinned commit and needs no checksum file.
 # The default location survives `./gradlew clean`, and the tests find the binary there without configuration.
 # Prints the binary path on stdout (use it as CYODA_BIN for a --dest elsewhere). Never runs `cyoda init`.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PIN="$ROOT/src/main/resources/cyoda/CYODA_VERSION"
+PINNED_SUMS="$ROOT/src/main/resources/cyoda/CYODA_SHA256SUMS"
 VERSION="$(sed -n 1p "$PIN")"
 COMMIT="$(sed -n 2p "$PIN" | sed 's/^commit=//')"
 DEST="$ROOT/.cyoda/bin"
 MODE=""
 REF=""
 SRC_DIR=""
+ARCHIVE=""
 
 fail() { echo "install-cyoda: $*" >&2; exit 1; }
 info() { echo "install-cyoda: $*" >&2; }
@@ -28,11 +35,15 @@ while [ $# -gt 0 ]; do
       shift ;;
     --src-dir) [ $# -ge 2 ] || fail "--src-dir needs a value"; MODE=local; SRC_DIR="$2"; shift 2 ;;
     --dest) [ $# -ge 2 ] || fail "--dest needs a value"; DEST="$2"; shift 2 ;;
+    --archive) [ $# -ge 2 ] || fail "--archive needs a value"; ARCHIVE="$2"; shift 2 ;;
     *) fail "unknown argument $1" ;;
   esac
 done
 if [ -z "$MODE" ]; then
   if [[ "$VERSION" == *-dev ]]; then MODE=github; else MODE=release; fi
+fi
+if [ -n "$ARCHIVE" ] && [ "$MODE" != release ]; then
+  fail "--archive installs a released pin's archive; the pin $VERSION is built from source"
 fi
 mkdir -p "$DEST"
 WORK="$(mktemp -d)"
@@ -121,16 +132,29 @@ case "$MODE" in
     asset="cyoda_${VERSION}_${os}_${arch}.tar.gz"
     base="https://github.com/Cyoda/cyoda-go/releases/download/v${VERSION}"
     download_hint="a released pin is downloaded, which needs network access to github.com and a published release v$VERSION with an asset for $os/$arch; $OVERRIDE_HINT"
-    curl -fsSL "$base/$asset" -o "$WORK/$asset" || fail "cannot download $base/$asset: $download_hint"
-    curl -fsSL "$base/SHA256SUMS" -o "$WORK/SHA256SUMS" || fail "cannot download $base/SHA256SUMS: $download_hint"
+    # Fail closed: the committed checksums are what make the download trustworthy.
+    [ -f "$PINNED_SUMS" ] || fail "the pin $VERSION is a release, but src/main/resources/cyoda/CYODA_SHA256SUMS is missing; re-run scripts/sync-cyoda-contract.sh for $VERSION to record its checksums, $OVERRIDE_HINT"
+    expected="$(awk -v a="$asset" '$2 == a || $2 == "*" a { print $1; exit }' "$PINNED_SUMS")"
+    [ -n "$expected" ] || fail "src/main/resources/cyoda/CYODA_SHA256SUMS has no checksum for $asset, $OVERRIDE_HINT"
     if command -v sha256sum >/dev/null; then
       checksum_tool=(sha256sum -c -)
+      digest_tool=(sha256sum)
     elif command -v shasum >/dev/null; then
       checksum_tool=(shasum -a 256 -c -)
+      digest_tool=(shasum -a 256)
     else
       fail "need sha256sum or shasum"
     fi
-    ( cd "$WORK" && grep " $asset\$" SHA256SUMS | "${checksum_tool[@]}" >/dev/null ) || fail "checksum mismatch for $asset"
+    if [ -n "$ARCHIVE" ]; then
+      [ -f "$ARCHIVE" ] || fail "--archive $ARCHIVE does not exist"
+      cp "$ARCHIVE" "$WORK/$asset"
+    else
+      curl -fsSL "$base/$asset" -o "$WORK/$asset" || fail "cannot download $base/$asset: $download_hint"
+      curl -fsSL "$base/SHA256SUMS" -o "$WORK/SHA256SUMS" || fail "cannot download $base/SHA256SUMS: $download_hint"
+      ( cd "$WORK" && grep " $asset\$" SHA256SUMS | "${checksum_tool[@]}" >/dev/null ) || fail "checksum mismatch for $asset against the release's SHA256SUMS"
+    fi
+    actual="$("${digest_tool[@]}" "$WORK/$asset" | awk '{ print $1 }')"
+    [ "$actual" = "$expected" ] || fail "checksum mismatch for $asset: it is $actual, but CYODA_SHA256SUMS pins $expected"
     tar -xzf "$WORK/$asset" -C "$WORK" cyoda
     mv "$WORK/cyoda" "$DEST/cyoda"
     ;;
