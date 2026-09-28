@@ -618,9 +618,11 @@ nested or concurrent cascades beyond the pool size deadlock until their callouts
   grows with the result size. Instead, before such a call starts, `CyodaRepository` waits for
   the channel to be `READY` (`ChannelReadiness`, using `ManagedChannel.getState(true)` and
   `notifyWhenStateChanged`) for at most `grpc-call-deadline-ms`.
-  - If the channel is not `READY` in time, or is shut down, the call fails without being
-    sent, with `CyodaRetryableException` code `UNAVAILABLE` and the message
-    `Cyoda was unreachable for <N> ms: …`. `CyodaGrpcCalls` does not retry it.
+  - If the channel is not `READY` in time, the call fails without being sent, with
+    `CyodaRetryableException` code `UNAVAILABLE` and the message
+    `Cyoda was unreachable for <N> ms: …`. If the channel is already shut down, the message
+    is instead `Cyoda is unreachable: the gRPC channel to it is shut down`. `CyodaGrpcCalls`
+    does not retry either case.
   - Once the call has started, nothing bounds its total duration, so a long but healthy
     stream is never cut off.
   - The stubs keep `withWaitForReady()`, so a brief reconnect between the check and the
