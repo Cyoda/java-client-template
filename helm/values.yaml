@@ -1,13 +1,28 @@
 name: cyoda-client
 
-imagePullSecret:
-  enabled: true
-
 enabled: true
 useNamespaceForIngress: false
 
-imagePullSecrets:
-  - name: regcred
+# Shared with an umbrella chart, if any.
+global:
+  registry:
+    host: ""  # REQUIRED: registry host of the image, e.g. registry.example.com
+    # Used only by the legacy imagePullSecret.enabled path below.
+    username: ""
+    password: ""
+  imagePullSecret:
+    # Preferred: an existing kubernetes.io/dockerconfigjson Secret to pull the image with. The chart creates
+    # nothing and never sees the credentials.
+    existingSecretName: ""
+    # Legacy, off by default: build a "regcred" Secret from global.registry.username/password. Those values are
+    # plaintext in the release's values; this is kept only for deployments whose umbrella chart still passes
+    # registry credentials that way. Ignored when existingSecretName is set.
+    enabled: false
+  hostAliases: []
+
+# Ingress host; required when ingress.enabled.
+host:
+  name: ""
 
 # Enable Spring Boot Actuator health endpoints
 actuatorEnabled: true
@@ -91,11 +106,13 @@ service:
     name: http
 
 ingress:
-  enabled: true
+  # Off by default. When enabled, host.name and ingress.tls are required: the app is only exposed over TLS.
+  enabled: false
   className: "nginx"
   annotations: {}
   path: /
   pathType: Prefix
+  # e.g. [{secretName: cyoda-client-tls, hosts: [app.example.com]}]
   tls: []
 
 autoscaling:
@@ -115,7 +132,23 @@ resources:
 
 extraVolumeMounts: {}
 extraVolumes: {}
-securityContext: {}
+# Pod-level security context. uid/gid 10001 is the unprivileged user the Dockerfile creates.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+# Container-level security context. The root filesystem is read-only; the app writes only to /tmp, which the
+# deployment mounts as an emptyDir.
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
 tolerations: []
 priorityClassName: ""
 serviceAccountName: ""
@@ -126,3 +159,4 @@ strategy: {}
 image:
   pullPolicy: Always
   imageName: client-app
+  tag: ""  # REQUIRED

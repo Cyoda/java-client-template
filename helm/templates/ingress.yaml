@@ -1,16 +1,21 @@
 {{- if .Values.ingress.enabled -}}
+{{- if not .Values.ingress.tls -}}
+{{- fail "ingress.tls is required when ingress.enabled: the app is only exposed over TLS" -}}
+{{- end -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ .Values.name }}
   {{- with .Values.ingress.annotations }}
   annotations:
-    {{- toYaml . | nindent 8 }}
+    {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
+  tls:
+    {{- toYaml .Values.ingress.tls | nindent 4 }}
   rules:
-    - host: {{ .Values.host.name }}
+    - host: {{ required "host.name is required when ingress.enabled" .Values.host.name }}
       http:
         paths:
           - backend:
@@ -18,6 +23,6 @@ spec:
                 name: {{ .Values.service.name }}
                 port:
                   name: {{ .Values.service.serverPort.name }}
-            path: /
-            pathType: "Prefix"
-{{- end}}
+            path: {{ .Values.ingress.path | default "/" }}
+            pathType: {{ .Values.ingress.pathType | default "Prefix" | quote }}
+{{- end }}

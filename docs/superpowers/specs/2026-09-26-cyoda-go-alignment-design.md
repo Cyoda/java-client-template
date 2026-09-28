@@ -881,6 +881,8 @@ or network access for a released pin (a download).
   2. `install-cyoda.sh`, whose output becomes `CYODA_BIN`;
   3. `./gradlew check`, in which `installCyoda` installs nothing, because `CYODA_BIN` is set.
 - **`compile-only`** compiles main, test, `testFixtures` and `integrationTest` sources.
+- **`helm` job:** `azure/setup-helm` (pinned) runs `helm lint` and `helm template` on `helm/`
+  with `.github/helm/ci-values.yaml`, the minimal required values.
 - **On failure,** `build/cyoda-logs/` is uploaded. Test results and reports for `test` and
   `integrationTest` are always uploaded. The standard jar artifact is `build/libs/app.jar`.
 
