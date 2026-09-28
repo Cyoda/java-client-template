@@ -132,7 +132,13 @@ public class Config implements InitializingBean {
         }
         if (cyodaApiUrl != null && !cyodaApiUrl.isBlank()) {
             String tokenUri = cyodaApiUrl + "/oauth/token";
-            URI uri = URI.create(tokenUri);
+            URI uri;
+            try {
+                uri = URI.create(tokenUri);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalStateException("app.config.cyoda-api-url '" + cyodaApiUrl + "' is not a valid URL: "
+                        + e.getMessage(), e);
+            }
             if (!"https".equalsIgnoreCase(uri.getScheme()) && !isLoopback(uri.getHost())) {
                 throw new IllegalStateException("The Cyoda token URI " + tokenUri + " (from app.config.cyoda-api-url) "
                         + "is not https, so app.config.auth-mode=client-credentials would send the client secret "

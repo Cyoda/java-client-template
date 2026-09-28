@@ -57,6 +57,28 @@ class TransportSecurityTest {
     }
 
     @Test
+    void plaintextGrpcToABareIpv6LoopbackIsAllowed() {
+        runner.withPropertyValues("app.config.cyoda-api-url=https://cyoda.example.com/api",
+                        "app.config.grpc-address=::1", "app.config.grpc-tls=false")
+                .run(ctx -> assertThat(ctx).hasNotFailed());
+    }
+
+    @Test
+    void plaintextGrpcToAnotherIpv6AddressFailsStartup() {
+        runner.withPropertyValues("app.config.cyoda-api-url=https://cyoda.example.com/api",
+                        "app.config.grpc-address=2001:db8::1", "app.config.grpc-tls=false")
+                .run(ctx -> assertThat(ctx).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("app.config.grpc-tls"));
+    }
+
+    @Test
+    void anUnparsableApiUrlNamesTheProperty() {
+        runner.withPropertyValues("app.config.cyoda-api-url=http://bad host/api")
+                .run(ctx -> assertThat(ctx).hasFailed().getFailure()
+                        .hasStackTraceContaining("app.config.cyoda-api-url 'http://bad host/api' is not a valid URL"));
+    }
+
+    @Test
     void aLookalikeOfLoopbackIsNotLoopback() {
         runner.withPropertyValues("app.config.cyoda-api-url=http://127.0.0.1.example.com/api",
                         "app.config.grpc-address=localhost.example.com", "app.config.grpc-tls=false")
