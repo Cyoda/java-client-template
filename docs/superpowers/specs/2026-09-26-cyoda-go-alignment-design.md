@@ -798,7 +798,11 @@ Boot's `JacksonAutoConfiguration`.
   `FAIL_ON_UNKNOWN_PROPERTIES` off, so a field cyoda-go adds never breaks parsing. No
   `spring.jackson.*` setting and no app bean reaches it. `CyodaJackson.configure` registers
   `JavaTimeModule`, turns `WRITE_DATES_AS_TIMESTAMPS` off (cyoda-go expects RFC3339 text),
-  and adds the processor-type handler (§3.3.3).
+  adds the processor-type handler (§3.3.3), and enables
+  `DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS`, so a decimal literal in the payload's
+  `data` tree parses as `DecimalNode`, not `DoubleNode`: a `BigDecimal` entity field beyond
+  ~17 significant digits survives an inbound callout unchanged, and still serializes back as
+  a plain JSON number.
 - **Entity mapper (`entities()`)** is used for every conversion between an app entity class
   and a JSON tree: writing an entity for create, update and save, reading one from a
   payload's `data`, the serializers' `entityToJsonNode`/`extractEntity`, and the values of

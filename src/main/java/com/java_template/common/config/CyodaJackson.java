@@ -1,6 +1,7 @@
 package com.java_template.common.config;
 
 import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -30,6 +31,9 @@ public final class CyodaJackson {
         // which would break the wire format even though it wouldn't lose precision.
         mapper.registerModule(new JavaTimeModule());
         mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        // A BigDecimal entity field beyond ~17 significant digits loses precision if a decimal literal in the
+        // payload's `data` tree parses as DoubleNode. This makes it parse as DecimalNode instead, losslessly.
+        mapper.enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
         return mapper;
     }
 
