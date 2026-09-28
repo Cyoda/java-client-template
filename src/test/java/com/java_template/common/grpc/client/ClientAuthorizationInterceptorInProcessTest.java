@@ -1,6 +1,8 @@
 package com.java_template.common.grpc.client;
 
+import com.java_template.common.auth.AuthenticatedCallerGuard;
 import com.java_template.common.auth.CyodaTokenSource;
+import com.java_template.common.exception.CyodaCredentialException;
 import io.cloudevents.v1.proto.CloudEvent;
 import io.grpc.ManagedChannel;
 import io.grpc.Server;
@@ -13,8 +15,11 @@ import org.cyoda.cloud.api.grpc.CloudEventsServiceGrpc;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.Iterator;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -70,11 +75,23 @@ class ClientAuthorizationInterceptorInProcessTest {
     void stopServer() throws Exception {
         channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
         server.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
+        SecurityContextHolder.clearContext();
     }
 
     private static CyodaTokenSource failingTokenSource() {
         return new CyodaTokenSource() {
             @Override public Optional<String> bearerToken() { throw new IllegalStateException("token endpoint down"); }
+            @Override public void invalidate() { }
+        };
+    }
+
+    /** Like Authentication: refuses the M2M token while an authenticated user is on the thread. */
+    private static CyodaTokenSource guardedTokenSource() {
+        return new CyodaTokenSource() {
+            @Override public Optional<String> bearerToken() {
+                AuthenticatedCallerGuard.refuseM2mForAuthenticatedUser();
+                return Optional.of("tok");
+            }
             @Override public void invalidate() { }
         };
     }
@@ -136,6 +153,30 @@ class ClientAuthorizationInterceptorInProcessTest {
     void unaryCallSucceedsWithAToken() {
         var stub = CloudEventsServiceGrpc.newBlockingStub(channel)
                 .withInterceptors(new ClientAuthorizationInterceptor(fixedTokenSource()));
+
+        assertThat(stub.entityManage(CloudEvent.getDefaultInstance())).isNotNull();
+        assertThat(serverCalls).hasValue(1);
+    }
+
+    @Test
+    void aCallFromAnAuthenticatedUsersThreadFailsUnauthenticatedAndNeverReachesTheServer() {
+        SecurityContextHolder.getContext().setAuthentication(
+                UsernamePasswordAuthenticationToken.authenticated("alice", "pw", List.of()));
+        var stub = CloudEventsServiceGrpc.newBlockingStub(channel)
+                .withInterceptors(new ClientAuthorizationInterceptor(guardedTokenSource()));
+
+        assertThatThrownBy(() -> stub.entityManage(CloudEvent.getDefaultInstance()))
+                .isInstanceOfSatisfying(StatusRuntimeException.class, e -> {
+                    assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.UNAUTHENTICATED);
+                    assertThat(e.getStatus().getCause()).isInstanceOf(CyodaCredentialException.class);
+                });
+        assertThat(serverCalls).hasValue(0);
+    }
+
+    @Test
+    void aCallWithoutAnAuthenticatedUserStillCarriesTheM2mToken() {
+        var stub = CloudEventsServiceGrpc.newBlockingStub(channel)
+                .withInterceptors(new ClientAuthorizationInterceptor(guardedTokenSource()));
 
         assertThat(stub.entityManage(CloudEvent.getDefaultInstance())).isNotNull();
         assertThat(serverCalls).hasValue(1);

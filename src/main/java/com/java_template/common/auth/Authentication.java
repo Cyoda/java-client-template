@@ -140,8 +140,13 @@ public class Authentication implements CyodaTokenSource {
         return s == null || s.isBlank();
     }
 
+    /**
+     * The M2M token for an outbound Cyoda call. Refused with {@link com.java_template.common.exception.CyodaCredentialException}
+     * while the current thread carries an authenticated user ({@link AuthenticatedCallerGuard}).
+     */
     @Override
     public Optional<String> bearerToken() {
+        AuthenticatedCallerGuard.refuseM2mForAuthenticatedUser();
         return Optional.of(getAccessToken().getTokenValue());
     }
 

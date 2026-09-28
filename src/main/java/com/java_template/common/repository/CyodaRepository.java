@@ -28,6 +28,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Repository;
 
 import java.io.IOException;
@@ -39,6 +41,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -413,12 +416,12 @@ public class CyodaRepository implements CrudRepository {
     ) {
         try {
             final CloudEvent requestEvent = cloudEventBuilder.buildEvent(baseEvent);
-            return CompletableFuture.supplyAsync(() -> {
+            return CompletableFuture.supplyAsync(withCallersSecurityContext(() -> {
                         logger.debug("Sending event: {}", CloudEvents.describe(requestEvent));
                         CloudEvent cloudEvent = requestAndGetOrThrow(apiCall, requestEvent);
                         logger.debug("Received event: {}", CloudEvents.describe(cloudEvent));
                         return cloudEvent;
-                    })
+                    }))
                     .thenApply(response -> cloudEventParser.parseCloudEvent(response, responsePayloadType))
                     .thenApply(this::validateResponse);
         } catch (InvalidProtocolBufferException e) {
@@ -433,7 +436,7 @@ public class CyodaRepository implements CrudRepository {
     ) {
         try {
             final var requestEvent = cloudEventBuilder.buildEvent(baseEvent);
-            return CompletableFuture.supplyAsync(() -> requestAndGetOrThrow(apiCall, requestEvent))
+            return CompletableFuture.supplyAsync(withCallersSecurityContext(() -> requestAndGetOrThrow(apiCall, requestEvent)))
                     .thenApply(response -> processCollection(Streams.stream(response), responsePayloadClass));
         } catch (InvalidProtocolBufferException e) {
             throw new RuntimeException(e);
@@ -448,6 +451,24 @@ public class CyodaRepository implements CrudRepository {
         return stream.filter(Objects::nonNull)
                 .map(elm -> cloudEventParser.parseCloudEvent(elm, payloadType))
                 .map(this::validateResponse);
+    }
+
+    /**
+     * Runs {@code call} on the pool thread with the calling thread's SecurityContext, restoring the pool thread's
+     * own afterwards. The auth interceptor runs on that pool thread, and it must see who the call is for: a call
+     * made for an authenticated user is refused there, never sent with the M2M token.
+     */
+    private static <T> Supplier<T> withCallersSecurityContext(final Supplier<T> call) {
+        final SecurityContext callers = SecurityContextHolder.getContext();
+        return () -> {
+            final SecurityContext previous = SecurityContextHolder.getContext();
+            SecurityContextHolder.setContext(callers);
+            try {
+                return call.get();
+            } finally {
+                SecurityContextHolder.setContext(previous);
+            }
+        };
     }
 
     private <RESPONSE_PAYLOAD_TYPE> RESPONSE_PAYLOAD_TYPE requestAndGetOrThrow(

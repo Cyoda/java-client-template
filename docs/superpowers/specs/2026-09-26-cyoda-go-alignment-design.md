@@ -94,7 +94,12 @@ template has no workarounds for it (§9.2).
   `SearchIT`, `ProcessorIT` and `CriterionIT`;
 - Cucumber removal and CI.
 
-After PR 1, every Cyoda call goes out as M2M, or with no header under `auth-mode=none`.
+After PR 1, every Cyoda call goes out as M2M, or with no header under `auth-mode=none`. The
+one exception fails closed: while the calling thread's `SecurityContext` holds an
+authenticated, non-anonymous user, the M2M token is refused (`CyodaCredentialException`;
+on gRPC the call fails with `UNAUTHENTICATED`), so a user's request never runs with the
+service account's rights. `CyodaRepository` runs each gRPC call with the caller's
+`SecurityContext`, so the interceptor sees it on the pool thread.
 
 **PR 2: credentials, callout scope, threading.** It covers:
 - §4.2, the decision point;
@@ -109,7 +114,8 @@ PR 2 builds on PR 1's harness. PR 1 does not depend on PR 2.
 **What changes for BFF calls.** In the template's default configuration (permit-all
 inbound), BFF calls go out as M2M, just as today, because OBO was off by default. An app
 that installed its own JWT `SecurityFilterChain` behaves differently after PR 2: its user's
-raw IdP token is forwarded to Cyoda (§4.2 rule 3). Before, the template attempted OBO and,
+raw IdP token is forwarded to Cyoda (§4.2 rule 3); after PR 1 alone, that call is refused.
+Before, the template attempted OBO and,
 with OBO unconfigured, threw `OboTokenException`. This is listed as a breaking change (§4.8).
 
 ## 3. Contract layer
