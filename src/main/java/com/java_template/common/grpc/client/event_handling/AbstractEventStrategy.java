@@ -34,21 +34,22 @@ public abstract class AbstractEventStrategy<
     private static final Logger logger = LoggerFactory.getLogger(AbstractEventStrategy.class);
 
     // Used only to test whether recovery text is valid JSON and, if so, to read its top-level
-    // fields directly. A plain mapper (not the wire mapper) is deliberate: this is a best-effort
+    // fields directly. A plain mapper (not the protocol mapper) is deliberate: this is a best-effort
     // fallback for text that may not even be a CloudEvent payload, not a DTO round trip.
     private static final ObjectMapper RECOVERY_MAPPER = new ObjectMapper();
 
     protected final OperationFactory operationFactory;
+    /** The protocol mapper ({@link CyodaObjectMapper#protocol()}), for the callout's Cyoda messages. */
     protected final ObjectMapper objectMapper;
     protected final CyodaContextFactory eventContextFactory;
 
     protected AbstractEventStrategy(
             OperationFactory operationFactory,
-            CyodaObjectMapper wireMapper,
+            CyodaObjectMapper mappers,
             CyodaContextFactory eventContextFactory
     ) {
         this.operationFactory = operationFactory;
-        this.objectMapper = wireMapper.mapper();
+        this.objectMapper = mappers.protocol();
         this.eventContextFactory = eventContextFactory;
     }
 

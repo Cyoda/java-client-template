@@ -48,8 +48,8 @@ class ExampleEntityCriterionTest {
     @BeforeEach
     void setUp() {
         autoCloseable = MockitoAnnotations.openMocks(this);
-        // The framework's wire mapper: Jackson defaults plus the cyoda-go contract settings.
-        objectMapper = CyodaObjectMapper.standalone().mapper();
+        // The entity mapper Spring Boot builds by default; Cyoda metadata uses the protocol mapper.
+        objectMapper = CyodaObjectMapper.standalone().entities();
         CriterionSerializer serializer = new JacksonCriterionSerializer(objectMapper);
 
         when(serializerFactory.getDefaultCriteriaSerializer()).thenReturn(serializer);

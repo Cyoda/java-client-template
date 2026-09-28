@@ -33,18 +33,18 @@ public class WorkflowServiceImpl implements WorkflowService {
      *
      * @param httpUtils HTTP utility component for making REST API calls
      * @param callContexts builds the per-call {@link CyodaCallContext} (spec §4.2)
-     * @param wireMapper the framework's wire ObjectMapper holder
+     * @param mappers the framework's mappers (workflow JSON uses the protocol mapper)
      * @param config Configuration component for application settings
      */
     public WorkflowServiceImpl(
             final HttpUtils httpUtils,
             final CyodaCallContexts callContexts,
-            final CyodaObjectMapper wireMapper,
+            final CyodaObjectMapper mappers,
             final Config config
     ) {
         this.httpUtils = httpUtils;
         this.callContexts = callContexts;
-        this.objectMapper = wireMapper.mapper();
+        this.objectMapper = mappers.protocol();
         this.config = config;
     }
 

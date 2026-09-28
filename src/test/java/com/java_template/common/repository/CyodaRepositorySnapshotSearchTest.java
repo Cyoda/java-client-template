@@ -53,7 +53,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class CyodaRepositorySnapshotSearchTest {
 
-    @Spy CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
+    @Spy CyodaObjectMapper mappers = CyodaObjectMapper.standalone();
     @Mock CloudEventsServiceGrpc.CloudEventsServiceBlockingStub stub;
     @Mock CloudEventBuilder cloudEventBuilder;
     @Mock CloudEventParser cloudEventParser;

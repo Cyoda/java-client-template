@@ -59,10 +59,10 @@ class HttpUtilsOriginTest {
     }
 
     private HttpUtils httpFor(String cyodaApiUrl) {
-        CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
+        CyodaObjectMapper mappers = CyodaObjectMapper.standalone();
         Config config = new Config();
         config.setCyodaApiUrl(cyodaApiUrl);
-        return new HttpUtils(new JsonUtils(wireMapper), wireMapper, config, tokens);
+        return new HttpUtils(new JsonUtils(mappers), mappers, config, tokens);
     }
 
     @Test

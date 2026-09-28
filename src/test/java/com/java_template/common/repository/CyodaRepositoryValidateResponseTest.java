@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @ExtendWith(MockitoExtension.class)
 class CyodaRepositoryValidateResponseTest {
 
-    @Spy CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
+    @Spy CyodaObjectMapper mappers = CyodaObjectMapper.standalone();
     @Mock CloudEventsServiceGrpc.CloudEventsServiceBlockingStub stub;
     @Mock CloudEventBuilder cloudEventBuilder;
     @Mock CloudEventParser cloudEventParser;

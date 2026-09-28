@@ -34,8 +34,8 @@ class CalloutScopeLifecycleTest {
 
     @Test
     void theScopeHoldsTheTokenDuringTheCalloutAndIsGoneAfterwards() throws Exception {
-        CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
-        ObjectMapper om = wireMapper.mapper();
+        CyodaObjectMapper mappers = CyodaObjectMapper.standalone();
+        ObjectMapper om = mappers.protocol();
         AtomicReference<String> seenToken = new AtomicReference<>();
         AtomicReference<Object> seenAuth = new AtomicReference<>("unset");
         AtomicReference<String> contextToken = new AtomicReference<>();
@@ -48,7 +48,7 @@ class CalloutScopeLifecycleTest {
         });
         OperationFactory factory = mock(OperationFactory.class);
         when(factory.getProcessorForModel(any())).thenReturn(processor);
-        ProcessorEventStrategy strategy = new ProcessorEventStrategy(factory, wireMapper, new CyodaContextFactory(wireMapper));
+        ProcessorEventStrategy strategy = new ProcessorEventStrategy(factory, mappers, new CyodaContextFactory(mappers));
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken("leftover", "x", List.of()));
 
         try {
@@ -85,8 +85,8 @@ class CalloutScopeLifecycleTest {
      */
     @Test
     void tokenlessDispatchGoesOutUnjoinedAsM2mAndClearsTheSecurityContext() throws Exception {
-        CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
-        ObjectMapper om = wireMapper.mapper();
+        CyodaObjectMapper mappers = CyodaObjectMapper.standalone();
+        ObjectMapper om = mappers.protocol();
         CyodaCallContexts callContexts = new CyodaCallContexts(new Config());
         AtomicReference<CyodaCallContext> seenContext = new AtomicReference<>();
         AtomicReference<Object> seenAuth = new AtomicReference<>("unset");
@@ -98,7 +98,7 @@ class CalloutScopeLifecycleTest {
         });
         OperationFactory factory = mock(OperationFactory.class);
         when(factory.getProcessorForModel(any())).thenReturn(processor);
-        ProcessorEventStrategy strategy = new ProcessorEventStrategy(factory, wireMapper, new CyodaContextFactory(wireMapper));
+        ProcessorEventStrategy strategy = new ProcessorEventStrategy(factory, mappers, new CyodaContextFactory(mappers));
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken("leftover", "x", List.of()));
 
         try {

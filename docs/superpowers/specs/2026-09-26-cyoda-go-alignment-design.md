@@ -87,7 +87,7 @@ has no workarounds for it (§9.2).
 - §4.7;
 - the protocol items in §4.4 that need no callout scope (responses, criteria `matches`,
   `authtype` values, keep-alive);
-- the date-time types, snapshot-search paging and the wire mapper in §4.9;
+- the date-time types, snapshot-search paging and the protocol and entity mappers in §4.9;
 - §6;
 - §7;
 - the tier-1 tests `CyodaServerIT`, `ComputeMemberJoinIT`, `ModelAndWorkflowSetupIT`,
@@ -244,7 +244,7 @@ otherwise, so contract drift cannot pass silently.
 - **Processor `type`.** A processor without `type`, or with `"type": ""`, deserialises as
   externalized, as cyoda-go defaults it; the template's workflows omit it. A Jackson
   `DeserializationProblemHandler`, registered by `CyodaJackson.configure` on the framework's
-  wire mapper (§4.9), resolves a missing or blank `type` to
+  protocol mapper (§4.9), resolves a missing or blank `type` to
   `ExternalizedProcessorDefinitionDto`. There is no generator template override and no spec
   patch for it.
 - **Schema mapping.** One `schemaMappings` entry,
@@ -687,8 +687,10 @@ table. It covers:
 - **Date-times and point in time:** event DTO date-times, `EntityWithMetadata.getCreationDate()`
   and `CrudRepository` `pointInTime` parameters are `OffsetDateTime`; `EntityService` and
   `SearchAndRetrievalParams` take both `Date` and `OffsetDateTime` (§4.9).
-- **Wire mapper:** framework classes take `CyodaObjectMapper`; the app's primary mapper is
-  not modified (§4.9).
+- **Mappers:** framework classes take `CyodaObjectMapper`. Protocol messages use its fixed
+  protocol mapper; entities use the app's primary mapper, unmodified, so the stored entity
+  JSON follows the app's Jackson settings. Several `ObjectMapper` beans need one marked
+  `@Primary` (§4.9).
 - **`deleteAll`:** the template does not send `transactionSize`, so `deleteAll` is one
   transaction by default (cyoda-go still honours `transactionSize` when sent, #379).
   `EntityDeleteAllRequest` has no `pageSize`.
@@ -769,18 +771,44 @@ run an async snapshot search.
 - An expired or unknown `searchId`, or a snapshot that ends in a status other than
   `SUCCESSFUL`, fails; it never falls back to a new search.
 
-**Wire mapper.** The framework has its own wire mapper, `CyodaObjectMapper`, used for every
-Cyoda payload and every event and OpenAPI DTO.
-- It is a Spring bean built by `CyodaJacksonAutoConfiguration` after Spring Boot's
-  `JacksonAutoConfiguration`: a copy of the app's primary `ObjectMapper` (or a plain
-  `ObjectMapper` when there is no unique one), with `CyodaJackson.configure` applied on top.
-- `CyodaJackson.configure` registers `JavaTimeModule`, turns `WRITE_DATES_AS_TIMESTAMPS`
-  off (cyoda-go expects RFC3339 text), and adds the processor-type handler (§3.3.3).
-- The app's own mapper is never modified. The app's other `spring.jackson.*` settings and
-  modules carry over into the copy.
+**Protocol and entity mappers.** `CyodaObjectMapper` holds the framework's two mappers,
+one per role. It is a Spring bean built by `CyodaJacksonAutoConfiguration` after Spring
+Boot's `JacksonAutoConfiguration`.
+- **Protocol mapper (`protocol()`)** is used for every Cyoda protocol message:
+  - CloudEvent payload JSON;
+  - the event DTOs (`org.cyoda.cloud.api.event.*`) and the OpenAPI models
+    (`org.cyoda.cloud.api.common.model`);
+  - workflow JSON and REST bodies sent to Cyoda;
+  - `DataPayload` envelopes, including reading and writing the entity JSON tree in their
+    `data` field, and the Cyoda metadata in `meta`.
+
+  It is fixed: `CyodaJackson.configure(new ObjectMapper())` with
+  `FAIL_ON_UNKNOWN_PROPERTIES` off, so a field cyoda-go adds never breaks parsing. No
+  `spring.jackson.*` setting and no app bean reaches it. `CyodaJackson.configure` registers
+  `JavaTimeModule`, turns `WRITE_DATES_AS_TIMESTAMPS` off (cyoda-go expects RFC3339 text),
+  and adds the processor-type handler (§3.3.3).
+- **Entity mapper (`entities()`)** is used for every conversion between an app entity class
+  and a JSON tree: writing an entity for create, update and save, reading one from a
+  payload's `data`, the serializers' `entityToJsonNode`/`extractEntity`, and the values of
+  search conditions built from entity fields. It is the app's primary `ObjectMapper`, used
+  as is: never copied, never modified.
+  - The entity JSON stored in Cyoda therefore follows the app's Jackson settings. With
+    `SNAKE_CASE` naming, the entity is stored in snake_case, and JSON paths in conditions and
+    workflows must use those names.
+  - Spring Boot's default mapper writes entity date-times as ISO-8601 text (it registers
+    `JavaTimeModule` and turns `WRITE_DATES_AS_TIMESTAMPS` off). The framework forces
+    nothing the app did not choose: an app that turns timestamps on stores numbers.
+  - The entity JSON always reaches the protocol message as a JSON tree (`valueToTree`),
+    never as text, so the protocol mapper writes it verbatim.
+- **An ambiguous app mapper fails at startup.** With several `ObjectMapper` beans and none
+  primary, the bean fails with a message naming them and the fix (mark one `@Primary`).
+  With no `ObjectMapper` bean at all, it fails saying to keep `JacksonAutoConfiguration` or
+  define one. There is no fallback to a bare mapper.
 - `CyodaObjectMapper` is a holder, not an `ObjectMapper` bean, because a second
   `ObjectMapper` bean would make Spring Boot's `JacksonAutoConfiguration` back off.
-- Tests and tools without Spring use `CyodaObjectMapper.standalone()`.
+- `CyodaObjectMapper.of(appMapper)` builds the pair by hand. Tests and tools without Spring
+  use `CyodaObjectMapper.standalone()`, whose entity mapper is the one Spring Boot builds
+  when the app sets no `spring.jackson.*` property.
 
 ## 5. cyoda-go facts relied on
 
@@ -971,7 +999,7 @@ scans `com.example.application`.
 - `CYODA_VERSION` parsing and version comparison;
 - the harness environment and startup-failure cleanup;
 - `auth-mode=none` startup without client credentials;
-- the wire mapper's auto-configuration.
+- the mappers' auto-configuration: protocol parsing under `fail-on-unknown-properties`, `SNAKE_CASE` reaching entities but not protocol DTOs, and the startup failure for several non-primary `ObjectMapper`s.
 
 **PR 2 tests:**
 - **Credential decision:**
@@ -1166,7 +1194,7 @@ or network access for a released pin (a download).
    six RPCs to the library's `CloudEvent` (`CyodaProtoContractTest`).
 4. **Pinning:** no `synchronized` block holds a lock across a blocking Cyoda call in the
    framework's call paths (§4.5).
-5. **Processor `type` default:** a Jackson `DeserializationProblemHandler` on the wire
+5. **Processor `type` default:** a Jackson `DeserializationProblemHandler` on the protocol
    mapper, with no openapi-generator template fork (§3.3.3).
 
 ## 9. Findings and obligations outside this template

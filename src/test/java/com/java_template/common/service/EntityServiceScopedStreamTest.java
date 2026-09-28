@@ -60,17 +60,17 @@ class EntityServiceScopedStreamTest {
     private final CloudEventParser cloudEventParser = mock(CloudEventParser.class);
     private final AtomicReference<BaseEvent> lastRequest = new AtomicReference<>();
     private final List<EntitySearchRequest> searches = new ArrayList<>();
-    private final ObjectMapper om = CyodaObjectMapper.standalone().mapper();
+    private final ObjectMapper om = CyodaObjectMapper.standalone().protocol();
     private int matches;
     private EntityServiceImpl service;
 
     @BeforeEach
     void setUp() throws Exception {
         Config config = new Config();
-        CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
-        CyodaRepository repository = new CyodaRepository(wireMapper, stub, cloudEventBuilder, cloudEventParser, config,
+        CyodaObjectMapper mappers = CyodaObjectMapper.standalone();
+        CyodaRepository repository = new CyodaRepository(mappers, stub, cloudEventBuilder, cloudEventParser, config,
                 mock(CyodaTokenSource.class));
-        service = new EntityServiceImpl(repository, wireMapper, new CyodaCallContexts(config));
+        service = new EntityServiceImpl(repository, mappers, new CyodaCallContexts(config));
 
         lenient().when(stub.withOption(any(), any())).thenReturn(stub);
         lenient().when(stub.withDeadlineAfter(anyLong(), any())).thenReturn(stub);

@@ -50,16 +50,19 @@ public class EntityServiceImpl implements EntityService {
     private final Logger logger = LoggerFactory.getLogger(this.getClass());
 
     private final CrudRepository repository;
-    private final ObjectMapper objectMapper;
+    /** The framework's mappers: entities with the app's mapper, the Cyoda metadata with the protocol mapper. */
+    private final CyodaObjectMapper mappers;
+    private final ObjectMapper entityMapper;
     private final CyodaCallContexts callContexts;
 
     public EntityServiceImpl(
             final CrudRepository repository,
-            final CyodaObjectMapper wireMapper,
+            final CyodaObjectMapper mappers,
             final CyodaCallContexts callContexts
     ) {
         this.repository = repository;
-        this.objectMapper = wireMapper.mapper();
+        this.mappers = mappers;
+        this.entityMapper = mappers.entities();
         this.callContexts = callContexts;
     }
 
@@ -99,7 +102,7 @@ public class EntityServiceImpl implements EntityService {
             @Nullable final OffsetDateTime pointInTime
     ) {
         DataPayload payload = Futures.joinUnwrapped(repository.findById(ctx, entityId, pointInTime));
-        return EntityWithMetadata.fromDataPayload(payload, entityClass, objectMapper);
+        return EntityWithMetadata.fromDataPayload(payload, entityClass, mappers);
     }
 
     @Override
@@ -134,7 +137,7 @@ public class EntityServiceImpl implements EntityService {
         SimpleConditionDto simpleCondition = new SimpleConditionDto()
                 .jsonPath("$." + businessIdField)
                 .operatorType(SimpleConditionDto.OperatorTypeEnum.EQUALS)
-                .value(objectMapper.valueToTree(businessId));
+                .value(entityMapper.valueToTree(businessId));
 
         GroupConditionDto condition = new GroupConditionDto()
                 .operator(GroupConditionDto.OperatorEnum.AND)
@@ -196,7 +199,7 @@ public class EntityServiceImpl implements EntityService {
             SimpleConditionDto condition = new SimpleConditionDto()
                     .jsonPath("$." + fieldName)
                     .operatorType(SimpleConditionDto.OperatorTypeEnum.EQUALS)
-                    .value(objectMapper.valueToTree(value));
+                    .value(entityMapper.valueToTree(value));
 
             simpleConditions.add(condition);
         }
@@ -365,7 +368,7 @@ public class EntityServiceImpl implements EntityService {
     ) {
         List<EntityWithMetadata<T>> entities = pageResult.data().stream()
                 .filter(Objects::nonNull)
-                .map(payload -> EntityWithMetadata.fromDataPayload(payload, entityClass, objectMapper))
+                .map(payload -> EntityWithMetadata.fromDataPayload(payload, entityClass, mappers))
                 .toList();
 
         return PageResult.of(
@@ -445,7 +448,7 @@ public class EntityServiceImpl implements EntityService {
     private <T extends CyodaEntity> EntityWithMetadata<T> create(final CyodaCallContext ctx, final T entity) {
         ModelSpec modelSpec = entity.getModelKey().modelKey();
 
-        EntityTransactionResponse response = Futures.joinUnwrapped(repository.save(ctx, modelSpec, objectMapper.valueToTree(entity)));
+        EntityTransactionResponse response = Futures.joinUnwrapped(repository.save(ctx, modelSpec, entityMapper.valueToTree(entity)));
 
         // Extract entity ID and transaction ID from response
         UUID entityId = response.getTransactionInfo().getEntityIds().getFirst();
@@ -510,12 +513,12 @@ public class EntityServiceImpl implements EntityService {
 
     private <T extends CyodaEntity> @NotNull String getBusinessIdValue(T entity, String businessIdField) {
         // Use Jackson to convert entity to JsonNode and extract the field
-        var entityNode = objectMapper.valueToTree(entity);
+        var entityNode = entityMapper.valueToTree(entity);
         var fieldValue = entityNode.get(businessIdField);
         if (fieldValue == null) {
             String entityString;
             try {
-                entityString = objectMapper.writeValueAsString(entityNode);
+                entityString = entityMapper.writeValueAsString(entityNode);
             } catch (JsonProcessingException e) {
                 entityString = "cannot convert entity to JSON: " + e.getMessage();
             }
@@ -644,7 +647,7 @@ public class EntityServiceImpl implements EntityService {
     ) {
         ModelSpec modelSpec = entity.getModelKey().modelKey();
 
-        EntityTransactionResponse response = Futures.joinUnwrapped(repository.update(ctx, entityId, objectMapper.valueToTree(entity), transition));
+        EntityTransactionResponse response = Futures.joinUnwrapped(repository.update(ctx, entityId, entityMapper.valueToTree(entity), transition));
 
         @SuppressWarnings("unchecked")
         Class<T> entityClass = (Class<T>) entity.getClass();
@@ -723,7 +726,7 @@ public class EntityServiceImpl implements EntityService {
 
         List<EntityTransactionResponse> responses = Futures.joinUnwrapped(repository.updateAll(
                 ctx,
-                objectMapper.convertValue(entities, new TypeReference<>() {}),
+                entityMapper.convertValue(entities, new TypeReference<>() {}),
                 transition,
                 transactionWindow,
                 transactionTimeoutMs

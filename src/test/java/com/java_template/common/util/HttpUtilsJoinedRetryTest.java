@@ -62,10 +62,10 @@ class HttpUtilsJoinedRetryTest {
             tokenFetchThreads.add(Thread.currentThread());
             return Optional.of("m2m");
         });
-        CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
+        CyodaObjectMapper mappers = CyodaObjectMapper.standalone();
         Config config = new Config();
         config.setCyodaApiUrl(base);
-        http = new HttpUtils(new JsonUtils(wireMapper), wireMapper, config, tokens);
+        http = new HttpUtils(new JsonUtils(mappers), mappers, config, tokens);
     }
 
     @AfterEach

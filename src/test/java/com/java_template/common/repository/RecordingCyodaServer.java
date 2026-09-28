@@ -42,7 +42,7 @@ final class RecordingCyodaServer extends CloudEventsServiceGrpc.CloudEventsServi
 
     final List<Seen> seen = new CopyOnWriteArrayList<>();
     final CloudEventBuilder builder;
-    private final CyodaObjectMapper wireMapper;
+    private final CyodaObjectMapper mappers;
     volatile Function<CloudEvent, BaseEvent> unary = ce -> { throw new IllegalStateException("no unary answer for " + ce.getType()); };
     volatile Function<CloudEvent, List<BaseEvent>> collection = ce -> List.of();
 
@@ -50,9 +50,9 @@ final class RecordingCyodaServer extends CloudEventsServiceGrpc.CloudEventsServi
     private final Server server;
     final ManagedChannel channel;
 
-    RecordingCyodaServer(CyodaObjectMapper wireMapper) throws Exception {
-        this.wireMapper = wireMapper;
-        builder = new CloudEventBuilder(wireMapper, EventFormatProvider.getInstance().resolveFormat(ProtobufFormat.PROTO_CONTENT_TYPE), new Config());
+    RecordingCyodaServer(CyodaObjectMapper mappers) throws Exception {
+        this.mappers = mappers;
+        builder = new CloudEventBuilder(mappers, EventFormatProvider.getInstance().resolveFormat(ProtobufFormat.PROTO_CONTENT_TYPE), new Config());
         ServerInterceptor capture = new ServerInterceptor() {
             @Override
             public <Q, R> ServerCall.Listener<Q> interceptCall(ServerCall<Q, R> call, Metadata headers, ServerCallHandler<Q, R> next) {
@@ -118,7 +118,7 @@ final class RecordingCyodaServer extends CloudEventsServiceGrpc.CloudEventsServi
                 .setSource("urn:test:recording-cyoda-server")
                 .setSpecVersion("1.0")
                 .setType(event.getClass().getSimpleName())
-                .setTextData(wireMapper.mapper().writeValueAsString(event))
+                .setTextData(mappers.protocol().writeValueAsString(event))
                 .build();
     }
 

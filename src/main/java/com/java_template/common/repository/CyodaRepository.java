@@ -73,7 +73,8 @@ public class CyodaRepository implements CrudRepository {
     /** How long {@link #shutdownExecutor()} lets in-flight calls finish before interrupting them. */
     private static final long EXECUTOR_SHUTDOWN_GRACE_SECONDS = 5;
 
-    private final ObjectMapper objectMapper;
+    /** The app's mapper, for the entities handed to save/update; their envelopes go through CloudEventBuilder. */
+    private final ObjectMapper entityMapper;
     private final Config config;
     private final CloudEventsServiceGrpc.CloudEventsServiceBlockingStub cloudEventsServiceBlockingStub;
     private final CloudEventBuilder cloudEventBuilder;
@@ -98,14 +99,14 @@ public class CyodaRepository implements CrudRepository {
     private final Cache<SearchCacheKey, CompletableFuture<SearchSnapshotStatus>> snapshotCache;
 
     public CyodaRepository(
-            final CyodaObjectMapper wireMapper,
+            final CyodaObjectMapper mappers,
             final CloudEventsServiceGrpc.CloudEventsServiceBlockingStub cloudEventsServiceBlockingStub,
             final CloudEventBuilder cloudEventBuilder,
             final CloudEventParser cloudEventParser,
             final Config config,
             final CyodaTokenSource tokenSource
     ) {
-        this.objectMapper = wireMapper.mapper();
+        this.entityMapper = mappers.entities();
         this.cloudEventsServiceBlockingStub = cloudEventsServiceBlockingStub;
         this.cloudEventBuilder = cloudEventBuilder;
         this.cloudEventParser = cloudEventParser;
@@ -515,7 +516,7 @@ public class CyodaRepository implements CrudRepository {
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
                         .withPayload(
                                 new EntityUpdatePayload().withEntityId(id)
-                                        .withData(objectMapper.valueToTree(entity))
+                                        .withData(entityMapper.valueToTree(entity))
                                         .withTransition(transition)
                         ),
                 EntityTransactionResponse.class
@@ -541,7 +542,7 @@ public class CyodaRepository implements CrudRepository {
     ) {
         rejectTransactionControlWhenJoined(ctx, transactionWindow, transactionTimeoutMs);
         final var entitiesByIds = entities.stream()
-                .map(objectMapper::valueToTree)
+                .map(entityMapper::valueToTree)
                 .map(entity -> (JsonNode) entity)
                 .collect(Collectors.toMap(
                                 entity -> UUID.fromString(entity.get("id").asText()),
@@ -686,7 +687,7 @@ public class CyodaRepository implements CrudRepository {
                 (stub, req) -> stub.entityManage(req),
                 new EntityCreateRequest().withId(generateEventId())
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
-                        .withPayload(new EntityCreatePayload().withData(objectMapper.valueToTree(entities))
+                        .withPayload(new EntityCreatePayload().withData(entityMapper.valueToTree(entities))
                                 .withModel(modelSpec)
                         ),
                 EntityTransactionResponse.class
@@ -707,7 +708,7 @@ public class CyodaRepository implements CrudRepository {
 
         List<EntityCreatePayload> payloads = entityCollection.stream()
                 .map(entity -> new EntityCreatePayload()
-                        .withData(objectMapper.valueToTree(entity))
+                        .withData(entityMapper.valueToTree(entity))
                         .withModel(modelSpec))
                 .toList();
 

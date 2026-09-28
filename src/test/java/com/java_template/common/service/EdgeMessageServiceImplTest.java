@@ -32,7 +32,7 @@ import static org.mockito.Mockito.when;
 class EdgeMessageServiceImplTest {
 
     private final HttpUtils http = mock(HttpUtils.class);
-    private final ObjectMapper om = CyodaObjectMapper.standalone().mapper();
+    private final ObjectMapper om = CyodaObjectMapper.standalone().protocol();
     private EdgeMessageServiceImpl service;
     private final UUID id = UUID.randomUUID();
 

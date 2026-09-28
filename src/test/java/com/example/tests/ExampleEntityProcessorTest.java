@@ -53,8 +53,8 @@ class ExampleEntityProcessorTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        // The framework's wire mapper: Jackson defaults plus the cyoda-go contract settings.
-        objectMapper = CyodaObjectMapper.standalone().mapper();
+        // The entity mapper Spring Boot builds by default; Cyoda metadata uses the protocol mapper.
+        objectMapper = CyodaObjectMapper.standalone().entities();
         serializer = new JacksonProcessorSerializer(objectMapper);
 
         when(serializerFactory.getDefaultProcessorSerializer()).thenReturn(serializer);

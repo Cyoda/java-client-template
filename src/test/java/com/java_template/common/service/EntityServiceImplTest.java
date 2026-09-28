@@ -65,7 +65,7 @@ class EntityServiceImplTest {
     @Mock
     private CrudRepository repository;
 
-    private ObjectMapper objectMapper;
+    private CyodaObjectMapper mappers;
     private EntityServiceImpl entityService;
     private UUID testEntityId;
     private UUID testEntityId2;
@@ -74,9 +74,8 @@ class EntityServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
-        objectMapper = wireMapper.mapper();
-        entityService = new EntityServiceImpl(repository, wireMapper, new CyodaCallContexts(new Config()));
+        mappers = CyodaObjectMapper.standalone();
+        entityService = new EntityServiceImpl(repository, mappers, new CyodaCallContexts(new Config()));
         testEntityId = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
         testEntityId2 = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
         testEntity = new TestEntity(123L, "Test Entity", "ACTIVE");
@@ -89,14 +88,14 @@ class EntityServiceImplTest {
 
     private DataPayload createTestDataPayload(TestEntity entity, UUID entityId, String state) {
         DataPayload payload = new DataPayload();
-        payload.setData(objectMapper.valueToTree(entity));
+        payload.setData(mappers.entities().valueToTree(entity));
 
         // Create EntityMetadata using the actual Cyoda class
         EntityMetadata metadata = new EntityMetadata();
         metadata.setId(entityId);
         metadata.setState(state);
         metadata.setCreationDate(OffsetDateTime.now());
-        payload.setMeta(objectMapper.valueToTree(metadata));
+        payload.setMeta(mappers.protocol().valueToTree(metadata));
 
         return payload;
     }

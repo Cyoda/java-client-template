@@ -42,12 +42,12 @@ public class EdgeMessageServiceImpl implements EdgeMessageService {
     public EdgeMessageServiceImpl(
             HttpUtils httpUtils,
             CyodaCallContexts callContexts,
-            CyodaObjectMapper wireMapper,
+            CyodaObjectMapper mappers,
             Config configProperties
     ) {
         this.httpUtils = httpUtils;
         this.callContexts = callContexts;
-        this.objectMapper = wireMapper.mapper();
+        this.objectMapper = mappers.protocol();
         this.cyodaApiUrl = configProperties.getCyodaApiUrl();
     }
 

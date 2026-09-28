@@ -91,8 +91,8 @@ class HttpTimeoutsTest {
     void aRestRequestIsBoundedByTheCallDeadline() {
         CyodaTokenSource tokens = mock(CyodaTokenSource.class);
         when(tokens.bearerToken()).thenReturn(Optional.of("m2m"));
-        CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
-        HttpUtils http = new HttpUtils(new JsonUtils(wireMapper), wireMapper, config(), tokens);
+        CyodaObjectMapper mappers = CyodaObjectMapper.standalone();
+        HttpUtils http = new HttpUtils(new JsonUtils(mappers), mappers, config(), tokens);
 
         long started = System.nanoTime();
         assertThatThrownBy(() -> http.sendGetRequest(CyodaCallContext.m2m(), api, "entity/x").join())

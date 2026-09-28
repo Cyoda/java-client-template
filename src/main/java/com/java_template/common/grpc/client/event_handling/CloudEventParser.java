@@ -17,8 +17,8 @@ public class CloudEventParser {
 
     private final ObjectMapper objectMapper;
 
-    public CloudEventParser(final CyodaObjectMapper wireMapper) {
-        this.objectMapper = wireMapper.mapper();
+    public CloudEventParser(final CyodaObjectMapper mappers) {
+        this.objectMapper = mappers.protocol();
     }
 
     public <EVENT_TYPE extends BaseEvent> EVENT_TYPE parseCloudEvent(

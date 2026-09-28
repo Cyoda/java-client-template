@@ -3,6 +3,7 @@ package com.java_template.common.dto;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.workflow.CyodaEntity;
 import org.cyoda.cloud.api.event.common.DataPayload;
 import org.cyoda.cloud.api.event.common.EntityMetadata;
@@ -128,21 +129,23 @@ public record EntityWithMetadata<T extends CyodaEntity>(@JsonProperty("entity") 
 
     /**
      * Factory method for creating EntityWithMetadata from a DataPayload.
-     * Used internally by serializers to convert request payloads to typed entities.
+     * Used internally by serializers to convert request payloads to typed entities. The entity data is read with
+     * the app's mapper ({@link CyodaObjectMapper#entities()}), the Cyoda metadata with the protocol mapper
+     * ({@link CyodaObjectMapper#protocol()}).
      * @param <T> the entity type
      * @param payload the DataPayload containing entity data and metadata
      * @param entityClass the entity class for deserialization
-     * @param objectMapper the ObjectMapper for JSON conversion
+     * @param mappers the framework's mappers
      * @return a new EntityWithMetadata instance
      */
     public static <T extends CyodaEntity> EntityWithMetadata<T> fromDataPayload(
             DataPayload payload,
             Class<T> entityClass,
-            ObjectMapper objectMapper) {
+            CyodaObjectMapper mappers) {
 
-        T entity = objectMapper.convertValue(payload.getData(), entityClass);
+        T entity = mappers.entities().convertValue(payload.getData(), entityClass);
         EntityMetadata metadata = payload.getMeta() != null
-                ? objectMapper.convertValue(payload.getMeta(), EntityMetadata.class)
+                ? mappers.protocol().convertValue(payload.getMeta(), EntityMetadata.class)
                 : new EntityMetadata();
 
         return new EntityWithMetadata<>(entity, metadata);

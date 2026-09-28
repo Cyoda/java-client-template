@@ -63,8 +63,8 @@ import static org.mockito.Mockito.when;
  */
 class CyodaRepositoryContextTest {
 
-    private final CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
-    private final ObjectMapper om = wireMapper.mapper();
+    private final CyodaObjectMapper mappers = CyodaObjectMapper.standalone();
+    private final ObjectMapper om = mappers.protocol();
     private RecordingCyodaServer server;
     private CyodaTokenSource tokens;
     private CyodaRepository repo;
@@ -73,12 +73,12 @@ class CyodaRepositoryContextTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        server = new RecordingCyodaServer(wireMapper);
+        server = new RecordingCyodaServer(mappers);
         tokens = mock(CyodaTokenSource.class);
         when(tokens.bearerToken()).thenReturn(Optional.of("m2m-token"));
         var stub = CloudEventsServiceGrpc.newBlockingStub(server.channel).withInterceptors(new CyodaCallInterceptor(tokens));
         Config config = new Config();
-        repo = new CyodaRepository(wireMapper, stub, server.builder, new CloudEventParser(wireMapper), config, tokens);
+        repo = new CyodaRepository(mappers, stub, server.builder, new CloudEventParser(mappers), config, tokens);
     }
 
     @AfterEach
@@ -289,7 +289,7 @@ class CyodaRepositoryContextTest {
     }
 
     private EntityServiceImpl service() {
-        return new EntityServiceImpl(repo, wireMapper, new CyodaCallContexts(new Config()));
+        return new EntityServiceImpl(repo, mappers, new CyodaCallContexts(new Config()));
     }
 
     @Test

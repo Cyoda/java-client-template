@@ -34,7 +34,7 @@ import static org.mockito.Mockito.when;
  */
 class CyodaRepositoryCallerCredentialTest {
 
-    private final CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
+    private final CyodaObjectMapper mappers = CyodaObjectMapper.standalone();
     private final ModelSpec model = new ModelSpec().withName("thing").withVersion(1);
     private final GroupConditionDto all = new GroupConditionDto().operator(GroupConditionDto.OperatorEnum.AND).conditions(List.of());
     private RecordingCyodaServer server;
@@ -42,13 +42,13 @@ class CyodaRepositoryCallerCredentialTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        server = new RecordingCyodaServer(wireMapper);
+        server = new RecordingCyodaServer(mappers);
         CyodaTokenSource tokens = mock(CyodaTokenSource.class);
         when(tokens.bearerToken()).thenReturn(Optional.of("m2m"));
         var stub = CloudEventsServiceGrpc.newBlockingStub(server.channel).withInterceptors(new CyodaCallInterceptor(tokens));
         Config config = new Config();
         config.setGrpcCallDeadlineMs(10_000);
-        repository = new CyodaRepository(wireMapper, stub, server.builder, new CloudEventParser(wireMapper), config, tokens);
+        repository = new CyodaRepository(mappers, stub, server.builder, new CloudEventParser(mappers), config, tokens);
     }
 
     @AfterEach
@@ -65,7 +65,7 @@ class CyodaRepositoryCallerCredentialTest {
 
     private EntityResponse entity() {
         return new EntityResponse().withId(UUID.randomUUID().toString()).withSuccess(true)
-                .withPayload(new DataPayload().withType("ENTITY").withData(wireMapper.mapper().createObjectNode()));
+                .withPayload(new DataPayload().withType("ENTITY").withData(mappers.protocol().createObjectNode()));
     }
 
     /**

@@ -57,9 +57,9 @@ class WorkflowServiceImplTest {
         config.setCyodaApiUrl("http://127.0.0.1:" + server.getAddress().getPort() + "/api");
         CyodaTokenSource tokens = mock(CyodaTokenSource.class);
         when(tokens.bearerToken()).thenReturn(Optional.of("m2m"));
-        CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
-        HttpUtils http = new HttpUtils(new JsonUtils(wireMapper), wireMapper, config, tokens);
-        workflowService = new WorkflowServiceImpl(http, new CyodaCallContexts(config), wireMapper, config);
+        CyodaObjectMapper mappers = CyodaObjectMapper.standalone();
+        HttpUtils http = new HttpUtils(new JsonUtils(mappers), mappers, config, tokens);
+        workflowService = new WorkflowServiceImpl(http, new CyodaCallContexts(config), mappers, config);
     }
 
     @Test

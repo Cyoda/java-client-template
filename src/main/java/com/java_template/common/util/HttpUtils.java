@@ -58,9 +58,9 @@ public class HttpUtils {
     /** Bound on each request, response included: app.config.grpc-call-deadline-ms, as for a unary gRPC call. */
     private final Duration requestTimeout;
 
-    public HttpUtils(JsonUtils jsonUtils, CyodaObjectMapper wireMapper, Config config, CyodaTokenSource tokenSource) {
+    public HttpUtils(JsonUtils jsonUtils, CyodaObjectMapper mappers, Config config, CyodaTokenSource tokenSource) {
         this.jsonUtils = jsonUtils;
-        this.om = wireMapper.mapper();
+        this.om = mappers.protocol();
         this.tokenSource = tokenSource;
         this.defaultParser = ContentTypeAwareParser.createDefault(om);
         this.client = SslUtils.createHttpClient(config);

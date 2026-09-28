@@ -61,10 +61,10 @@ public class CyodaInit {
     private final ObjectMapper objectMapper;
     private final Config config;
 
-    public CyodaInit(HttpUtils httpUtils, CyodaCallContexts callContexts, CyodaObjectMapper wireMapper, Config config) {
+    public CyodaInit(HttpUtils httpUtils, CyodaCallContexts callContexts, CyodaObjectMapper mappers, Config config) {
         this.httpUtils = httpUtils;
         this.callContexts = callContexts;
-        this.objectMapper = wireMapper.mapper();
+        this.objectMapper = mappers.protocol();
         this.config = config;
     }
 
