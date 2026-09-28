@@ -19,9 +19,6 @@ WORKDIR /app
 # Copy the generated JAR file from the builder stage
 COPY --from=builder /app/build/libs/app.jar /app/app.jar
 
-# Copy the .env file
-COPY .env /app/.env
-
 # Expose the port on which the app will run (default Spring Boot port)
 EXPOSE 8080
 
