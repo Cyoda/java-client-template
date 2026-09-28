@@ -1,6 +1,8 @@
 package com.java_template.common.tool;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -16,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * value is read with `shift 2` used to let `shift` fail with no message at all (T1, T11). None of
  * these cases reach the network.
  */
+@DisabledOnOs(OS.WINDOWS)
 class ScriptArgumentsTest {
 
     private static final Path ROOT = Paths.get(System.getProperty("user.dir"));

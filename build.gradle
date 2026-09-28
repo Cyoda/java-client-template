@@ -248,7 +248,7 @@ tasks.register('buildLogicTest', Exec) {
     group = 'verification'
     workingDir = rootDir
     commandLine com.cyoda.build.GradleWrapperCommand.of(
-            org.gradle.internal.os.OperatingSystem.current().isWindows(), '-p', 'buildSrc', 'test')
+            System.getProperty('os.name').startsWith('Windows'), '-p', 'buildSrc', 'test')
 }
 
 tasks.named('check') { dependsOn 'buildLogicTest' }
