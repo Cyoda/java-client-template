@@ -103,8 +103,10 @@ Installing needs:
 - for a released pin (downloaded): network access to the GitHub release.
 
 To use a cyoda binary you installed yourself, pass `-Dcyoda.bin=<path>` or set `CYODA_BIN=<path>`; the build
-then installs nothing. Windows cannot run the install script: use `-Dcyoda.bin` / `CYODA_BIN` there, or
-`-x integrationTest`.
+then installs nothing. A `cyoda` on `PATH` that already matches the pin is kept too, as long as `.cyoda/bin`
+is empty (the tests then use it). To keep a binary that deliberately does not match the pin — at `.cyoda/bin`
+or on `PATH` — instead of it being overwritten, pass `-Dcyoda.allowVersionMismatch=true`. Windows cannot run
+the install script: use `-Dcyoda.bin` / `CYODA_BIN` there, or `-x integrationTest`.
 
 ---
 

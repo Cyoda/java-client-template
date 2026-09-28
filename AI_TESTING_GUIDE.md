@@ -237,10 +237,12 @@ Show me the exact entity names and file paths I need for testing."
 **Integration tests and the cyoda binary.** `./gradlew check` and `./gradlew build` also run the integration
 tests (`src/integrationTest`) against the cyoda-go pinned in `src/main/resources/cyoda/CYODA_VERSION`. The build
 installs that binary automatically (the `installCyoda` task runs `scripts/install-cyoda.sh` into `.cyoda/bin`,
-which survives `./gradlew clean` and is reused while it matches the pin). A `-dev` pin is built from source and
-needs Go 1.26.7 or later, `git` and network access; a released pin is downloaded and needs network access. With
-no way to install it, pass `-Dcyoda.bin=<path>` / set `CYODA_BIN` to a binary you have, or build with
-`./gradlew build -x integrationTest`.
+which survives `./gradlew clean` and is reused while it matches the pin; a `cyoda` on `PATH` that already
+matches the pin is kept too, as long as `.cyoda/bin` is empty). A `-dev` pin is built from source and needs Go
+1.26.7 or later, `git` and network access; a released pin is downloaded and needs network access. With no way
+to install it, pass `-Dcyoda.bin=<path>` / set `CYODA_BIN` to a binary you have, or build with
+`./gradlew build -x integrationTest`. To keep a binary that deliberately does not match the pin — at
+`.cyoda/bin` or on `PATH` — instead of it being overwritten, pass `-Dcyoda.allowVersionMismatch=true`.
 
 #### 5. **Code Quality Verification**
 ```

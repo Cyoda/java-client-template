@@ -41,6 +41,14 @@ public abstract class InstallCyodaTask extends DefaultTask {
     @Internal
     public abstract Property<String> getExplicitBinaryEnv();
 
+    /** The build's {@code -Dcyoda.allowVersionMismatch}, when set. */
+    @Internal
+    public abstract Property<String> getAllowVersionMismatchProperty();
+
+    /** {@code $PATH}, searched for a matching {@code cyoda} when {@code .cyoda/bin/cyoda} is absent. */
+    @Internal
+    public abstract Property<String> getPathEnv();
+
     @Inject
     protected abstract ExecOperations getExec();
 
@@ -50,10 +58,12 @@ public abstract class InstallCyodaTask extends DefaultTask {
         Path installed = root.resolve(".cyoda/bin/cyoda");
         String pin = Files.readString(getPinFile().get().getAsFile().toPath());
         boolean windows = System.getProperty("os.name", "").startsWith("Windows");
+        boolean allowVersionMismatch = Boolean.parseBoolean(getAllowVersionMismatchProperty().getOrElse("false"));
 
         CyodaInstallDecision.Result decision = CyodaInstallDecision.decide(
                 getExplicitBinaryProperty().getOrNull(), getExplicitBinaryEnv().getOrNull(),
-                installed, pin, windows, InstallCyodaTask::versionOf);
+                installed, pin, windows, allowVersionMismatch, getPathEnv().getOrNull(),
+                InstallCyodaTask::versionOf);
         switch (decision.action()) {
             case USE_EXPLICIT, UP_TO_DATE -> {
                 getLogger().info("installCyoda: nothing to install: {}", decision.reason());

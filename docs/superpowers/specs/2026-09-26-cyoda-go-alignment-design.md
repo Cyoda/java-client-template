@@ -743,8 +743,9 @@ source set has `sourceSets.test.output` on its classpath. `@CyodaIntegrationTest
   `install-cyoda.sh` without Go says Go is needed and names `CYODA_BIN`.
 - **Binary lookup and install:** `CyodaBinary`'s lookup order, including `.cyoda/bin`
   auto-detection in a temp project; `CyodaInstallDecision` (`buildSrc`): an explicit binary
-  skips, a matching binary is kept, a missing or mismatching one is installed, and Windows
-  refuses with the way around it.
+  skips, a matching binary is kept whether at `.cyoda/bin` or, failing that, on `PATH`, a
+  missing or mismatching one is installed unless `-Dcyoda.allowVersionMismatch=true` keeps
+  it, and Windows refuses with the way around it.
 
 ## 7. Build and CI
 
@@ -813,6 +814,13 @@ cyoda into `.cyoda/bin` itself. `CyodaInstallDecision` decides, at execution tim
 - `.cyoda/bin/cyoda` present and its `--version` matches the pin, by the harness's rule
   (§3.4): nothing is installed, and the task reports `UP-TO-DATE`. The binary is only ever
   run with `--version`.
+- `.cyoda/bin/cyoda` absent, but a `cyoda` on `PATH` matches the pin: nothing is installed
+  either, because `CyodaBinary.locate()` would use that PATH binary anyway (`.cyoda/bin` is
+  checked first, but only when something is there).
+- `-Dcyoda.allowVersionMismatch=true`: a binary already at `.cyoda/bin` or, failing that, on
+  `PATH` is kept even when it does not match the pin, so a binary placed there deliberately
+  is never overwritten. With no binary anywhere, this has no effect and the pin is still
+  installed.
 - Otherwise it is installed, or reinstalled over a binary that does not match.
 - On Windows, which cannot run the script, an install that is needed fails with a message
   naming `scripts/install-cyoda.sh`, `-Dcyoda.bin` and `CYODA_BIN`.

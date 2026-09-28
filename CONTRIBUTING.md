@@ -133,7 +133,10 @@ Before submitting changes, ensure:
 - Installing a `-dev` pin builds it from source and needs Go 1.26.7 or later, `git` and network access; a released
   pin is downloaded and needs network access. If the install fails, its message says which
 - To use your own binary, pass `-Dcyoda.bin=<path>` or set `CYODA_BIN`; nothing is installed then (also the
-  way to run them on Windows). To build without them: `./gradlew build -x integrationTest`
+  way to run them on Windows). A `cyoda` on `PATH` that already matches the pin is kept too, as long as
+  `.cyoda/bin` is empty. To keep a binary that deliberately does not match the pin — at `.cyoda/bin` or on
+  `PATH` — instead of it being overwritten, pass `-Dcyoda.allowVersionMismatch=true`. To build without them:
+  `./gradlew build -x integrationTest`
 
 **File Not Found:**
 - Ensure `.java.txt` files are in correct directories

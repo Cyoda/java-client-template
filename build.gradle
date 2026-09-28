@@ -173,6 +173,8 @@ tasks.register('installCyoda', com.cyoda.build.InstallCyodaTask) {
     pinFile = cyodaPin
     explicitBinaryProperty = providers.systemProperty('cyoda.bin')
     explicitBinaryEnv = providers.environmentVariable('CYODA_BIN')
+    allowVersionMismatchProperty = providers.systemProperty('cyoda.allowVersionMismatch')
+    pathEnv = providers.environmentVariable('PATH')
 }
 
 tasks.register('integrationTest', Test) {
