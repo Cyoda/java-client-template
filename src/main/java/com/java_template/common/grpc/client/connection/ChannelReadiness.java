@@ -37,6 +37,10 @@ public class ChannelReadiness {
         if (state == ConnectivityState.READY) {
             return;
         }
+        if (state == ConnectivityState.TRANSIENT_FAILURE) {
+            // Cyoda may already be back; retry now instead of sitting out gRPC's own reconnect backoff.
+            channel.resetConnectBackoff();
+        }
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(boundMs);
         while (state != ConnectivityState.READY) {
             if (state == ConnectivityState.SHUTDOWN) {

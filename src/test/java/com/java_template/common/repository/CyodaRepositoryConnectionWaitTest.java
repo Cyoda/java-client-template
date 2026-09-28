@@ -24,6 +24,7 @@ import org.cyoda.cloud.api.event.common.ModelSpec;
 import org.cyoda.cloud.api.event.search.EntityResponse;
 import org.cyoda.cloud.api.grpc.CloudEventsServiceGrpc;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -41,7 +42,8 @@ import static org.mockito.Mockito.when;
 /**
  * ABOUTME: An unjoined multi-reply (server-streaming) call waits at most grpc-call-deadline-ms for the connection
  * to Cyoda, then fails as unreachable; once started it runs with no total deadline (spec §4.5). The stubs keep
- * withWaitForReady, as in production.
+ * withWaitForReady, as in production. A wait that begins with the channel in TRANSIENT_FAILURE resets gRPC's
+ * reconnect backoff, so a call made right after Cyoda recovers does not sit out that backoff.
  */
 class CyodaRepositoryConnectionWaitTest {
 
@@ -54,6 +56,57 @@ class CyodaRepositoryConnectionWaitTest {
     private ManagedChannel channel;
     private Server server;
     private CyodaRepository repo;
+
+    /**
+     * Runs one successful and one failing search against a throwaway channel/server pair before any timed test,
+     * paying the JIT/class-loading cost of the gRPC-channel and search code paths once so the bound assertions
+     * below (some as tight as BOUND_MS itself) never absorb it.
+     */
+    @BeforeAll
+    static void warmUp() throws Exception {
+        CyodaObjectMapper mappers = CyodaObjectMapper.standalone();
+        String warmName = "cyoda-warmup-" + UUID.randomUUID();
+        ManagedChannel warmChannel = InProcessChannelBuilder.forName(warmName).build();
+        Server warmServer = InProcessServerBuilder.forName(warmName)
+                .addService(new CloudEventsServiceGrpc.CloudEventsServiceImplBase() {
+                    @Override
+                    public void entitySearchCollection(CloudEvent request, StreamObserver<CloudEvent> out) {
+                        try {
+                            EntityResponse entity = new EntityResponse().withId(UUID.randomUUID().toString())
+                                    .withSuccess(true).withPayload(new DataPayload().withType("ENTITY")
+                                            .withData(mappers.protocol().createObjectNode().put("i", 0)));
+                            out.onNext(CloudEvent.newBuilder().setId(UUID.randomUUID().toString()).setSource("urn:test")
+                                    .setSpecVersion("1.0").setType("EntityResponse")
+                                    .setTextData(mappers.protocol().writeValueAsString(entity)).build());
+                            out.onCompleted();
+                        } catch (Exception e) {
+                            out.onError(e);
+                        }
+                    }
+                }).build().start();
+        CyodaTokenSource tokens = mock(CyodaTokenSource.class);
+        when(tokens.bearerToken()).thenReturn(Optional.of("m2m-token"));
+        var stub = CloudEventsServiceGrpc.newBlockingStub(warmChannel).withWaitForReady()
+                .withInterceptors(new CyodaCallInterceptor(tokens));
+        Config config = new Config();
+        config.setGrpcCallDeadlineMs(BOUND_MS);
+        CloudEventBuilder builder = new CloudEventBuilder(mappers,
+                EventFormatProvider.getInstance().resolveFormat(ProtobufFormat.PROTO_CONTENT_TYPE), config);
+        CyodaRepository warmRepo = new CyodaRepository(mappers, stub, builder, new CloudEventParser(mappers), config,
+                tokens, new ChannelReadiness(warmChannel));
+        ModelSpec warmSpec = new ModelSpec().withName("m").withVersion(1);
+        GroupConditionDto warmAll = new GroupConditionDto().operator(GroupConditionDto.OperatorEnum.AND).conditions(List.of());
+        try {
+            warmRepo.findAllByCriteria(CyodaCallContext.m2m(), warmSpec, warmAll,
+                    SearchAndRetrievalParams.builder().inMemory(true).build()).join();
+            warmServer.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
+            catchThrowable(() -> warmRepo.findAllByCriteria(CyodaCallContext.m2m(), warmSpec, warmAll,
+                    SearchAndRetrievalParams.builder().inMemory(true).build()).join());
+        } finally {
+            warmRepo.shutdownExecutor();
+            warmChannel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
 
     /** Answers entitySearchCollection with {@code count} entities, {@code gapMs} apart. */
     private final class SlowCyoda extends CloudEventsServiceGrpc.CloudEventsServiceImplBase {
@@ -152,6 +205,25 @@ class CyodaRepositoryConnectionWaitTest {
         cyoda.count = 3;
 
         assertThat(search().data()).hasSize(3);
+    }
+
+    @Test
+    void afterATransientFailureTheNextWaitResetsTheBackoffAndRetriesImmediately() throws Exception {
+        // First, fail fast against no server, putting the channel into TRANSIENT_FAILURE with gRPC's
+        // exponential backoff (>= 800ms by default) scheduled before its next connection attempt.
+        Throwable thrown = catchThrowable(this::search);
+        assertThat(thrown).isInstanceOf(CompletionException.class);
+
+        // Then start the server immediately, well within that backoff, and retry with the same bound. Without
+        // resetting the backoff as the wait begins, awaitReady would sit out gRPC's backoff and this call would
+        // still fail within BOUND_MS even though the server is already back.
+        startServer();
+        long start = System.nanoTime();
+        PageResult<DataPayload> result = search();
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+
+        assertThat(result.data()).hasSize(1);
+        assertThat(elapsedMs).isLessThan(BOUND_MS);
     }
 
     @Test

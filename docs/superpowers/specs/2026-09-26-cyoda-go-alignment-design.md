@@ -628,6 +628,9 @@ nested or concurrent cascades beyond the pool size deadlock until their callouts
   - The stubs keep `withWaitForReady()`, so a brief reconnect between the check and the
     start still works; the readiness wait is the bound.
   - The wait blocks on a latch, on the repository's virtual-thread executor.
+  - If the channel is already `TRANSIENT_FAILURE` as the wait begins, it calls
+    `ManagedChannel.resetConnectBackoff()`, so a call made right after Cyoda recovers retries
+    immediately instead of sitting out gRPC's own reconnect backoff.
 - Each REST request to Cyoda has a timeout of `grpc-call-deadline-ms`, and the REST and
   token HTTP clients have a 10 s connect timeout.
 
@@ -1039,7 +1042,9 @@ scans `com.example.application`.
 - **REST origin rule** and request timeouts.
 - **Deadlines:** unary, and streaming joined and unjoined; on an in-process channel, an
   unjoined streaming call fails after about the bound with no server or after the server
-  goes away, succeeds with it up, and a slow stream longer than the bound completes.
+  goes away, succeeds with it up, and a slow stream longer than the bound completes. A call
+  made right after a `TRANSIENT_FAILURE` (the server was down, now back) succeeds within the
+  bound instead of sitting out gRPC's reconnect backoff.
 - **Reads inside a callout:** the direct-search limits and scoped streams.
 - **Auth context:**
   - `authclaims` parsing: comma form, empty, JSON, garbage;
