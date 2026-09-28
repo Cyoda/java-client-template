@@ -13,7 +13,7 @@ The `java-client-template` project provides the shared framework layer (`com.jav
 | `src/main/resources/META-INF/` | Spring Boot auto-configuration registrations |
 | `src/main/resources/cyoda/` | The cyoda-go contract: `CYODA_VERSION` (the pin), `CYODA_SHA256SUMS` (for a released pin), `proto/`, `schema/`, `openapi/openapi.yaml`. Vendored unmodified by `scripts/sync-cyoda-contract.sh`; never edit by hand |
 | `src/main/resources/application-cyoda-local.yml` | The `cyoda-local` profile for a local cyoda-go (no credentials) |
-| `buildSrc/` | Build logic: contract transforms for code generation, and the `installCyoda` task |
+| `buildSrc/` | Build logic: contract transforms for code generation, and the `installCyoda` task; `buildSrc/gradle/verification-metadata.xml` holds the checksums of its nested test build |
 | `scripts/` | `sync-cyoda-contract.sh` (refresh the contract) and `install-cyoda.sh` (install the pinned cyoda) |
 | `src/testFixtures/` | The cyoda test harness: `@CyodaIntegrationTest`, `CyodaServer`, `CyodaBinary`, `CyodaRest`, `CyodaModelSetup`, … |
 | `src/test/java/com/java_template/common/` | Unit tests for the framework layer |
@@ -130,6 +130,8 @@ replace src/main/resources/META-INF/
 rm -rf $TEMPLATE/buildSrc/src/
 cp -R $SOURCE/buildSrc/src/ $TEMPLATE/buildSrc/src/
 cp $SOURCE/buildSrc/build.gradle $TEMPLATE/buildSrc/build.gradle
+mkdir -p $TEMPLATE/buildSrc/gradle
+cp $SOURCE/buildSrc/gradle/verification-metadata.xml $TEMPLATE/buildSrc/gradle/verification-metadata.xml
 replace scripts/
 
 # Harness, framework tests, the reference implementation and the tier-1 suite
