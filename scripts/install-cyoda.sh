@@ -24,8 +24,8 @@ while [ $# -gt 0 ]; do
       MODE=github
       if [ $# -gt 1 ] && [[ "$2" != --* ]]; then REF="$2"; shift; fi
       shift ;;
-    --src-dir) MODE=local; SRC_DIR="${2:-}"; shift 2 ;;
-    --dest) DEST="${2:-}"; shift 2 ;;
+    --src-dir) [ $# -ge 2 ] || fail "--src-dir needs a value"; MODE=local; SRC_DIR="$2"; shift 2 ;;
+    --dest) [ $# -ge 2 ] || fail "--dest needs a value"; DEST="$2"; shift 2 ;;
     *) fail "unknown argument $1" ;;
   esac
 done
@@ -55,7 +55,14 @@ case "$MODE" in
     base="https://github.com/Cyoda/cyoda-go/releases/download/v${VERSION}"
     curl -fsSL "$base/$asset" -o "$WORK/$asset" || fail "cannot download $base/$asset"
     curl -fsSL "$base/SHA256SUMS" -o "$WORK/SHA256SUMS" || fail "cannot download $base/SHA256SUMS"
-    ( cd "$WORK" && grep " $asset\$" SHA256SUMS | shasum -a 256 -c - >/dev/null ) || fail "checksum mismatch for $asset"
+    if command -v sha256sum >/dev/null; then
+      checksum_tool=(sha256sum -c -)
+    elif command -v shasum >/dev/null; then
+      checksum_tool=(shasum -a 256 -c -)
+    else
+      fail "need sha256sum or shasum"
+    fi
+    ( cd "$WORK" && grep " $asset\$" SHA256SUMS | "${checksum_tool[@]}" >/dev/null ) || fail "checksum mismatch for $asset"
     tar -xzf "$WORK/$asset" -C "$WORK" cyoda
     mv "$WORK/cyoda" "$DEST/cyoda"
     ;;

@@ -12,8 +12,8 @@ SRC=""
 VERSION=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --from-src) SRC="${2:-}"; shift 2 ;;
-    --version)  VERSION="${2:-}"; shift 2 ;;
+    --from-src) [ $# -ge 2 ] || usage; SRC="$2"; shift 2 ;;
+    --version)  [ $# -ge 2 ] || usage; VERSION="$2"; shift 2 ;;
     *) usage ;;
   esac
 done
