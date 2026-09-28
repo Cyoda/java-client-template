@@ -179,15 +179,28 @@ public class HttpUtils {
         return fullUrl + "?" + queryString;
     }
 
+    /**
+     * The error message of a failed response. cyoda-go's problem+json carries its error code in
+     * {@code properties.errorCode}; when present it prefixes the message ({@code "MODEL_HAS_ENTITIES: cannot
+     * unlock: 1 entities exist"}), so callers can tell refusals apart by code, not by wording.
+     */
     private String extractErrorMessage(String responseBody) {
         try {
             JsonNode errorNode = om.readTree(responseBody);
+            String message = null;
             if (errorNode.has("errorMessage")) {
-                return errorNode.get("errorMessage").asText();
+                message = errorNode.get("errorMessage").asText();
             } else if (errorNode.has("message")) {
-                return errorNode.get("message").asText();
+                message = errorNode.get("message").asText();
             } else if (errorNode.has("detail")) {
-                return errorNode.get("detail").asText();
+                message = errorNode.get("detail").asText();
+            }
+            JsonNode errorCode = errorNode.path("properties").path("errorCode");
+            if (errorCode.isTextual() && !errorCode.asText().isBlank()) {
+                return message == null ? errorCode.asText() : errorCode.asText() + ": " + message;
+            }
+            if (message != null) {
+                return message;
             }
         } catch (Exception ignored) {}
         return responseBody;

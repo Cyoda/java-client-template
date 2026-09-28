@@ -25,6 +25,7 @@ import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * The only test that touches the example application's models (ExampleEntity, OtherEntity);
@@ -64,6 +65,57 @@ class ModelAndWorkflowSetupIT {
         cyodaInit.initCyoda(init);
 
         assertExampleEntityV1IsLockedWithTheWorkflow(rest, workflow);
+    }
+
+    @Test
+    void recreateModelsOnAModelWithEntitiesFailsLoudlyAndLeavesItLocked(@TempDir Path workflowDir) throws Exception {
+        ObjectNode workflow = WorkflowTemplating.load("/example/config/workflow/template_workflow.json", config.getGrpcProcessorTag());
+        Path file = workflowDir.resolve("ExampleEntity/version_1/ExampleEntity.json");
+        Files.createDirectories(file.getParent());
+        om.writeValue(file.toFile(), workflow);
+        CyodaInitConfig init = CyodaInitConfig.withRecreateModels(true);
+        init.setWorkflowDir(workflowDir.toString());
+
+        cyodaInit.initCyoda(init);
+
+        CyodaRest rest = CyodaTestEnvironment.rest(Profile.mockMemory());
+        assertExampleEntityV1IsLockedWithTheWorkflow(rest, workflow);
+
+        // Save one entity against the now-LOCKED model, so a second --recreate-models run's
+        // unlock/delete hits cyoda-go's 409 MODEL_HAS_ENTITIES instead of succeeding.
+        JsonNode sample = om.readTree(
+                Path.of("src/integrationTest/resources/entity-schemas/examples/ExampleEntity/example-entity.json").toFile());
+        JsonNode created = rest.post("entity/JSON/ExampleEntity/1", sample).requireSuccess().body();
+        String entityId = created.get(0).get("entityIds").get(0).asText();
+
+        try {
+            assertThatThrownBy(() -> cyodaInit.initCyoda(init))
+                    .satisfies(thrown -> {
+                        Throwable root = rootCause(thrown);
+                        assertThat(root).isInstanceOf(IllegalStateException.class);
+                        assertThat(root.getMessage()).contains("MODEL_HAS_ENTITIES").contains("--recreate-models");
+                    });
+
+            // The failed recreate must not have left the model unlocked: cyoda-go itself refuses
+            // to unlock a model that still has entities, so the model is never unlocked here.
+            assertExampleEntityV1IsLockedWithTheWorkflow(rest, workflow);
+        } finally {
+            // This class shares one cyoda-go instance across its tests and all of them use the
+            // ExampleEntity model, so this entity must not outlive this test.
+            rest.delete("entity/" + entityId).requireSuccess();
+        }
+
+        // Now that the entity is gone, --recreate-models must succeed again.
+        cyodaInit.initCyoda(init);
+        assertExampleEntityV1IsLockedWithTheWorkflow(rest, workflow);
+    }
+
+    private static Throwable rootCause(Throwable t) {
+        Throwable cause = t;
+        while (cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        return cause;
     }
 
     private void assertExampleEntityV1IsLockedWithTheWorkflow(CyodaRest rest, ObjectNode workflow) throws Exception {
