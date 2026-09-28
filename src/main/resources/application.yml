@@ -54,8 +54,11 @@ app:
     cyoda-host:
     cyoda-api-url: https://${app.config.cyoda-host}/api
     # client-credentials: M2M token from {cyoda-api-url}/oauth/token (cyoda-go jwt mode, Cyoda Cloud)
-    # none: no Authorization header (cyoda-go mock IAM)
+    # none: no Authorization header (cyoda-go mock IAM); logs a warning at startup
     auth-mode: client-credentials
+    # With client-credentials, startup fails if the token URI is not https or grpc-tls is false,
+    # unless the host is loopback (localhost, 127.0.0.0/8, ::1). true allows plaintext anyway.
+    allow-insecure-transport: false
     cyoda-client-id:
     cyoda-client-secret:
 
@@ -63,7 +66,7 @@ app:
     grpc-address: grpc-${app.config.cyoda-host}
     grpc-server-port: 443
     grpc-tls: true
-    # Deadline for each unary gRPC call to Cyoda; the server-streaming collection calls have none
+    # Deadline for each unary gRPC call to Cyoda (must be > 0); the server-streaming collection calls have none
     grpc-call-deadline-ms: 120000
     grpc-processor-tag: cyoda_application
     grpc-communication-data-format: JSON

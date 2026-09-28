@@ -76,4 +76,13 @@ class ConfigBindingTest {
         assertThat(local.getProperty("app.config.grpc-tls")).isEqualTo(false);
         assertThat(local.getProperty("app.config.auth-mode")).isEqualTo("none");
     }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"0", "-1"})
+    void aNonPositiveCallDeadlineIsRejectedAtStartup(String deadline) {
+        runner.withPropertyValues("app.config.grpc-call-deadline-ms=" + deadline)
+                .run(ctx -> assertThat(ctx).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("app.config.grpc-call-deadline-ms")
+                        .hasMessageContaining("must be greater than 0"));
+    }
 }

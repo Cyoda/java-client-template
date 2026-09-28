@@ -292,10 +292,11 @@ removed. "cyoda-light" was cyoda-go's earlier name.
 | `cyoda-api-url` | REST base URL, including the context path | `https://${cyoda-host}/api` |
 | `grpc-address` / `grpc-server-port` | gRPC endpoint | `grpc-${cyoda-host}` / `443` |
 | `grpc-tls` | TLS on the gRPC channel (replaces `skip-ssl`) | `true` |
-| `grpc-call-deadline-ms` | Deadline on every unary Cyoda call (previously none; `withWaitForReady()` could wait forever) | `120000` |
+| `grpc-call-deadline-ms` | Deadline on every unary Cyoda call (previously none; `withWaitForReady()` could wait forever). A value ≤ 0 fails startup. | `120000` |
 | `ssl-trust-all` / `ssl-trusted-hosts` | Unchanged | `false` / empty |
 | `auth-mode` | `client-credentials` or `none` | `client-credentials` |
 | `cyoda-client-id` / `cyoda-client-secret` | M2M credentials, required when `auth-mode=client-credentials` | — |
+| `allow-insecure-transport` | Allows plaintext to Cyoda with `auth-mode=client-credentials` (below) | `false` |
 | `execution-mode` | `virtual` or `platform` threads for processor and criteria work (§4.5) | `virtual` (was `platform`) |
 
 **`auth-mode=none`:**
@@ -304,6 +305,13 @@ removed. "cyoda-light" was cyoda-go's earlier name.
   startup.
 - `auth-mode=client-credentials` with a missing client id or secret fails startup with a
   message naming both properties.
+- `auth-mode=none` logs one warning at startup: calls carry no credentials.
+
+**Transport check (`auth-mode=client-credentials`).** The client secret goes to
+`{cyoda-api-url}/oauth/token` and the M2M token rides every call, so startup fails, naming
+the setting, when the token URI is not `https` or `grpc-tls=false`. A loopback host
+(`localhost`, `127.0.0.0/8`, `::1`, by its literal form) or
+`app.config.allow-insecure-transport=true` lifts the check.
 
 **New `application-cyoda-local.yml` (profile `cyoda-local`):**
 - `server.port: 8081`, because cyoda-go's HTTP default is 8080;
