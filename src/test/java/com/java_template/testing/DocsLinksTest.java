@@ -31,6 +31,14 @@ class DocsLinksTest {
     private static final Pattern LINK_TARGET = Pattern.compile("]\\(([^)\\s]+)\\)");
 
     /**
+     * llms.txt/llms-full.txt link to this repo's own GitHub tree with {@code ${branch}/<path>}. That path is
+     * always preceded by a "/" (the URL segment separator), so REPO_PATH's left boundary deliberately never
+     * matches it (it would otherwise also match a foreign URL's unrelated "/src/..." fragment). Matched over the
+     * raw text directly, fenced or not: a doc doesn't wrap a URL in backticks just for this to see it.
+     */
+    private static final Pattern BRANCH_LINK = Pattern.compile("\\$\\{branch}/([A-Za-z0-9_./$-]+)");
+
+    /**
      * Only the path shapes the task calls out: src/…, scripts/…, llm_example/…, docs/…,
      * .augment-guidelines. The leading {@code (?<![\w./-])} is a left boundary: without it, the
      * pattern would match the "src/…" tail inside "buildSrc/src/…" or a URL like
@@ -63,7 +71,8 @@ class DocsLinksTest {
 
     /**
      * Backticked spans and link targets outside fenced blocks (prose referencing a path); bare
-     * repo-path-shaped tokens inside fenced blocks (example shell commands and file listings).
+     * repo-path-shaped tokens inside fenced blocks (example shell commands and file listings);
+     * {@code ${branch}/<path>} links anywhere in the raw text, fenced or not.
      */
     private static List<String> extractPaths(String text) {
         List<String> found = new ArrayList<>();
@@ -78,6 +87,11 @@ class DocsLinksTest {
         outsideFences.append(text, last, text.length());
         collectFromSpans(BACKTICK_SPAN.matcher(outsideFences), found);
         collectFromSpans(LINK_TARGET.matcher(outsideFences), found);
+
+        Matcher branchLink = BRANCH_LINK.matcher(text);
+        while (branchLink.find()) {
+            found.add(branchLink.group(1));
+        }
         return found;
     }
 
@@ -160,6 +174,18 @@ class DocsLinksTest {
 
         assertThat(offendersIn(ROOT, List.of(injected)))
                 .containsExactly(injected + " -> src/main/resources/this-file-does-not-exist.yml");
+    }
+
+    @Test
+    void theScannerCatchesADeadBranchLink(@TempDir Path tempDir) throws IOException {
+        Path injected = tempDir.resolve("injected.md");
+        Files.writeString(injected,
+                "[bad link](https://github.com/example/repo/${branch}/src/does-not-exist)\n");
+
+        // REPO_PATH's left boundary alone would never catch this (the path is preceded by "/" inside the URL,
+        // same as any other link), so it needs its own pass matched against the raw text.
+        assertThat(offendersIn(ROOT, List.of(injected)))
+                .containsExactly(injected + " -> src/does-not-exist");
     }
 
     @Test
