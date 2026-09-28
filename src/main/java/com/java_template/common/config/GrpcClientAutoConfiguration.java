@@ -9,6 +9,7 @@ import com.java_template.common.grpc.client.CriteriaThreadExecutor;
 import com.java_template.common.grpc.client.DefaultEventExecutionRouter;
 import com.java_template.common.grpc.client.EventExecutionRouter;
 import com.java_template.common.grpc.client.ProcessorThreadExecutor;
+import com.java_template.common.grpc.client.connection.ChannelReadiness;
 import com.java_template.common.grpc.client.connection.DefaultReconnectionStrategy;
 import com.java_template.common.grpc.client.monitoring.ConnectionStateTracker;
 import com.java_template.common.grpc.client.connection.ReconnectionStrategy;
@@ -68,6 +69,12 @@ public class GrpcClientAutoConfiguration {
 
         channel.notifyWhenStateChanged(currentStateProvider.get(), initSubscription);
         return channel;
+    }
+
+    /** The bounded wait for the channel before an unjoined multi-reply call (spec §4.5). */
+    @Bean
+    public ChannelReadiness channelReadiness(final ManagedChannel managedChannel) {
+        return new ChannelReadiness(managedChannel);
     }
 
     @Bean

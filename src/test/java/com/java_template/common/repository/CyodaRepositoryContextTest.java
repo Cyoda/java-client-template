@@ -12,6 +12,7 @@ import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.exception.CyodaRetryableException;
+import com.java_template.common.grpc.client.connection.ChannelReadiness;
 import com.java_template.common.grpc.client.event_handling.CloudEventParser;
 import com.java_template.common.service.EntityServiceImpl;
 import com.java_template.common.workflow.CyodaEntity;
@@ -78,7 +79,8 @@ class CyodaRepositoryContextTest {
         when(tokens.bearerToken()).thenReturn(Optional.of("m2m-token"));
         var stub = CloudEventsServiceGrpc.newBlockingStub(server.channel).withInterceptors(new CyodaCallInterceptor(tokens));
         Config config = new Config();
-        repo = new CyodaRepository(mappers, stub, server.builder, new CloudEventParser(mappers), config, tokens);
+        repo = new CyodaRepository(mappers, stub, server.builder, new CloudEventParser(mappers), config, tokens,
+                new ChannelReadiness(server.channel));
     }
 
     @AfterEach

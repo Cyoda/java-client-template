@@ -5,6 +5,7 @@ import com.java_template.common.call.CyodaCallContext;
 import com.java_template.common.call.CyodaCallInterceptor;
 import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaObjectMapper;
+import com.java_template.common.grpc.client.connection.ChannelReadiness;
 import com.java_template.common.grpc.client.event_handling.CloudEventParser;
 import org.cyoda.cloud.api.common.model.GroupConditionDto;
 import org.cyoda.cloud.api.event.common.DataPayload;
@@ -48,7 +49,8 @@ class CyodaRepositoryCallerCredentialTest {
         var stub = CloudEventsServiceGrpc.newBlockingStub(server.channel).withInterceptors(new CyodaCallInterceptor(tokens));
         Config config = new Config();
         config.setGrpcCallDeadlineMs(10_000);
-        repository = new CyodaRepository(mappers, stub, server.builder, new CloudEventParser(mappers), config, tokens);
+        repository = new CyodaRepository(mappers, stub, server.builder, new CloudEventParser(mappers), config, tokens,
+                new ChannelReadiness(server.channel));
     }
 
     @AfterEach

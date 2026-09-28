@@ -294,7 +294,7 @@ The template has no `Config.CyodaLight`, no `CyodaLightConfigCustomizer` and no
 | `cyoda-api-url` | REST base URL, including the context path. Also the only origin a Cyoda credential or tx-token is sent to over REST (§4.2) | `https://${cyoda-host}/api` |
 | `grpc-address` / `grpc-server-port` | gRPC endpoint | `grpc-${cyoda-host}` / `443` |
 | `grpc-tls` | TLS on the gRPC channel | `true` |
-| `grpc-call-deadline-ms` | Deadline on each unary gRPC call, and on server-streaming calls inside a callout (§4.5). Also the timeout of each REST request to Cyoda and the read timeout of the M2M token request. A value ≤ 0 fails startup | `120000` |
+| `grpc-call-deadline-ms` | Deadline on each unary gRPC call, and on server-streaming calls inside a callout. Outside a callout, the longest a server-streaming call waits for the connection before it starts (§4.5). Also the timeout of each REST request to Cyoda and the read timeout of the M2M token request. A value ≤ 0 fails startup | `120000` |
 | `ssl-trust-all` / `ssl-trusted-hosts` | Trust every certificate / skip certificate checks for the listed hosts only (REST and the token request validate every other host normally). For development | `false` / empty |
 | `auth-mode` | `client-credentials` or `none` | `client-credentials` |
 | `cyoda-client-id` / `cyoda-client-secret` | M2M credentials, required when `auth-mode=client-credentials` | — |
@@ -613,9 +613,19 @@ nested or concurrent cascades beyond the pool size deadlock until their callouts
   gets a fresh deadline.
 - The server-streaming calls (`entityManageCollection`, `entitySearchCollection`) carry the
   same deadline only when joined; the tx-token's lifetime bounds them anyway.
-- Unjoined server-streaming calls have no deadline, because their duration grows with the
-  result size. The stubs use `withWaitForReady()`, so while Cyoda is unreachable an
-  unjoined streaming call waits for it.
+- Unjoined server-streaming calls (search, snapshot result pages, count, stats, changes
+  metadata, `saveAll`/`updateAll`/`deleteAll`) have no deadline, because their duration
+  grows with the result size. Instead, before such a call starts, `CyodaRepository` waits for
+  the channel to be `READY` (`ChannelReadiness`, using `ManagedChannel.getState(true)` and
+  `notifyWhenStateChanged`) for at most `grpc-call-deadline-ms`.
+  - If the channel is not `READY` in time, or is shut down, the call fails without being
+    sent, with `CyodaRetryableException` code `UNAVAILABLE` and the message
+    `Cyoda was unreachable for <N> ms: …`. `CyodaGrpcCalls` does not retry it.
+  - Once the call has started, nothing bounds its total duration, so a long but healthy
+    stream is never cut off.
+  - The stubs keep `withWaitForReady()`, so a brief reconnect between the check and the
+    start still works; the readiness wait is the bound.
+  - The wait blocks on a latch, on the repository's virtual-thread executor.
 - Each REST request to Cyoda has a timeout of `grpc-call-deadline-ms`, and the REST and
   token HTTP clients have a 10 s connect timeout.
 
@@ -1021,7 +1031,9 @@ scans `com.example.application`.
   - the retry rules on both doors (§4.2), including invalidation of only the rejected token;
   - unwrapping at the service boundary (`Futures`).
 - **REST origin rule** and request timeouts.
-- **Deadlines:** unary, and streaming joined and unjoined.
+- **Deadlines:** unary, and streaming joined and unjoined; on an in-process channel, an
+  unjoined streaming call fails after about the bound with no server or after the server
+  goes away, succeeds with it up, and a slow stream longer than the bound completes.
 - **Reads inside a callout:** the direct-search limits and scoped streams.
 - **Auth context:**
   - `authclaims` parsing: comma form, empty, JSON, garbage;

@@ -5,6 +5,7 @@ import com.java_template.common.call.CyodaCallContext;
 import com.java_template.common.call.CyodaCallInterceptor;
 import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaObjectMapper;
+import com.java_template.common.grpc.client.connection.ChannelReadiness;
 import com.java_template.common.grpc.client.event_handling.CloudEventBuilder;
 import com.java_template.common.grpc.client.event_handling.CloudEventParser;
 import io.cloudevents.v1.proto.CloudEvent;
@@ -34,10 +35,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * ABOUTME: grpc-call-deadline-ms bounds every unary Cyoda call (spec §4.5) and, outside a callout, never the
- * server-streaming entityManageCollection/entitySearchCollection calls, whose duration grows with the result
- * size. Inside a callout (a joined context) streaming calls carry it too. Both kinds carry the operation's
- * CyodaCallContext as the CONTEXT call option.
+ * ABOUTME: grpc-call-deadline-ms bounds every unary Cyoda call (spec §4.5). Outside a callout it bounds only the
+ * wait for the connection before a server-streaming entityManageCollection/entitySearchCollection call, never the
+ * call itself, whose duration grows with the result size. Inside a callout (a joined context) streaming calls
+ * carry it as a deadline. Both kinds carry the operation's CyodaCallContext as the CONTEXT call option.
  */
 @ExtendWith(MockitoExtension.class)
 class CyodaRepositoryDeadlineTest {
@@ -48,13 +49,14 @@ class CyodaRepositoryDeadlineTest {
     @Mock CloudEventParser cloudEventParser;
     @Mock Config config;
     @Mock CyodaTokenSource tokenSource;
+    @Mock ChannelReadiness channelReadiness;
 
     private final CyodaCallContext ctx = CyodaCallContext.m2m();
     private CyodaRepository repository;
 
     @BeforeEach
     void setUp() throws Exception {
-        repository = new CyodaRepository(CyodaObjectMapper.standalone(), stub, cloudEventBuilder, cloudEventParser, config, tokenSource);
+        repository = new CyodaRepository(CyodaObjectMapper.standalone(), stub, cloudEventBuilder, cloudEventParser, config, tokenSource, channelReadiness);
         lenient().when(config.getGrpcCallDeadlineMs()).thenReturn(1_234L);
         lenient().when(stub.withOption(any(), any())).thenReturn(stub);
         lenient().when(stub.withDeadlineAfter(anyLong(), any())).thenReturn(deadlineStub);
@@ -73,6 +75,7 @@ class CyodaRepositoryDeadlineTest {
         verify(stub).withDeadlineAfter(1_234L, TimeUnit.MILLISECONDS);
         verify(deadlineStub).entitySearch(any());
         verify(stub, never()).entitySearch(any());
+        verify(channelReadiness, never()).awaitReady(anyLong());
     }
 
     @Test
@@ -87,6 +90,8 @@ class CyodaRepositoryDeadlineTest {
         verify(stub).entitySearchCollection(any());
         verify(stub, never()).withDeadlineAfter(anyLong(), any());
         verify(deadlineStub, never()).entitySearchCollection(any());
+        // the bound is on the wait for the connection, before the call starts (CyodaRepositoryConnectionWaitTest)
+        verify(channelReadiness).awaitReady(1_234L);
     }
 
     @Test
@@ -104,5 +109,6 @@ class CyodaRepositoryDeadlineTest {
         verify(stub).withDeadlineAfter(1_234L, TimeUnit.MILLISECONDS);
         verify(deadlineStub).entitySearchCollection(any());
         verify(stub, never()).entitySearchCollection(any());
+        verify(channelReadiness, never()).awaitReady(anyLong());
     }
 }

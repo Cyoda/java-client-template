@@ -15,6 +15,7 @@ import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.exception.CyodaErrors;
 import com.java_template.common.exception.CyodaOperationException;
+import com.java_template.common.grpc.client.connection.ChannelReadiness;
 import com.java_template.common.grpc.client.event_handling.CloudEventBuilder;
 import com.java_template.common.grpc.client.event_handling.CloudEventParser;
 import com.java_template.common.grpc.client.event_handling.CloudEvents;
@@ -80,6 +81,7 @@ public class CyodaRepository implements CrudRepository {
     private final CloudEventBuilder cloudEventBuilder;
     private final CloudEventParser cloudEventParser;
     private final CyodaTokenSource tokenSource;
+    private final ChannelReadiness channelReadiness;
 
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -104,7 +106,8 @@ public class CyodaRepository implements CrudRepository {
             final CloudEventBuilder cloudEventBuilder,
             final CloudEventParser cloudEventParser,
             final Config config,
-            final CyodaTokenSource tokenSource
+            final CyodaTokenSource tokenSource,
+            final ChannelReadiness channelReadiness
     ) {
         this.entityMapper = mappers.entities();
         this.cloudEventsServiceBlockingStub = cloudEventsServiceBlockingStub;
@@ -112,6 +115,7 @@ public class CyodaRepository implements CrudRepository {
         this.cloudEventParser = cloudEventParser;
         this.config = config;
         this.tokenSource = tokenSource;
+        this.channelReadiness = channelReadiness;
 
         // Initialize cache with expiry based on the snapshot's own expirationDate (wall-clock).
         // This is a plain Cache, not a LoadingCache: entries are populated explicitly, in
@@ -197,9 +201,10 @@ public class CyodaRepository implements CrudRepository {
     /**
      * Stub for the server-streaming entityManageCollection/entitySearchCollection calls: it carries the call
      * context. Outside a callout it has no deadline, since their duration grows with the result size, and a
-     * deadline would cut a long but healthy stream short. Inside a callout ({@code ctx.isJoined()}) it carries
-     * grpc-call-deadline-ms like a unary call: the tx-token's lifetime bounds the call anyway, and a direct
-     * search there is capped at {@link #DIRECT_SEARCH_LIMIT}. Built per attempt, so a retry gets a fresh one.
+     * deadline would cut a long but healthy stream short; {@link #sendAndGetCollection} bounds only the wait for
+     * the connection instead. Inside a callout ({@code ctx.isJoined()}) it carries grpc-call-deadline-ms like a
+     * unary call: the tx-token's lifetime bounds the call anyway, and a direct search there is capped at
+     * {@link #DIRECT_SEARCH_LIMIT}. Built per attempt, so a retry gets a fresh one.
      */
     private CloudEventsServiceGrpc.CloudEventsServiceBlockingStub streaming(final CyodaCallContext ctx) {
         CloudEventsServiceGrpc.CloudEventsServiceBlockingStub stub =
@@ -603,7 +608,10 @@ public class CyodaRepository implements CrudRepository {
 
     /**
      * One server-streaming call under {@link CyodaGrpcCalls#call}'s retry rules, on the virtual-thread
-     * executor. The stream is read to the end inside the attempt, so an envelope failure anywhere in it
+     * executor. Outside a callout the call starts only once the channel is READY, waiting at most
+     * grpc-call-deadline-ms ({@link ChannelReadiness}; an unreachable Cyoda fails with a
+     * {@link com.java_template.common.exception.CyodaRetryableException} {@code UNAVAILABLE}), and then runs with no
+     * total deadline. The stream is read to the end inside the attempt, so an envelope failure anywhere in it
      * surfaces in (and can retry) the call that caused it; an attempt abandoned part-way is cancelled, so a
      * retry never leaves the previous stream open.
      *
@@ -638,6 +646,11 @@ public class CyodaRepository implements CrudRepository {
             Context.CancellableContext attempt = Context.current().withCancellation();
             Context previous = attempt.attach();
             try {
+                if (!ctx.isJoined()) {
+                    // No deadline on the call itself: wait a bounded time for the connection instead (spec §4.5).
+                    // The stub keeps withWaitForReady, so a brief reconnect after this check still works.
+                    channelReadiness.awaitReady(config.getGrpcCallDeadlineMs());
+                }
                 List<RESPONSE_PAYLOAD_TYPE> all = new ArrayList<>();
                 Iterator<CloudEvent> responses = apiCall.apply(streaming(ctx), requestEvent);
                 while (responses.hasNext()) {

@@ -80,9 +80,10 @@ app:
     grpc-address: grpc-${app.config.cyoda-host}
     grpc-server-port: 443
     grpc-tls: true
-    # Deadline for each unary gRPC call to Cyoda (must be > 0). The server-streaming collection calls have none, except inside
-    # a processor/criterion callout (there the tx-token's lifetime bounds them anyway). Also bounds each REST
-    # request to Cyoda and the read of the M2M token request.
+    # Deadline for each unary gRPC call to Cyoda (must be > 0). The multi-reply (server-streaming) collection calls have no
+    # deadline, since they grow with the result; this instead bounds how long one waits for the connection to
+    # Cyoda before it starts (then it fails as unreachable). Inside a processor/criterion callout they carry it as
+    # a deadline too. Also bounds each REST request to Cyoda and the read of the M2M token request.
     grpc-call-deadline-ms: 120000
     grpc-processor-tag: cyoda_application
     grpc-communication-data-format: JSON

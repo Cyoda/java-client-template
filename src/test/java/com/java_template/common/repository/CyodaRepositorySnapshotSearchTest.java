@@ -20,6 +20,7 @@ import org.cyoda.cloud.api.grpc.CloudEventsServiceGrpc;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import com.java_template.common.grpc.client.connection.ChannelReadiness;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
@@ -59,6 +60,7 @@ class CyodaRepositorySnapshotSearchTest {
     @Mock CloudEventParser cloudEventParser;
     @Mock Config config;
     @Mock CyodaTokenSource tokenSource;
+    @Mock ChannelReadiness channelReadiness;
 
     @InjectMocks CyodaRepository repository;
 

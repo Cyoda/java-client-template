@@ -5,6 +5,7 @@ import com.java_template.common.auth.CyodaTokenSource;
 import com.java_template.common.call.CalloutScope;
 import com.java_template.common.call.CyodaCallContexts;
 import com.java_template.common.config.Config;
+import com.java_template.common.grpc.client.connection.ChannelReadiness;
 import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.grpc.client.event_handling.CloudEventBuilder;
@@ -69,7 +70,7 @@ class EntityServiceScopedStreamTest {
         Config config = new Config();
         CyodaObjectMapper mappers = CyodaObjectMapper.standalone();
         CyodaRepository repository = new CyodaRepository(mappers, stub, cloudEventBuilder, cloudEventParser, config,
-                mock(CyodaTokenSource.class));
+                mock(CyodaTokenSource.class), mock(ChannelReadiness.class));
         service = new EntityServiceImpl(repository, mappers, new CyodaCallContexts(config));
 
         lenient().when(stub.withOption(any(), any())).thenReturn(stub);
