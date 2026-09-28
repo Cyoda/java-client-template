@@ -8,6 +8,14 @@ server:
   servlet:
     context-path: /api
 
+# Liveness/readiness groups are served at /api/actuator/health/{liveness,readiness} (the Helm probes use
+# these paths); enabled explicitly rather than relying on Kubernetes detection.
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
 spring:
   mvc:
     problemdetails:
