@@ -634,7 +634,7 @@ public class CyodaInit {
                 throw new IllegalStateException(String.format(
                         "Cannot recreate %s v%s: it still has entities (MODEL_HAS_ENTITIES). "
                                 + "Delete its entities first, or run without --recreate-models",
-                        entityName, version));
+                        entityName, version), ex);
             }
             throw ex instanceof RuntimeException re ? re
                     : new RuntimeException("Failed to unlock entity model for " + entityName, ex);
@@ -662,7 +662,7 @@ public class CyodaInit {
                 throw new IllegalStateException(String.format(
                         "Cannot recreate %s v%s: it still has entities (MODEL_HAS_ENTITIES). "
                                 + "Delete its entities first, or run without --recreate-models",
-                        entityName, version));
+                        entityName, version), ex);
             }
             throw ex instanceof RuntimeException re ? re
                     : new RuntimeException("Failed to delete entity model for " + entityName, ex);
