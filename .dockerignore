@@ -13,24 +13,26 @@
 !buildSrc/src/**/build/
 
 # Gradle cache: the builder stage runs its own Gradle, so a host cache is both useless and huge.
-.gradle
+# buildSrc is its own mini Gradle project and gets its own nested .gradle/ (buildSrc/.gradle).
+**/.gradle
 
 # The cyoda binary scripts/install-cyoda.sh installs for the integration tests (~70 MB). The image
 # build only runs bootJar, which needs neither the binary nor an integration-test run.
 .cyoda
 
-# Agent/IDE/editor metadata not read by the Gradle build.
-.idea
-*.iml
-.vscode
-.kotlin
-.ai
-.augment
-.augmentignore
-.superpowers
-.sandbox
-.playwright-mcp
-.DS_Store
+# Agent/IDE/editor metadata not read by the Gradle build. **/ because these can show up in any
+# subdirectory (a per-module .iml, a Finder .DS_Store dropped anywhere), not just the project root.
+**/.idea
+**/*.iml
+**/.vscode
+**/.kotlin
+**/.ai
+**/.augment
+**/.augmentignore
+**/.superpowers
+**/.sandbox
+**/.playwright-mcp
+**/.DS_Store
 
 # Documentation and deployment assets not read by the Gradle build.
 docs
