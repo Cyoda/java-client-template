@@ -833,7 +833,15 @@ or network access for a released pin (a download).
 
 ### 7.5 CI (`.github/workflows/build.yml`)
 
-- **Triggers:** `push`, `pull_request` and `workflow_dispatch`.
+- **Triggers:** `push` to `main` and `develop`, `pull_request` and `workflow_dispatch`.
+- **Hardening:**
+  - the workflow token is read-only (`permissions: contents: read`), and `actions/checkout`
+    does not persist it (`persist-credentials: false`);
+  - every action is pinned by full commit SHA, with its version in a comment;
+  - the Gradle wrapper jar is checked by `gradle/actions/wrapper-validation`, and
+    `gradle-wrapper.properties` pins the distribution's `distributionSha256Sum`;
+  - branch names and dispatch inputs reach `run:` scripts only through `env:`, never as
+    expressions spliced into the script.
 - **Standard job** (and `test-only`):
   1. `actions/setup-go` at Go 1.26.7, for the source build of the `-dev` pin;
   2. `install-cyoda.sh`, whose output becomes `CYODA_BIN`;
