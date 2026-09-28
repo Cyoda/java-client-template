@@ -35,11 +35,20 @@ class WorkflowServiceImplTest {
 
     @BeforeEach
     void start() throws Exception {
+        startServer(400, "application/problem+json", PROBLEM);
+    }
+
+    @AfterEach
+    void stop() {
+        server.stop(0);
+    }
+
+    private void startServer(int status, String contentType, String responseBody) throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/api", ex -> {
-            byte[] body = PROBLEM.getBytes(StandardCharsets.UTF_8);
-            ex.getResponseHeaders().add("Content-Type", "application/problem+json");
-            ex.sendResponseHeaders(400, body.length);
+            byte[] body = responseBody.getBytes(StandardCharsets.UTF_8);
+            ex.getResponseHeaders().add("Content-Type", contentType);
+            ex.sendResponseHeaders(status, body.length);
             ex.getResponseBody().write(body);
             ex.close();
         });
@@ -51,11 +60,6 @@ class WorkflowServiceImplTest {
         CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
         HttpUtils http = new HttpUtils(new JsonUtils(wireMapper), wireMapper, config, tokens);
         workflowService = new WorkflowServiceImpl(http, new CyodaCallContexts(config), wireMapper, config);
-    }
-
-    @AfterEach
-    void stop() {
-        server.stop(0);
     }
 
     @Test
@@ -74,5 +78,32 @@ class WorkflowServiceImplTest {
         assertThatThrownBy(() -> workflowService.exportWorkflows("m", 1))
                 .isInstanceOf(WorkflowExportException.class)
                 .hasCauseInstanceOf(CyodaHttpException.class);
+    }
+
+    @Test
+    void aMissingEntityModelIsReportedAs404WithATypedCause() throws Exception {
+        server.stop(0);
+        startServer(404, "application/problem+json", """
+                {"status":404,"detail":"model m/1 not found","properties":{"errorCode":"MODEL_NOT_FOUND"}}""");
+
+        assertThatThrownBy(() -> workflowService.exportWorkflows("m", 1))
+                .isInstanceOfSatisfying(WorkflowExportException.class, e -> {
+                    assertThat(e.getHttpStatusCode()).isEqualTo(404);
+                    assertThat(e.getMessage()).startsWith("Entity model not found");
+                    assertThat(e.getCause()).isInstanceOf(CyodaHttpException.class);
+                });
+    }
+
+    @Test
+    void anUnexpectedServerErrorKeepsItsStatusCode() throws Exception {
+        server.stop(0);
+        startServer(500, "application/problem+json", """
+                {"status":500,"detail":"boom","properties":{"errorCode":"INTERNAL"}}""");
+
+        assertThatThrownBy(() -> workflowService.exportWorkflows("m", 1))
+                .isInstanceOfSatisfying(WorkflowExportException.class, e -> {
+                    assertThat(e.getHttpStatusCode()).isEqualTo(500);
+                    assertThat(e.getCause()).isInstanceOf(CyodaHttpException.class);
+                });
     }
 }

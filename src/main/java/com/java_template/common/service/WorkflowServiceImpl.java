@@ -7,6 +7,7 @@ import com.java_template.common.call.CyodaCallContext;
 import com.java_template.common.call.CyodaCallContexts;
 import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaObjectMapper;
+import com.java_template.common.exception.CyodaHttpException;
 import com.java_template.common.exception.WorkflowExportException;
 import com.java_template.common.util.Futures;
 import com.java_template.common.util.HttpUtils;
@@ -61,31 +62,27 @@ public class WorkflowServiceImpl implements WorkflowService {
             String exportPath = String.format("model/%s/%d/workflow/export", entityName, modelVersion);
             logger.debug("Using export endpoint: {}", exportPath);
 
-            // Make HTTP GET request to Cyoda API
+            // Make HTTP GET request to Cyoda API. HttpUtils throws a typed CyodaHttpException for
+            // every status >= 400 (caught below), so a successful response here is always 2xx/3xx.
             ObjectNode response = Futures.joinUnwrapped(httpUtils.sendGetRequest(ctx, config.getCyodaApiUrl(), exportPath));
-            int statusCode = response.get("status").asInt();
-
-            // Check response status
-            if (statusCode >= 200 && statusCode < 300) {
-                logger.info("Successfully exported workflows for entity: {} (version: {})", entityName, modelVersion);
-                return response.get("json");
-            } else if (statusCode == 404) {
+            logger.info("Successfully exported workflows for entity: {} (version: {})", entityName, modelVersion);
+            return response.get("json");
+        } catch (WorkflowExportException e) {
+            // Re-throw WorkflowExportException without logging (will be logged by controller)
+            throw e;
+        } catch (CyodaHttpException e) {
+            if (e.status() == 404) {
                 String errorMsg = String.format(
                     "Entity model not found: %s (version %d). Please verify the entity name and version.",
                     entityName, modelVersion
                 );
-                throw new WorkflowExportException(errorMsg, statusCode);
-            } else {
-                String errorBody = response.path("json").toString();
-                String errorMsg = String.format(
-                    "Failed to export workflows for entity %s (version %d). Status code: %d, Response: %s",
-                    entityName, modelVersion, statusCode, errorBody
-                );
-                throw new WorkflowExportException(errorMsg, statusCode);
+                throw new WorkflowExportException(errorMsg, e.status(), e);
             }
-        } catch (WorkflowExportException e) {
-            // Re-throw WorkflowExportException without logging (will be logged by controller)
-            throw e;
+            String errorMsg = String.format(
+                "Failed to export workflows for entity %s (version %d). Status code: %d",
+                entityName, modelVersion, e.status()
+            );
+            throw new WorkflowExportException(errorMsg, e.status(), e);
         } catch (Exception e) {
             // Wrap unexpected exceptions
             String errorMsg = String.format(
