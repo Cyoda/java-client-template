@@ -32,6 +32,11 @@ springdoc:
 # Environment-specific settings for Cross-Origin Resource Sharing
 # Override via environment variables or profile-specific YAML files for different environments (dev/staging/prod)
 app:
+  admin:
+    grpc-endpoints:
+      # POST /admin/grpc/reconnect and GET /admin/grpc/status. They carry no authentication of their own:
+      # enable only where your SecurityFilterChain protects /admin/**.
+      enabled: false
   cors:
     # Comma-separated list of allowed origins (no wildcards when credentials enabled)
     # Dev: http://localhost:3000,http://localhost:5173
