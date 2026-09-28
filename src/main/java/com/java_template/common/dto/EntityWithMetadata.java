@@ -2,7 +2,6 @@ package com.java_template.common.dto;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.workflow.CyodaEntity;
 import org.cyoda.cloud.api.event.common.DataPayload;
@@ -157,13 +156,11 @@ public record EntityWithMetadata<T extends CyodaEntity>(@JsonProperty("entity") 
      * @param <T> the entity type
      * @param response the EntityTransactionResponse from save/update operations
      * @param entity the entity that was saved/updated
-     * @param objectMapper the ObjectMapper for JSON conversion
      * @return a new EntityWithMetadata instance with transaction metadata
      */
     public static <T extends CyodaEntity> EntityWithMetadata<T> fromTransactionResponse(
             EntityTransactionResponse response,
-            T entity,
-            ObjectMapper objectMapper) {
+            T entity) {
 
         // Create basic metadata from transaction info
         EntityMetadata metadata = new EntityMetadata();
@@ -180,13 +177,11 @@ public record EntityWithMetadata<T extends CyodaEntity>(@JsonProperty("entity") 
      * @param <T> the entity type
      * @param response the EntityTransactionResponse from batch save operations
      * @param entities the collection of entities that were saved
-     * @param objectMapper the ObjectMapper for JSON conversion
      * @return a list of EntityWithMetadata instances with transaction metadata
      */
     public static <T extends CyodaEntity> List<EntityWithMetadata<T>> fromTransactionResponseList(
             EntityTransactionResponse response,
-            Collection<T> entities,
-            ObjectMapper objectMapper) {
+            Collection<T> entities) {
 
         List<UUID> entityIds = response.getTransactionInfo() != null ?
                 response.getTransactionInfo().getEntityIds() : List.of();
@@ -200,13 +195,11 @@ public record EntityWithMetadata<T extends CyodaEntity>(@JsonProperty("entity") 
      * @param <T> the entity type
      * @param responses the list of EntityTransactionResponse from batch update operations
      * @param entities the collection of entities that were updated
-     * @param objectMapper the ObjectMapper for JSON conversion
      * @return a list of EntityWithMetadata instances with transaction metadata
      */
     public static <T extends CyodaEntity> List<EntityWithMetadata<T>> fromTransactionResponseList(
             List<EntityTransactionResponse> responses,
-            Collection<T> entities,
-            ObjectMapper objectMapper) {
+            Collection<T> entities) {
 
         List<UUID> allEntityIds = new ArrayList<>();
         for (EntityTransactionResponse response : responses) {
