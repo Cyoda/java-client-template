@@ -32,6 +32,8 @@ class CyodaServerEnvironmentTest {
                 .containsEntry("CYODA_SCHEDULER_SCAN_INTERVAL", "50ms")
                 .containsEntry("CYODA_SUPPRESS_BANNER", "true")
                 .containsEntry("CYODA_ERROR_RESPONSE_MODE", "verbose")
+                .containsEntry("CYODA_ADMIN_BIND_ADDRESS", "127.0.0.1")
+                .containsEntry("CYODA_LOG_LEVEL", "info")
                 .doesNotContainKey("CYODA_PROFILES");
     }
 
