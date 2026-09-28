@@ -293,7 +293,7 @@ removed. "cyoda-light" was cyoda-go's earlier name.
 | `grpc-address` / `grpc-server-port` | gRPC endpoint | `grpc-${cyoda-host}` / `443` |
 | `grpc-tls` | TLS on the gRPC channel (replaces `skip-ssl`) | `true` |
 | `grpc-call-deadline-ms` | Deadline on every unary Cyoda call (previously none; `withWaitForReady()` could wait forever). A value ≤ 0 fails startup. | `120000` |
-| `ssl-trust-all` / `ssl-trusted-hosts` | Unchanged | `false` / empty |
+| `ssl-trust-all` / `ssl-trusted-hosts` | Trust every certificate / skip certificate checks for the listed hosts only (REST and the token request validate every other host normally) | `false` / empty |
 | `auth-mode` | `client-credentials` or `none` | `client-credentials` |
 | `cyoda-client-id` / `cyoda-client-secret` | M2M credentials, required when `auth-mode=client-credentials` | — |
 | `allow-insecure-transport` | Allows plaintext to Cyoda with `auth-mode=client-credentials` (below) | `false` |
