@@ -19,9 +19,11 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * ABOUTME: Installs the pinned cyoda into .cyoda/bin with scripts/install-cyoda.sh, unless an explicit binary is
- * configured or the one already there matches the pin (spec §7.4). The decision is {@link CyodaInstallDecision}'s,
- * made from the binary's {@code --version}, not from Gradle's file tracking, so a binary copied or built there by
- * hand counts too. When nothing is installed the task reports UP-TO-DATE.
+ * configured (-Dcyoda.bin / CYODA_BIN), or a binary already at .cyoda/bin, or failing that on PATH, already matches
+ * the pin, or (-Dcyoda.allowVersionMismatch=true) a mismatching one there is kept deliberately (spec §7.4). The
+ * decision is {@link CyodaInstallDecision}'s, made from the binary's {@code --version}, not from Gradle's file
+ * tracking, so a binary copied or built there by hand counts too. When nothing is installed the task reports
+ * UP-TO-DATE; a kept mismatch is logged at WARN, since it is not the pin the build expects.
  */
 @UntrackedTask(because = "whether to install is decided from the binary's --version against the pin")
 public abstract class InstallCyodaTask extends DefaultTask {
@@ -67,6 +69,10 @@ public abstract class InstallCyodaTask extends DefaultTask {
         switch (decision.action()) {
             case USE_EXPLICIT, UP_TO_DATE -> {
                 getLogger().info("installCyoda: nothing to install: {}", decision.reason());
+                setDidWork(false);
+            }
+            case MISMATCH_ALLOWED -> {
+                getLogger().warn("installCyoda: nothing to install: {}", decision.reason());
                 setDidWork(false);
             }
             case CANNOT_INSTALL -> throw new GradleException("installCyoda: " + decision.reason());

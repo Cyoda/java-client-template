@@ -33,7 +33,17 @@ class CyodaInstallDecisionTest {
 
     private final List<Path> ranVersionOf = new ArrayList<>();
 
+    /** An executable "cyoda" at .cyoda/bin, matching what scripts/install-cyoda.sh leaves behind (it chmod +x's it). */
     private Path installed() throws Exception {
+        Path bin = project.resolve(".cyoda/bin/cyoda");
+        Files.createDirectories(bin.getParent());
+        Files.writeString(bin, "fake");
+        makeExecutable(bin);
+        return bin;
+    }
+
+    /** A present but non-executable "cyoda" at .cyoda/bin: CyodaBinary.locate() skips this, so decide() must too. */
+    private Path installedButNotExecutable() throws Exception {
         Path bin = project.resolve(".cyoda/bin/cyoda");
         Files.createDirectories(bin.getParent());
         Files.writeString(bin, "fake");
@@ -46,13 +56,17 @@ class CyodaInstallDecisionTest {
         Files.createDirectories(dir);
         Path bin = dir.resolve("cyoda");
         Files.writeString(bin, "fake");
+        makeExecutable(bin);
+        return bin;
+    }
+
+    private static void makeExecutable(Path bin) throws Exception {
         try {
             Files.setPosixFilePermissions(bin, PosixFilePermissions.fromString("rwxr-xr-x"));
         } catch (UnsupportedOperationException ignored) {
             // non-POSIX filesystem (e.g. Windows); Files.isExecutable still needs a real check there
             bin.toFile().setExecutable(true);
         }
-        return bin;
     }
 
     private Function<Path, String> reporting(String output) {
@@ -211,7 +225,9 @@ class CyodaInstallDecisionTest {
         var d = CyodaInstallDecision.decide(null, null, bin, DEV_PIN, false, true, null,
                 reporting(MISMATCHED_BINARY));
 
-        assertThat(d.action()).isEqualTo(Action.UP_TO_DATE);
+        // A distinct action from plain UP_TO_DATE: this binary does NOT match the pin, and the task logs it
+        // at WARN, not the quiet INFO a real match gets.
+        assertThat(d.action()).isEqualTo(Action.MISMATCH_ALLOWED);
         assertThat(d.reason()).contains("allowVersionMismatch");
     }
 
@@ -223,7 +239,7 @@ class CyodaInstallDecisionTest {
         var d = CyodaInstallDecision.decide(null, null, installed, DEV_PIN, false, true,
                 onPath.getParent().toString(), reporting(MISMATCHED_BINARY));
 
-        assertThat(d.action()).isEqualTo(Action.UP_TO_DATE);
+        assertThat(d.action()).isEqualTo(Action.MISMATCH_ALLOWED);
         assertThat(d.reason()).contains("allowVersionMismatch");
     }
 
@@ -233,5 +249,20 @@ class CyodaInstallDecisionTest {
                 null, reporting("never"));
 
         assertThat(d.action()).isEqualTo(Action.INSTALL);
+    }
+
+    @Test
+    void aPresentButNonExecutableInstalledBinaryFallsBackToPath() throws Exception {
+        Path installed = installedButNotExecutable();
+        Path onPath = onPath();
+
+        // CyodaBinary.locate() skips a non-executable .cyoda/bin/cyoda and falls through to PATH; decide() must
+        // make the same choice, or it could needlessly reinstall over a binary nothing will ever run.
+        var d = CyodaInstallDecision.decide(null, null, installed, DEV_PIN, false, false,
+                onPath.getParent().toString(), reporting(DEV_BINARY));
+
+        assertThat(d.action()).isEqualTo(Action.UP_TO_DATE);
+        assertThat(d.reason()).contains("PATH");
+        assertThat(ranVersionOf).containsExactly(onPath);
     }
 }

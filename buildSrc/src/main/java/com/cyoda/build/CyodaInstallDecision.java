@@ -10,10 +10,12 @@ import java.util.regex.Pattern;
 
 /**
  * ABOUTME: Decides whether the installCyoda task installs the pinned cyoda into .cyoda/bin (spec §7.4).
- * An explicit binary (-Dcyoda.bin or CYODA_BIN) always wins and nothing is installed or run; a binary already in
- * .cyoda/bin, or failing that on PATH, whose {@code --version} matches the pin is kept, because that is the same
- * binary {@code CyodaBinary.locate()} would use at test time; a mismatching one is (re)installed, unless
- * {@code -Dcyoda.allowVersionMismatch=true} says to keep it deliberately; anything missing is installed.
+ * An explicit binary (-Dcyoda.bin or CYODA_BIN) always wins and nothing is installed or run; an executable binary
+ * already in .cyoda/bin, or failing that on PATH, whose {@code --version} matches the pin is kept
+ * ({@link Action#UP_TO_DATE}), because that is the same binary {@code CyodaBinary.locate()} would use at test time
+ * ({@code Files.isExecutable}, the same check it makes). A mismatching one is (re)installed, unless
+ * {@code -Dcyoda.allowVersionMismatch=true} says to keep it deliberately ({@link Action#MISMATCH_ALLOWED}, logged
+ * louder than a real match); anything missing is installed.
  * <p>
  * The pin rule is the harness's own (testFixtures {@code CyodaVersion.incompatibility}, spec §3.4), repeated here
  * because the build logic cannot use the test fixtures: a released pin needs the same {@code major.minor.patch}
@@ -22,7 +24,7 @@ import java.util.regex.Pattern;
  */
 public final class CyodaInstallDecision {
 
-    public enum Action { USE_EXPLICIT, UP_TO_DATE, INSTALL, CANNOT_INSTALL }
+    public enum Action { USE_EXPLICIT, UP_TO_DATE, MISMATCH_ALLOWED, INSTALL, CANNOT_INSTALL }
 
     public record Result(Action action, String reason) {
     }
@@ -58,7 +60,7 @@ public final class CyodaInstallDecision {
 
         Path candidate;
         String label;
-        if (Files.exists(installed)) {
+        if (Files.isExecutable(installed)) {
             candidate = installed;
             label = installed.toString();
         } else {
@@ -84,7 +86,7 @@ public final class CyodaInstallDecision {
                     ? label + " (" + output.strip() + ") does not match the pin " + pinSummary(pinText)
                     : label + " --version failed (" + failure + ")";
             if (allowVersionMismatch) {
-                return new Result(Action.UP_TO_DATE,
+                return new Result(Action.MISMATCH_ALLOWED,
                         why + "; kept because -Dcyoda.allowVersionMismatch=true is set");
             }
         }

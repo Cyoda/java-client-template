@@ -165,9 +165,11 @@ test {
 def cyodaPin = file('src/main/resources/cyoda/CYODA_VERSION')
 
 // Installs the pinned cyoda into .cyoda/bin with scripts/install-cyoda.sh (spec §7.4). Nothing is installed when
-// -Dcyoda.bin or CYODA_BIN names a binary, or when .cyoda/bin/cyoda already matches the pin.
+// -Dcyoda.bin or CYODA_BIN names a binary; when .cyoda/bin/cyoda, or failing that a cyoda on PATH, already matches
+// the pin; or when -Dcyoda.allowVersionMismatch=true says to keep a mismatching one at either location deliberately.
 tasks.register('installCyoda', com.cyoda.build.InstallCyodaTask) {
-    description = 'Installs the pinned cyoda binary into .cyoda/bin, unless one is configured or already installed'
+    description = 'Installs the pinned cyoda binary into .cyoda/bin, unless one is configured, already installed ' +
+            '(there or on PATH), or a mismatch is allowed with -Dcyoda.allowVersionMismatch=true'
     group = 'verification'
     projectRoot = layout.projectDirectory
     pinFile = cyodaPin
