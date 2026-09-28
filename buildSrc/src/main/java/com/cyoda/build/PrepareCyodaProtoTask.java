@@ -2,12 +2,14 @@ package com.cyoda.build;
 
 import org.gradle.api.DefaultTask;
 import org.gradle.api.file.DirectoryProperty;
+import org.gradle.api.file.FileSystemOperations;
 import org.gradle.api.tasks.InputDirectory;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.PathSensitive;
 import org.gradle.api.tasks.PathSensitivity;
 import org.gradle.api.tasks.TaskAction;
 
+import javax.inject.Inject;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,11 +24,14 @@ public abstract class PrepareCyodaProtoTask extends DefaultTask {
     @OutputDirectory
     public abstract DirectoryProperty getOutputDir();
 
+    @Inject
+    protected abstract FileSystemOperations getFs();
+
     @TaskAction
     public void prepare() throws IOException {
         Path src = getSourceDir().get().getAsFile().toPath();
         Path out = getOutputDir().get().getAsFile().toPath();
-        getProject().delete(out.toFile());
+        getFs().delete(s -> s.delete(out.toFile()));
 
         Path api = src.resolve("cyoda/cyoda-cloud-api.proto");
         Path ce = src.resolve("cloudevents/cloudevents.proto");

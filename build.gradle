@@ -247,7 +247,8 @@ tasks.register('buildLogicTest', Exec) {
     description = 'Runs the unit tests of the build logic in buildSrc'
     group = 'verification'
     workingDir = rootDir
-    commandLine "$rootDir/gradlew", '-p', 'buildSrc', 'test'
+    commandLine com.cyoda.build.GradleWrapperCommand.of(
+            org.gradle.internal.os.OperatingSystem.current().isWindows(), '-p', 'buildSrc', 'test')
 }
 
 tasks.named('check') { dependsOn 'buildLogicTest' }

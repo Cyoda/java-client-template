@@ -6,12 +6,14 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.file.DirectoryProperty;
+import org.gradle.api.file.FileSystemOperations;
 import org.gradle.api.tasks.InputDirectory;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.PathSensitive;
 import org.gradle.api.tasks.PathSensitivity;
 import org.gradle.api.tasks.TaskAction;
 
+import javax.inject.Inject;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -29,12 +31,15 @@ public abstract class PrepareEventSchemasTask extends DefaultTask {
     @OutputDirectory
     public abstract DirectoryProperty getOutputDir();
 
+    @Inject
+    protected abstract FileSystemOperations getFs();
+
     @TaskAction
     public void prepare() throws IOException {
         ObjectMapper om = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
         Path src = getSourceDir().get().getAsFile().toPath();
         Path out = getOutputDir().get().getAsFile().toPath();
-        getProject().delete(out.toFile());
+        getFs().delete(s -> s.delete(out.toFile()));
 
         List<JsonNode> orderByItems = new ArrayList<>();
         try (Stream<Path> files = Files.walk(src)) {
