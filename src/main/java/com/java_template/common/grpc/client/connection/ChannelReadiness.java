@@ -6,6 +6,7 @@ import io.grpc.ManagedChannel;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * ABOUTME: Bounded wait for the gRPC channel to Cyoda to be READY, taken before an unjoined multi-reply call
@@ -20,7 +21,18 @@ public class ChannelReadiness {
     /** The error code of the {@link CyodaRetryableException} thrown when Cyoda stays unreachable. */
     public static final String UNAVAILABLE = "UNAVAILABLE";
 
+    /**
+     * How often {@link ManagedChannel#resetConnectBackoff()} may fire at most. A burst of calls during an outage
+     * (every waiting caller starts in {@code TRANSIENT_FAILURE}) must not reset it on every single one: that would
+     * defeat gRPC's own backoff just as effectively as never resetting it, hammering a struggling Cyoda with
+     * reconnect attempts instead of giving it room to recover.
+     */
+    private static final long RESET_BACKOFF_MIN_INTERVAL_NANOS = TimeUnit.MILLISECONDS.toNanos(500);
+
     private final ManagedChannel channel;
+    // Initialized already outside the window (not a sentinel like Long.MIN_VALUE, which would overflow the
+    // now - last subtraction below), so the first reset is never rate-limited away.
+    private final AtomicLong lastResetBackoffNanos = new AtomicLong(System.nanoTime() - RESET_BACKOFF_MIN_INTERVAL_NANOS);
 
     public ChannelReadiness(ManagedChannel channel) {
         this.channel = channel;
@@ -39,7 +51,7 @@ public class ChannelReadiness {
         }
         if (state == ConnectivityState.TRANSIENT_FAILURE) {
             // Cyoda may already be back; retry now instead of sitting out gRPC's own reconnect backoff.
-            channel.resetConnectBackoff();
+            resetConnectBackoffRateLimited();
         }
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(boundMs);
         while (state != ConnectivityState.READY) {
@@ -58,6 +70,15 @@ public class ChannelReadiness {
                 throw new IllegalStateException("interrupted while waiting for the connection to Cyoda", e);
             }
             state = channel.getState(true);
+        }
+    }
+
+    /** Calls {@link ManagedChannel#resetConnectBackoff()}, but at most once per {@link #RESET_BACKOFF_MIN_INTERVAL_NANOS}. */
+    private void resetConnectBackoffRateLimited() {
+        long now = System.nanoTime();
+        long last = lastResetBackoffNanos.get();
+        if (now - last >= RESET_BACKOFF_MIN_INTERVAL_NANOS && lastResetBackoffNanos.compareAndSet(last, now)) {
+            channel.resetConnectBackoff();
         }
     }
 

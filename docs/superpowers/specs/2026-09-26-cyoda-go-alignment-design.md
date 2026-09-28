@@ -630,7 +630,9 @@ nested or concurrent cascades beyond the pool size deadlock until their callouts
   - The wait blocks on a latch, on the repository's virtual-thread executor.
   - If the channel is already `TRANSIENT_FAILURE` as the wait begins, it calls
     `ManagedChannel.resetConnectBackoff()`, so a call made right after Cyoda recovers retries
-    immediately instead of sitting out gRPC's own reconnect backoff.
+    immediately instead of sitting out gRPC's own reconnect backoff. This is rate-limited to
+    at most once every 500 ms, so a burst of calls during an outage does not itself defeat
+    gRPC's backoff by resetting it on every single one.
 - Each REST request to Cyoda has a timeout of `grpc-call-deadline-ms`, and the REST and
   token HTTP clients have a 10 s connect timeout.
 
