@@ -28,7 +28,7 @@ gradle-app.setting
 /backup/
 
 .playwright-mcp/
-.kotlin/sessions/
+.kotlin/
 
 .claude/worktrees
 .claude/settings.local.json
