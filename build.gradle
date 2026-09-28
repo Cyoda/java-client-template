@@ -261,12 +261,25 @@ tasks.register('prepareCyodaProto', com.cyoda.build.PrepareCyodaProtoTask) {
 // GradleBuild cannot target buildSrc directly ("build name 'buildSrc' which cannot be used as
 // it is a reserved name" — it is Gradle's own included build, not an ordinary one), so this
 // forks the wrapper as a separate process against the buildSrc build instead.
+//
+// The nested run never starts a daemon (--no-daemon) and inherits --offline. Its inputs (buildSrc's sources and
+// build files, the wrapper and the verification metadata) and its output (buildSrc's test results) are declared,
+// so it is UP-TO-DATE when none of them changed.
 tasks.register('buildLogicTest', Exec) {
     description = 'Runs the unit tests of the build logic in buildSrc'
     group = 'verification'
     workingDir = rootDir
+    def offline = gradle.startParameter.offline
+    def nestedArgs = (offline ? ['--offline'] : []) + ['--no-daemon', '-p', 'buildSrc', 'test']
     commandLine com.cyoda.build.GradleWrapperCommand.of(
-            System.getProperty('os.name').startsWith('Windows'), '-p', 'buildSrc', 'test')
+            System.getProperty('os.name').startsWith('Windows'), *nestedArgs)
+    inputs.files(fileTree('buildSrc') {
+        include 'src/**', '*.gradle', '*.gradle.kts', 'gradle.properties', 'settings.gradle*'
+    }).withPropertyName('buildSrcSources').withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files('gradle/wrapper/gradle-wrapper.properties', 'gradle/verification-metadata.xml')
+            .withPropertyName('buildEnvironment').withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.property('offline', offline)
+    outputs.dir('buildSrc/build/test-results/test').withPropertyName('buildSrcTestResults')
 }
 
 tasks.named('check') { dependsOn 'buildLogicTest' }
