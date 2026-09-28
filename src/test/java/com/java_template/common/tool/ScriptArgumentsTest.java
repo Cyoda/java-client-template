@@ -96,4 +96,76 @@ class ScriptArgumentsTest {
         assertThat(result.exitCode()).isNotZero();
         assertThat(result.stderr()).contains("Go >= 1.26.7").contains("-dev").contains("CYODA_BIN");
     }
+
+    /**
+     * Pins the two pure helpers that give the Go-version hint its content: reading the required
+     * version out of a checkout's go.mod, and comparing two dot-separated versions. Extracted
+     * verbatim from the real script (not reimplemented) so a future edit to either function is
+     * exercised here too. No network, no real install.
+     */
+    private String requiredGoVersion(Path checkout) throws IOException, InterruptedException {
+        return callHelper("required_go_version", checkout.toString());
+    }
+
+    private boolean versionLt(String a, String b) throws IOException, InterruptedException {
+        return callHelperResult("version_lt", a, b).exitCode() == 0;
+    }
+
+    private record HelperResult(int exitCode, String stdout) {
+    }
+
+    private HelperResult callHelperResult(String function, String... args) throws IOException, InterruptedException {
+        Path script = ROOT.resolve("scripts").resolve("install-cyoda.sh");
+        String cmd = "set -e; eval \"$(sed -n '/^required_go_version()/,/^}/p;/^version_lt()/,/^}/p' '"
+                + script + "')\"; " + function + " \"$@\"";
+        String[] command = new String[args.length + 4];
+        command[0] = "bash";
+        command[1] = "-c";
+        command[2] = cmd;
+        command[3] = "install-cyoda-test";
+        System.arraycopy(args, 0, command, 4, args.length);
+        ProcessBuilder builder = new ProcessBuilder(command).directory(ROOT.toFile());
+        Process process = builder.start();
+        process.getOutputStream().close();
+        String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        process.getErrorStream().readAllBytes();
+        boolean finished = process.waitFor(10, TimeUnit.SECONDS);
+        assertThat(finished).as("helper call terminated").isTrue();
+        return new HelperResult(process.exitValue(), stdout.trim());
+    }
+
+    private String callHelper(String function, String... args) throws IOException, InterruptedException {
+        return callHelperResult(function, args).stdout();
+    }
+
+    @Test
+    void requiredGoVersionReadsTheGoDirective(@TempDir Path checkout) throws Exception {
+        Files.writeString(checkout.resolve("go.mod"), "module example.com/foo\n\ngo 1.26.7\n");
+        assertThat(requiredGoVersion(checkout)).isEqualTo("1.26.7");
+    }
+
+    @Test
+    void requiredGoVersionPrefersToolchainOverGoDirective(@TempDir Path checkout) throws Exception {
+        Files.writeString(checkout.resolve("go.mod"), "module example.com/foo\n\ngo 1.24\n\ntoolchain go1.26.7\n");
+        assertThat(requiredGoVersion(checkout)).isEqualTo("1.26.7");
+    }
+
+    @Test
+    void requiredGoVersionIsBlankWithoutAGoDirective(@TempDir Path checkout) throws Exception {
+        Files.writeString(checkout.resolve("go.mod"), "module example.com/foo\n");
+        assertThat(requiredGoVersion(checkout)).isEmpty();
+    }
+
+    @Test
+    void requiredGoVersionIsBlankWithoutAGoMod(@TempDir Path checkout) throws Exception {
+        assertThat(requiredGoVersion(checkout)).isEmpty();
+    }
+
+    @Test
+    void versionLtComparesDotSeparatedVersions() throws Exception {
+        assertThat(versionLt("1.26.1", "1.26.7")).isTrue();
+        assertThat(versionLt("1.26.7", "1.26.1")).isFalse();
+        assertThat(versionLt("1.26.7", "1.26.7")).isFalse();
+        assertThat(versionLt("1.20", "1.26.7")).isTrue();
+    }
 }

@@ -18,6 +18,7 @@ REF=""
 SRC_DIR=""
 
 fail() { echo "install-cyoda: $*" >&2; exit 1; }
+info() { echo "install-cyoda: $*" >&2; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -45,15 +46,59 @@ require_go() {
   command -v go >/dev/null || fail "Go >= 1.26.7 is required to build cyoda from source$why. Install Go, $OVERRIDE_HINT"
 }
 
+# Echoes the X.Y.Z version cyoda-go's go.mod asks for: its `toolchain` directive if present
+# (e.g. "toolchain go1.26.7"), else its `go` directive (e.g. "go 1.26.7"). Echoes nothing if
+# <checkout dir>/go.mod is missing or has neither.
+required_go_version() { # <checkout dir>
+  local gomod="$1/go.mod" v
+  [ -f "$gomod" ] || return 0
+  v="$(sed -n 's/^[[:space:]]*toolchain[[:space:]][[:space:]]*go\([0-9][0-9.]*\).*/\1/p' "$gomod" | head -n1)"
+  if [ -z "$v" ]; then
+    v="$(sed -n 's/^[[:space:]]*go[[:space:]][[:space:]]*\([0-9][0-9.]*\).*/\1/p' "$gomod" | head -n1)"
+  fi
+  echo "$v"
+}
+
+# True (0) if version A is older than version B. Compares up to three dot-separated numeric
+# components; a missing component counts as 0. Portable to bash 3.2 (macOS) and Linux bash.
+version_lt() { # <A> <B>
+  local a1 a2 a3 b1 b2 b3
+  IFS=. read -r a1 a2 a3 <<<"$1"
+  IFS=. read -r b1 b2 b3 <<<"$2"
+  a1=${a1:-0}; a2=${a2:-0}; a3=${a3:-0}
+  b1=${b1:-0}; b2=${b2:-0}; b3=${b3:-0}
+  [ "$a1" -eq "$b1" ] || { [ "$a1" -lt "$b1" ]; return; }
+  [ "$a2" -eq "$b2" ] || { [ "$a2" -lt "$b2" ]; return; }
+  [ "$a3" -lt "$b3" ]
+}
+
+# Warns, before building, when the local Go is older than what the checkout's go.mod asks for:
+# `go build` will otherwise try to download the newer toolchain itself (network-dependent, and a
+# no-op under GOTOOLCHAIN=local), and a plain "go build failed" would not explain why.
+warn_if_go_too_old() { # <checkout dir>
+  local required local_ver
+  required="$(required_go_version "$1")"
+  [ -n "$required" ] || return 0
+  local_ver="$(go env GOVERSION 2>/dev/null)"
+  local_ver="${local_ver#go}"
+  [ -n "$local_ver" ] || return 0
+  if version_lt "$local_ver" "$required"; then
+    info "local Go is $local_ver; cyoda-go's go.mod asks for Go $required. Go will try to download and use toolchain go$required automatically unless GOTOOLCHAIN=local is set or the network is unavailable."
+  fi
+}
+
 build_checkout() { # <checkout dir>
   require_go
+  local required
+  required="$(required_go_version "$1")"
+  warn_if_go_too_old "$1"
   local sha date
   sha="$(git -C "$1" rev-parse HEAD)"
   date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   ( cd "$1" && CGO_ENABLED=0 go build \
       -ldflags "-X main.version=$VERSION -X main.commit=$sha -X main.buildDate=$date" \
       -o "$DEST/cyoda" ./cmd/cyoda ) \
-    || fail "go build failed in $1 (it needs Go >= 1.26.7 and, to fetch modules, network access), $OVERRIDE_HINT"
+    || fail "go build failed in $1 (it needs Go >= ${required:-1.26.7} and, to fetch modules, network access), $OVERRIDE_HINT"
 }
 
 case "$MODE" in
