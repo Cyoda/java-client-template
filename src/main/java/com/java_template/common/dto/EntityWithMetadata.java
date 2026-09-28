@@ -7,8 +7,6 @@ import com.java_template.common.workflow.CyodaEntity;
 import org.cyoda.cloud.api.event.common.DataPayload;
 import org.cyoda.cloud.api.event.common.EntityMetadata;
 import org.cyoda.cloud.api.event.common.ModelSpec;
-import org.cyoda.cloud.api.event.entity.EntityTransactionResponse;
-import org.jetbrains.annotations.NotNull;
 
 import java.time.OffsetDateTime;
 import java.util.*;
@@ -148,82 +146,6 @@ public record EntityWithMetadata<T extends CyodaEntity>(@JsonProperty("entity") 
                 : new EntityMetadata();
 
         return new EntityWithMetadata<>(entity, metadata);
-    }
-
-    /**
-     * Factory method for creating EntityWithMetadata from an EntityTransactionResponse.
-     * Used for save/update operations to wrap the entity with transaction metadata.
-     * @param <T> the entity type
-     * @param response the EntityTransactionResponse from save/update operations
-     * @param entity the entity that was saved/updated
-     * @return a new EntityWithMetadata instance with transaction metadata
-     */
-    public static <T extends CyodaEntity> EntityWithMetadata<T> fromTransactionResponse(
-            EntityTransactionResponse response,
-            T entity) {
-
-        // Create basic metadata from transaction info
-        EntityMetadata metadata = new EntityMetadata();
-        if (response.getTransactionInfo() != null && !response.getTransactionInfo().getEntityIds().isEmpty()) {
-            metadata.setId(response.getTransactionInfo().getEntityIds().getFirst());
-        }
-
-        return new EntityWithMetadata<>(entity, metadata);
-    }
-
-    /**
-     * Factory method for creating a list of EntityWithMetadata from a single EntityTransactionResponse.
-     * Used for batch save operations to wrap multiple entities with their transaction metadata.
-     * @param <T> the entity type
-     * @param response the EntityTransactionResponse from batch save operations
-     * @param entities the collection of entities that were saved
-     * @return a list of EntityWithMetadata instances with transaction metadata
-     */
-    public static <T extends CyodaEntity> List<EntityWithMetadata<T>> fromTransactionResponseList(
-            EntityTransactionResponse response,
-            Collection<T> entities) {
-
-        List<UUID> entityIds = response.getTransactionInfo() != null ?
-                response.getTransactionInfo().getEntityIds() : List.of();
-
-        return assembleEntitiesWithMetadata(entities, entityIds);
-    }
-
-    /**
-     * Factory method for creating a list of EntityWithMetadata from multiple EntityTransactionResponses.
-     * Used for batch update operations to wrap multiple entities with their transaction metadata.
-     * @param <T> the entity type
-     * @param responses the list of EntityTransactionResponse from batch update operations
-     * @param entities the collection of entities that were updated
-     * @return a list of EntityWithMetadata instances with transaction metadata
-     */
-    public static <T extends CyodaEntity> List<EntityWithMetadata<T>> fromTransactionResponseList(
-            List<EntityTransactionResponse> responses,
-            Collection<T> entities) {
-
-        List<UUID> allEntityIds = new ArrayList<>();
-        for (EntityTransactionResponse response : responses) {
-            if (response.getTransactionInfo() != null) {
-                allEntityIds.addAll(response.getTransactionInfo().getEntityIds());
-            }
-        }
-
-        return assembleEntitiesWithMetadata(entities, allEntityIds);
-    }
-
-    private static <T extends CyodaEntity> @NotNull List<EntityWithMetadata<T>> assembleEntitiesWithMetadata(Collection<T> entities, List<UUID> allEntityIds) {
-        List<T> entitiesList = new ArrayList<>(entities);
-        List<EntityWithMetadata<T>> entityWithMetadatas = new ArrayList<>();
-
-        for (int i = 0; i < entitiesList.size(); i++) {
-            EntityMetadata metadata = new EntityMetadata();
-            if (i < allEntityIds.size()) {
-                metadata.setId(allEntityIds.get(i));
-            }
-            entityWithMetadatas.add(new EntityWithMetadata<>(entitiesList.get(i), metadata));
-        }
-
-        return entityWithMetadatas;
     }
 
 }
