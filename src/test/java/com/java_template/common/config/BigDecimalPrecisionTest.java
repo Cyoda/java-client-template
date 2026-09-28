@@ -4,14 +4,18 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.DecimalNode;
 import com.java_template.common.dto.EntityWithMetadata;
+import com.java_template.common.serializer.jackson.JacksonProcessorSerializer;
 import com.java_template.common.workflow.CyodaEntity;
 import com.java_template.common.workflow.OperationSpecification;
+import org.cyoda.cloud.api.event.common.DataPayload;
 import org.cyoda.cloud.api.event.common.EntityMetadata;
 import org.cyoda.cloud.api.event.common.ModelSpec;
 import org.cyoda.cloud.api.event.processing.EntityProcessorCalculationRequest;
+import org.cyoda.cloud.api.event.processing.EntityProcessorCalculationResponse;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -107,6 +111,46 @@ class BigDecimalPrecisionTest {
         String written = mappers.protocol().writeValueAsString(request);
 
         assertThat(written).contains("\"amount\":0.0000001").doesNotContainIgnoringCase("e-7");
+    }
+
+    /**
+     * The write-back direction: entityToJsonNode / valueToTree (used by save, update, saveAll, updateAll and a
+     * processor's response payload) goes through entities(), not protocol(). Jackson 2.19's
+     * JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES (default true) would collapse the scale here before
+     * protocol() ever sees the tree, in a way protocol()'s own fix (it only controls parsing and writing, not
+     * how entities() itself builds a tree from a POJO) cannot repair afterwards.
+     */
+    @Test
+    void anOutgoingEntitysTrailingZeroScaleSurvivesTheTreeConversion() throws Exception {
+        TestEntity outgoing = new TestEntity();
+        outgoing.setAmount(new BigDecimal("10.00"));
+
+        JsonNode tree = mappers.entities().valueToTree(outgoing);
+
+        assertThat(tree.get("amount")).isInstanceOf(DecimalNode.class);
+        assertThat(tree.get("amount").decimalValue().scale()).isEqualTo(2);
+
+        String written = mappers.protocol().writeValueAsString(tree);
+        assertThat(written).contains("\"amount\":10.00");
+    }
+
+    /** The real processor path: entityToJsonNode builds the response payload, then protocol() serializes it. */
+    @Test
+    void aProcessorsReturnedEntityKeepsItsScaleAndSerializesViaProtocol() throws Exception {
+        JacksonProcessorSerializer serializer = new JacksonProcessorSerializer(mappers);
+        EntityProcessorCalculationRequest request = new EntityProcessorCalculationRequest()
+                .withId("evt").withRequestId("r1").withEntityId(UUID.randomUUID())
+                .withPayload(new DataPayload().withType("ENTITY").withData(mappers.protocol().createObjectNode()));
+        TestEntity outgoing = new TestEntity();
+        outgoing.setAmount(new BigDecimal("10.00"));
+
+        EntityProcessorCalculationResponse response = serializer.responseBuilder(request)
+                .withSuccess(outgoing, serializer::entityToJsonNode)
+                .build();
+
+        assertThat(response.getPayload().getData().get("amount")).isInstanceOf(DecimalNode.class);
+        String written = mappers.protocol().writeValueAsString(response);
+        assertThat(written).contains("\"amount\":10.00");
     }
 
     @SuppressWarnings({"LombokGetterMayBeUsed", "LombokSetterMayBeUsed", "unused"})

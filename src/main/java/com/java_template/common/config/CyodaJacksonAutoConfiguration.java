@@ -10,9 +10,10 @@ import org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 
 /**
- * ABOUTME: Provides the framework's mappers ({@link CyodaObjectMapper}): the fixed protocol mapper, and the app's
- * primary ObjectMapper, used as is, for entities (spec §4.9). The app's mapper is not modified. An app with no
- * ObjectMapper, or with several and none primary, fails at startup rather than silently getting a bare mapper.
+ * ABOUTME: Provides the framework's mappers ({@link CyodaObjectMapper}): the fixed protocol mapper, and a copy of
+ * the app's primary ObjectMapper (with decimal scale always kept) for entities (spec §4.9). The app's own bean is
+ * never modified. An app with no ObjectMapper, or with several and none primary, fails at startup rather than
+ * silently getting a bare mapper.
  */
 @AutoConfiguration(after = JacksonAutoConfiguration.class)
 public class CyodaJacksonAutoConfiguration {

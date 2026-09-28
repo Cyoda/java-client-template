@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.cfg.JsonNodeFeature;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.java_template.common.dto.EntityWithMetadata;
@@ -33,8 +34,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * ABOUTME: The framework's two mappers (spec §4.9). Cyoda protocol messages always use the fixed protocol mapper,
- * whatever the app's spring.jackson.* settings; the app's entities use the app's own primary ObjectMapper, as is,
- * never copied or modified; and an app with several ObjectMappers and no primary one fails at startup.
+ * whatever the app's spring.jackson.* settings; the app's entities use a copy of the app's own primary
+ * ObjectMapper, taken once at startup, with only decimal-scale stripping disabled — the app's own bean is never
+ * modified; and an app with several ObjectMappers and no primary one fails at startup.
  */
 class CyodaObjectMapperAutoConfigurationTest {
 
@@ -99,7 +101,7 @@ class CyodaObjectMapperAutoConfigurationTest {
     }
 
     @Test
-    void entitiesUseTheAppMapperAsIsAndProtocolMessagesTheFixedMapper() {
+    void entitiesUseACopyOfTheAppMapperAndProtocolMessagesTheFixedMapper() {
         runner.withUserConfiguration(PlainAppMapper.class).run(ctx -> {
             assertThat(ctx).hasSingleBean(CyodaObjectMapper.class);
             assertThat(ctx).hasSingleBean(ObjectMapper.class);
@@ -108,11 +110,19 @@ class CyodaObjectMapperAutoConfigurationTest {
 
             assertMeetsTheWireContract(mappers.protocol());
             assertThat(mappers.protocol()).isNotSameAs(appMapper);
-            assertThat(mappers.entities()).isSameAs(appMapper);
-            // the app's mapper is left exactly as the app configured it
+            // entities() is a copy, not the bean itself, so a BigDecimal field's scale can be kept without
+            // touching anything the app configured on its own mapper.
+            assertThat(mappers.entities()).isNotSameAs(appMapper);
+            assertThat(mappers.entities().isEnabled(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS))
+                    .isEqualTo(appMapper.isEnabled(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS));
+            assertThat(mappers.entities().getDeserializationConfig()
+                    .isEnabled(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)).isFalse();
+            // the app's own bean is left exactly as the app configured it: still copied from, never modified
             assertThat(appMapper.getRegisteredModuleIds()).doesNotContain(JSR310_MODULE_ID);
             assertThat(appMapper.getDeserializationConfig().getProblemHandlers()).isNull();
             assertThat(appMapper.isEnabled(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)).isTrue();
+            assertThat(appMapper.getDeserializationConfig().isEnabled(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES))
+                    .isTrue();
         });
     }
 
@@ -124,7 +134,8 @@ class CyodaObjectMapperAutoConfigurationTest {
             CyodaObjectMapper mappers = ctx.getBean(CyodaObjectMapper.class);
 
             assertThat(appMapper.isEnabled(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)).isTrue();
-            assertThat(mappers.entities()).isSameAs(appMapper);
+            assertThat(mappers.entities()).isNotSameAs(appMapper);
+            assertThat(mappers.entities().isEnabled(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)).isTrue();
             assertThat(mappers.protocol().isEnabled(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)).isFalse();
             assertMeetsTheWireContract(mappers.protocol());
         });
@@ -236,14 +247,19 @@ class CyodaObjectMapperAutoConfigurationTest {
     }
 
     @Test
-    void ofUsesTheAppMapperForEntitiesWithoutModifyingIt() throws Exception {
+    void ofCopiesTheAppMapperForEntitiesWithoutModifyingIt() throws Exception {
         ObjectMapper base = new ObjectMapper();
 
         CyodaObjectMapper mappers = CyodaObjectMapper.of(base);
 
-        assertThat(mappers.entities()).isSameAs(base);
+        assertThat(mappers.entities()).isNotSameAs(base);
         assertThat(base.getRegisteredModuleIds()).isEmpty();
         assertThat(base.isEnabled(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)).isTrue();
+        // the copy keeps decimal scale; the bean itself is untouched (still Jackson's default: stripped)
+        assertThat(mappers.entities().getDeserializationConfig()
+                .isEnabled(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)).isFalse();
+        assertThat(base.getDeserializationConfig().isEnabled(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES))
+                .isTrue();
         assertMeetsTheWireContract(mappers.protocol());
     }
 }

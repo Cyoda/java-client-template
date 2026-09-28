@@ -821,8 +821,18 @@ Boot's `JacksonAutoConfiguration`.
 - **Entity mapper (`entities()`)** is used for every conversion between an app entity class
   and a JSON tree: writing an entity for create, update and save, reading one from a
   payload's `data`, the serializers' `entityToJsonNode`/`extractEntity`, and the values of
-  search conditions built from entity fields. It is the app's primary `ObjectMapper`, used
-  as is: never copied, never modified.
+  search conditions built from entity fields. It is a copy of the app's primary
+  `ObjectMapper`, taken once at startup with `ObjectMapper.copy()`: every app setting
+  (naming, modules, date format) carries over, **except** that
+  `JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES` is always disabled on the copy. The
+  app's own bean is never modified.
+  - Why: the entity-to-tree conversion (`valueToTree` / `entityToJsonNode`) is an
+    intermediate step the app never sees or configures, not a choice the app made. Left at
+    Jackson 2.19's default, it would collapse a `BigDecimal` entity field's scale there
+    (`10.00` becomes a `DecimalNode` of scale `-1`, written back as `1E+1`) even though the
+    app's own JSON output — serializing a `BigDecimal` field directly, not through this tree
+    — already keeps it. So: entity conversion follows the app's Jackson settings, except
+    that decimal scale is always kept.
   - The entity JSON stored in Cyoda therefore follows the app's Jackson settings. With
     `SNAKE_CASE` naming, the entity is stored in snake_case, and JSON paths in conditions and
     workflows must use those names.
@@ -830,7 +840,9 @@ Boot's `JacksonAutoConfiguration`.
     `JavaTimeModule` and turns `WRITE_DATES_AS_TIMESTAMPS` off). The framework forces
     nothing the app did not choose: an app that turns timestamps on stores numbers.
   - The entity JSON always reaches the protocol message as a JSON tree (`valueToTree`),
-    never as text, so the protocol mapper writes it verbatim.
+    never as text, so the protocol mapper writes it verbatim — including a `BigDecimal`
+    field's scale, end to end in both directions (an inbound callout's entity data, via
+    `protocol()`'s own decimal settings above, and an outgoing entity, via this copy).
 - **An ambiguous app mapper fails at startup.** With several `ObjectMapper` beans and none
   primary, the bean fails with a message naming them and the fix (mark one `@Primary`).
   With no `ObjectMapper` bean at all, it fails saying to keep `JacksonAutoConfiguration` or
