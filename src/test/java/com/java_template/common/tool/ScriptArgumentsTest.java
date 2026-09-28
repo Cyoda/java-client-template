@@ -3,20 +3,25 @@ package com.java_template.common.tool;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * ABOUTME: Pins that scripts/sync-cyoda-contract.sh and scripts/install-cyoda.sh fail loudly, not
  * silently, when a value-taking flag is given with no value. Under `set -e`, a trailing flag whose
- * value is read with `shift 2` used to let `shift` fail with no message at all (T1, T11). None of
- * these cases reach the network.
+ * value is read with `shift 2` used to let `shift` fail with no message at all (T1, T11). Also that
+ * install-cyoda.sh names Go when a source build has none. None of these cases reach the network.
  */
 @DisabledOnOs(OS.WINDOWS)
 class ScriptArgumentsTest {
@@ -27,14 +32,19 @@ class ScriptArgumentsTest {
     }
 
     private Result run(String script, String... args) throws IOException, InterruptedException {
+        return run(Map.of(), script, args);
+    }
+
+    private Result run(Map<String, String> env, String script, String... args) throws IOException, InterruptedException {
         String[] command = new String[args.length + 2];
         command[0] = "bash";
         command[1] = ROOT.resolve("scripts").resolve(script).toString();
         System.arraycopy(args, 0, command, 2, args.length);
-        Process process = new ProcessBuilder(command)
+        ProcessBuilder builder = new ProcessBuilder(command)
                 .directory(ROOT.toFile())
-                .redirectErrorStream(false)
-                .start();
+                .redirectErrorStream(false);
+        builder.environment().putAll(env);
+        Process process = builder.start();
         process.getOutputStream().close();
         String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
         process.getInputStream().readAllBytes();
@@ -69,5 +79,21 @@ class ScriptArgumentsTest {
         Result result = run("install-cyoda.sh", "--dest");
         assertThat(result.exitCode()).isNotZero();
         assertThat(result.stderr()).contains("--dest");
+    }
+
+    /**
+     * The build's installCyoda task runs this script with no arguments; for the -dev pin that is a source build.
+     * Without Go it must say so, and name the way around it, before it reaches the network.
+     */
+    @Test
+    void installCyodaWithoutGoSaysGoIsNeededAndHowToSkipIt(@TempDir Path dest) throws Exception {
+        assumeTrue(Files.readString(ROOT.resolve("src/main/resources/cyoda/CYODA_VERSION")).lines().findFirst()
+                .orElseThrow().endsWith("-dev"), "the pin is a -dev version");
+        assumeFalse(Files.exists(Path.of("/usr/bin/go")) || Files.exists(Path.of("/bin/go")), "no go on the bare PATH");
+
+        Result result = run(Map.of("PATH", "/usr/bin:/bin"), "install-cyoda.sh", "--dest", dest.toString());
+
+        assertThat(result.exitCode()).isNotZero();
+        assertThat(result.stderr()).contains("Go >= 1.26.7").contains("-dev").contains("CYODA_BIN");
     }
 }

@@ -128,6 +128,15 @@ Before submitting changes, ensure:
 - Run `./gradlew build` to generate required classes
 - Check that all framework dependencies are available
 
+**Integration Tests and the cyoda Binary:**
+- `./gradlew build` and `./gradlew check` run the integration tests against the cyoda-go pinned in
+  `src/main/resources/cyoda/CYODA_VERSION`, and install it automatically first (the `installCyoda` task runs
+  `scripts/install-cyoda.sh` into `.cyoda/bin`, which is git-ignored and survives `./gradlew clean`)
+- Installing a `-dev` pin builds it from source and needs Go 1.26.7 or later, `git` and network access; a released
+  pin is downloaded and needs network access. If the install fails, its message says which
+- To use your own binary, pass `-Dcyoda.bin=<path>` or set `CYODA_BIN`; nothing is installed then (also the
+  way to run them on Windows). To build without them: `./gradlew build -x integrationTest`
+
 **File Not Found:**
 - Ensure `.java.txt` files are in correct directories
 - Verify directory structure matches package names

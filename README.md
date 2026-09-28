@@ -85,6 +85,27 @@ java -jar build/libs/app.jar --spring.profiles.active=local
 >
 > **Note**: The app runs on port 8080 by default (`src/main/resources/application.yml`) and on 8081 with the `local` profile, under the `/api` context path. You can change the port by setting the `server.port` property.
 
+### 5. 🧪 Run the Tests
+
+```bash
+./gradlew test                        # unit tests
+./gradlew check                       # unit tests + integration tests against the pinned cyoda-go
+./gradlew build -x integrationTest    # build without the integration tests
+```
+
+`./gradlew check` and `./gradlew build` run the integration tests (`src/integrationTest`), which start the
+cyoda-go version pinned in `src/main/resources/cyoda/CYODA_VERSION` as a subprocess. **The build installs it
+automatically**: the `installCyoda` task runs `scripts/install-cyoda.sh` into `.cyoda/bin` (git-ignored). The
+binary survives `./gradlew clean` and is reused while it matches the pin, so it is installed once per pin.
+Installing needs:
+
+- for a `-dev` pin (built from source): Go 1.26.7 or later, `git`, and network access to github.com;
+- for a released pin (downloaded): network access to the GitHub release.
+
+To use a cyoda binary you installed yourself, pass `-Dcyoda.bin=<path>` or set `CYODA_BIN=<path>`; the build
+then installs nothing. Windows cannot run the install script: use `-Dcyoda.bin` / `CYODA_BIN` there, or
+`-x integrationTest`.
+
 ---
 
 ## 🏗️ Project Structure
@@ -208,7 +229,8 @@ This schema defines the structure for workflow definitions, including states, tr
 1. Review `llm_example/` directory for patterns before implementing new features
 2. Follow established architectural patterns for processors, criteria, and serializers
 3. Use `usage-rules.md` for detailed implementation guidelines
-4. Run `./gradlew build` to generate required classes before development
+4. Run `./gradlew build` to generate required classes before development (it also installs the pinned cyoda
+   for the integration tests; see "5. Run the Tests" above)
 
 **For Contributors:**
 

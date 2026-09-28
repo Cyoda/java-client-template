@@ -739,6 +739,12 @@ source set has `sourceSets.test.output` on its classpath. `@CyodaIntegrationTest
   - `authclaims` parsing: comma form, empty, JSON, garbage;
   - `requireRole` for `SERVICE`, `SYSTEM`, an empty context and empty roles.
 - **Callout scope:** `wrap`, `unjoined`, and behaviour once closed.
+- **Maintainer scripts:** a value-taking flag given without its value fails with a message;
+  `install-cyoda.sh` without Go says Go is needed and names `CYODA_BIN`.
+- **Binary lookup and install:** `CyodaBinary`'s lookup order, including `.cyoda/bin`
+  auto-detection in a temp project; `CyodaInstallDecision` (`buildSrc`): an explicit binary
+  skips, a matching binary is kept, a missing or mismatching one is installed, and Windows
+  refuses with the way around it.
 
 ## 7. Build and CI
 
@@ -751,10 +757,14 @@ source set has `sourceSets.test.output` on its classpath. `@CyodaIntegrationTest
   - it passes `cyoda.pinFile`, `cyoda.logDir`, `cyoda.projectDir` (the project directory,
     where the harness looks for `.cyoda/bin/cyoda`) and, when set, `cyoda.bin` and
     `cyoda.allowVersionMismatch`.
-  - Without a cyoda binary, it fails with the install command.
-  - On machines without cyoda, run `./gradlew build -x integrationTest` (documented).
-- **Integration-test check:** a test fails when an integration-test class declares
-  `@MockitoBean` or `@MockBean`.
+  - It depends on `installCyoda` (§7.4), so `./gradlew build` and `check` install the
+    pinned cyoda themselves.
+  - If no binary can be found after that, it fails with the install command.
+  - Where cyoda cannot be installed or run, `./gradlew build -x integrationTest` builds
+    without it (documented).
+- **`buildLogicTest`** runs `buildSrc`'s own unit tests and is part of `check`.
+- **Integration-test hygiene:** the unit test `IntegrationTestHygieneTest` fails when an
+  integration-test class declares `@MockitoBean` or `@MockBean`.
 - **Jacoco** reports on `test` + `integrationTest`.
 
 ### 7.2 Removed
@@ -790,17 +800,38 @@ with `CYODA_BIN` or `-Dcyoda.bin`.
   - It requires Go ≥ 1.26.7.
   - The Go module path is `github.com/cyoda-platform/cyoda-go`; the repository is
     `Cyoda/cyoda-go`.
-- It prints the binary path for `CYODA_BIN`.
+- It runs `--version` on the result and prints the binary path on stdout, for `CYODA_BIN`.
+  It never runs `cyoda init`.
+- **Failures name their cause and the way around it** (`CYODA_BIN` / `-Dcyoda.bin`): no
+  Go for a source build (and, for a `-dev` pin, that it has no release to download), a
+  failed clone or download (network access, a published release), or a failed `go build`.
+
+**The `installCyoda` Gradle task** (`buildSrc` `InstallCyodaTask`, a dependency of
+`integrationTest`) runs the script with no arguments, so the build installs the pinned
+cyoda into `.cyoda/bin` itself. `CyodaInstallDecision` decides, at execution time:
+- `-Dcyoda.bin` or `CYODA_BIN` set: nothing is installed or run.
+- `.cyoda/bin/cyoda` present and its `--version` matches the pin, by the harness's rule
+  (§3.4): nothing is installed, and the task reports `UP-TO-DATE`. The binary is only ever
+  run with `--version`.
+- Otherwise it is installed, or reinstalled over a binary that does not match.
+- On Windows, which cannot run the script, an install that is needed fails with a message
+  naming `scripts/install-cyoda.sh`, `-Dcyoda.bin` and `CYODA_BIN`.
+- A failed install fails the task after the script's own message, and adds the
+  `-Dcyoda.bin` / `CYODA_BIN` / `-x integrationTest` ways around it.
+
+Installing needs Go ≥ 1.26.7, `git` and network access for a `-dev` pin (a source build),
+or network access for a released pin (a download).
 
 ### 7.5 CI (`.github/workflows/build.yml`)
 
-- **Triggers:** `push` and `pull_request` are added to the existing `workflow_dispatch`.
-- **Standard job:**
-  1. `actions/setup-go` pinned to cyoda-go's Go version (only for a source build);
-  2. `install-cyoda.sh`;
-  3. `./gradlew check`.
-- **`compile-only`** also compiles `testFixtures` and `integrationTest`.
-- **On failure,** `build/cyoda-logs/` and the test reports are uploaded as artifacts.
+- **Triggers:** `push`, `pull_request` and `workflow_dispatch`.
+- **Standard job** (and `test-only`):
+  1. `actions/setup-go` at Go 1.26.7, for the source build of the `-dev` pin;
+  2. `install-cyoda.sh`, whose output becomes `CYODA_BIN`;
+  3. `./gradlew check`, in which `installCyoda` installs nothing, because `CYODA_BIN` is set.
+- **`compile-only`** compiles main, test, `testFixtures` and `integrationTest` sources.
+- **On failure,** `build/cyoda-logs/` is uploaded. Test results and reports for `test` and
+  `integrationTest` are always uploaded. The standard jar artifact is `build/libs/app.jar`.
 
 ## 8. Verify early during implementation
 

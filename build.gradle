@@ -164,12 +164,24 @@ test {
 
 def cyodaPin = file('src/main/resources/cyoda/CYODA_VERSION')
 
+// Installs the pinned cyoda into .cyoda/bin with scripts/install-cyoda.sh (spec §7.4). Nothing is installed when
+// -Dcyoda.bin or CYODA_BIN names a binary, or when .cyoda/bin/cyoda already matches the pin.
+tasks.register('installCyoda', com.cyoda.build.InstallCyodaTask) {
+    description = 'Installs the pinned cyoda binary into .cyoda/bin, unless one is configured or already installed'
+    group = 'verification'
+    projectRoot = layout.projectDirectory
+    pinFile = cyodaPin
+    explicitBinaryProperty = providers.systemProperty('cyoda.bin')
+    explicitBinaryEnv = providers.environmentVariable('CYODA_BIN')
+}
+
 tasks.register('integrationTest', Test) {
     description = 'Tier-1 integration tests against a cyoda-go subprocess (mock IAM, memory storage)'
     group = 'verification'
     testClassesDirs = sourceSets.integrationTest.output.classesDirs
     classpath = sourceSets.integrationTest.runtimeClasspath
     useJUnitPlatform()
+    dependsOn tasks.named('installCyoda')
     shouldRunAfter tasks.named('test')
     systemProperty 'user.dir', project.projectDir.absolutePath
     // CyodaBinary looks for scripts/install-cyoda.sh's default install, <project>/.cyoda/bin/cyoda, here

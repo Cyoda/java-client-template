@@ -37,14 +37,23 @@ mkdir -p "$DEST"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+OVERRIDE_HINT="or install cyoda yourself and point CYODA_BIN (or -Dcyoda.bin) at it"
+
+require_go() {
+  local why=""
+  if [[ "$VERSION" == *-dev ]]; then why=" (the pin $VERSION is a -dev version, which has no published release to download)"; fi
+  command -v go >/dev/null || fail "Go >= 1.26.7 is required to build cyoda from source$why. Install Go, $OVERRIDE_HINT"
+}
+
 build_checkout() { # <checkout dir>
-  command -v go >/dev/null || fail "Go >= 1.26.7 is required to build cyoda from source"
+  require_go
   local sha date
   sha="$(git -C "$1" rev-parse HEAD)"
   date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   ( cd "$1" && CGO_ENABLED=0 go build \
       -ldflags "-X main.version=$VERSION -X main.commit=$sha -X main.buildDate=$date" \
-      -o "$DEST/cyoda" ./cmd/cyoda )
+      -o "$DEST/cyoda" ./cmd/cyoda ) \
+    || fail "go build failed in $1 (it needs Go >= 1.26.7 and, to fetch modules, network access), $OVERRIDE_HINT"
 }
 
 case "$MODE" in
@@ -54,8 +63,9 @@ case "$MODE" in
     case "$arch" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; esac
     asset="cyoda_${VERSION}_${os}_${arch}.tar.gz"
     base="https://github.com/Cyoda/cyoda-go/releases/download/v${VERSION}"
-    curl -fsSL "$base/$asset" -o "$WORK/$asset" || fail "cannot download $base/$asset"
-    curl -fsSL "$base/SHA256SUMS" -o "$WORK/SHA256SUMS" || fail "cannot download $base/SHA256SUMS"
+    download_hint="a released pin is downloaded, which needs network access to github.com and a published release v$VERSION with an asset for $os/$arch; $OVERRIDE_HINT"
+    curl -fsSL "$base/$asset" -o "$WORK/$asset" || fail "cannot download $base/$asset: $download_hint"
+    curl -fsSL "$base/SHA256SUMS" -o "$WORK/SHA256SUMS" || fail "cannot download $base/SHA256SUMS: $download_hint"
     if command -v sha256sum >/dev/null; then
       checksum_tool=(sha256sum -c -)
     elif command -v shasum >/dev/null; then
@@ -69,8 +79,10 @@ case "$MODE" in
     ;;
   github)
     [ -n "$REF" ] || REF="$COMMIT"
-    git clone --quiet https://github.com/Cyoda/cyoda-go.git "$WORK/cyoda-go"
-    git -C "$WORK/cyoda-go" checkout --quiet "$REF"
+    require_go
+    git clone --quiet https://github.com/Cyoda/cyoda-go.git "$WORK/cyoda-go" \
+      || fail "cannot clone https://github.com/Cyoda/cyoda-go.git: a source build needs network access to github.com, $OVERRIDE_HINT"
+    git -C "$WORK/cyoda-go" checkout --quiet "$REF" || fail "cannot check out $REF in cyoda-go"
     build_checkout "$WORK/cyoda-go"
     ;;
   local)
