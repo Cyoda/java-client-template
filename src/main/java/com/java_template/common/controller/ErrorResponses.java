@@ -1,5 +1,8 @@
 package com.java_template.common.controller;
 
+import com.java_template.common.exception.CyodaCredentialException;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import org.slf4j.Logger;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -12,6 +15,11 @@ import java.util.UUID;
  * hosts, URLs or Cyoda error detail, so it is never put in the response: the client gets a generic detail and a
  * correlation id (also in the ProblemDetail's {@code correlationId} property), and the server log records the
  * exception under that id.
+ * <p>
+ * The status is the caller's (e.g. 400 for a request the operation could not carry out), except for a call
+ * refused because a logged-in user is on the thread ({@link CyodaCredentialException}) or rejected by Cyoda as
+ * {@code UNAUTHENTICATED}: those are the service's own configuration limits, not the client's fault, so they
+ * answer 500.
  */
 public final class ErrorResponses {
 
@@ -22,12 +30,15 @@ public final class ErrorResponses {
 
     /**
      * Logs {@code cause} at ERROR with a new correlation id and returns a ProblemDetail whose detail is
-     * {@code publicMessage} plus that id.
+     * {@code publicMessage} plus that id, with {@code status}, or 500 for a server-side credential failure.
      *
      * @param publicMessage a fixed, generic description of what failed (e.g. "Failed to create Order"); never
      *                      the exception's message or unvalidated request input
      */
     public static ProblemDetail problem(Logger logger, HttpStatus status, String publicMessage, Exception cause) {
+        if (isServerSideCredentialFailure(cause)) {
+            status = HttpStatus.INTERNAL_SERVER_ERROR;
+        }
         String correlationId = UUID.randomUUID().toString();
         logger.error("{} [correlationId={}]", publicMessage, correlationId, cause);
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
@@ -39,5 +50,18 @@ public final class ErrorResponses {
     /** {@link #problem} as a response entity. */
     public static <T> ResponseEntity<T> failure(Logger logger, HttpStatus status, String publicMessage, Exception cause) {
         return ResponseEntity.of(problem(logger, status, publicMessage, cause)).build();
+    }
+
+    /** A refused logged-in call, or Cyoda rejecting the service's credentials, anywhere in the cause chain. */
+    static boolean isServerSideCredentialFailure(Throwable cause) {
+        for (Throwable t = cause; t != null; t = t.getCause()) {
+            if (t instanceof CyodaCredentialException) {
+                return true;
+            }
+            if (t instanceof StatusRuntimeException sre && sre.getStatus().getCode() == Status.Code.UNAUTHENTICATED) {
+                return true;
+            }
+        }
+        return false;
     }
 }

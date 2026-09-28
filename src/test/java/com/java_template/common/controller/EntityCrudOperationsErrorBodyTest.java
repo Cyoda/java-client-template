@@ -54,6 +54,17 @@ class EntityCrudOperationsErrorBodyTest {
     }
 
     @Test
+    void aRefusedLoggedInCallAnswers500(CapturedOutput output) {
+        when(entityService.deleteById(any())).thenThrow(new java.util.concurrent.CompletionException(
+                new com.java_template.common.exception.CyodaCredentialException(INTERNAL)));
+
+        ResponseEntity<Void> response = ops.deleteById(UUID.randomUUID());
+
+        assertThat(response.getStatusCode().value()).isEqualTo(500);
+        assertGeneric(() -> response, output);
+    }
+
+    @Test
     void everyOperationHidesTheCause(CapturedOutput output) {
         UUID id = UUID.randomUUID();
         RuntimeException boom = new RuntimeException(INTERNAL);
