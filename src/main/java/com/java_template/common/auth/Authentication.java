@@ -54,7 +54,6 @@ public class Authentication implements CyodaTokenSource {
                 .clientSecret(config.getCyodaClientSecret())
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
                 .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
-                .scope("ROLE_M2M")
                 .build();
 
         var registrationRepo = new InMemoryClientRegistrationRepository(registration);
