@@ -119,7 +119,7 @@ jobs:
 
       - name: Run workflow validation test
         if: ${{ env.BUILD_TYPE == 'workflow-validation' }}
-        run: ./gradlew test --tests WorkflowComponentValidationStandaloneTest
+        run: ./gradlew validateWorkflowImplementations --console=plain
 
       - name: Build standard JAR
         if: ${{ env.BUILD_TYPE == 'standard' || env.BUILD_TYPE == 'both' }}
