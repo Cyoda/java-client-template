@@ -599,9 +599,13 @@ public class CyodaRepository implements CrudRepository {
     ) {
         final CloudEvent requestEvent = build(baseEvent);
         return CompletableFuture.supplyAsync(() -> CyodaGrpcCalls.call(ctx, tokenSource, () -> {
-            logger.debug("Sending event: {}", CloudEvents.describe(requestEvent));
+            if (logger.isDebugEnabled()) {
+                logger.debug("Sending event: {}", CloudEvents.describe(requestEvent));
+            }
             CloudEvent response = apiCall.apply(unary(ctx), requestEvent);
-            logger.debug("Received event: {}", CloudEvents.describe(response));
+            if (logger.isDebugEnabled()) {
+                logger.debug("Received event: {}", CloudEvents.describe(response));
+            }
             return validateResponse(cloudEventParser.parseCloudEvent(response, responsePayloadType), ctx.isJoined());
         }), executor);
     }
