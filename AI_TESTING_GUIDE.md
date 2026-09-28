@@ -239,7 +239,7 @@ tests (`src/integrationTest`) against the cyoda-go pinned in `src/main/resources
 installs that binary automatically (the `installCyoda` task runs `scripts/install-cyoda.sh` into `.cyoda/bin`,
 which survives `./gradlew clean` and is reused while it matches the pin; a `cyoda` on `PATH` that already
 matches the pin is kept too, as long as `.cyoda/bin` is empty). A `-dev` pin is built from source and needs Go
-1.26.7 or later, `git` and network access; a released pin is downloaded and needs network access. With no way
+1.26.7 or later, `git` and network access; a released pin is downloaded, needs network access, and must match the SHA-256 committed in `CYODA_SHA256SUMS`. With no way
 to install it, pass `-Dcyoda.bin=<path>` / set `CYODA_BIN` to a binary you have, or build with
 `./gradlew build -x integrationTest`. To keep a binary that deliberately does not match the pin — at
 `.cyoda/bin` or on `PATH` — instead of it being overwritten, pass `-Dcyoda.allowVersionMismatch=true`.

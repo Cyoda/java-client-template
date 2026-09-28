@@ -100,13 +100,21 @@ binary survives `./gradlew clean` and is reused while it matches the pin, so it 
 Installing needs:
 
 - for a `-dev` pin (built from source): Go 1.26.7 or later, `git`, and network access to github.com;
-- for a released pin (downloaded): network access to the GitHub release.
+- for a released pin (downloaded): network access to the GitHub release; the archive must match the SHA-256
+  committed next to the pin (`CYODA_SHA256SUMS`).
 
 To use a cyoda binary you installed yourself, pass `-Dcyoda.bin=<path>` or set `CYODA_BIN=<path>`; the build
 then installs nothing. A `cyoda` on `PATH` that already matches the pin is kept too, as long as `.cyoda/bin`
 is empty (the tests then use it). To keep a binary that deliberately does not match the pin — at `.cyoda/bin`
 or on `PATH` — instead of it being overwritten, pass `-Dcyoda.allowVersionMismatch=true`. Windows cannot run
 the install script: use `-Dcyoda.bin` / `CYODA_BIN` there, or `-x integrationTest`.
+
+**Dependency verification.** Gradle checks every downloaded dependency against `gradle/verification-metadata.xml`.
+After adding or bumping a dependency, regenerate the checksums with one command (details in `CONTRIBUTING.md`):
+
+```bash
+./gradlew --no-daemon --write-verification-metadata sha256 build integrationTest jacocoTestReport bootJarWorkflowImport printOtelAgentPath resolveProtocNatives
+```
 
 ---
 

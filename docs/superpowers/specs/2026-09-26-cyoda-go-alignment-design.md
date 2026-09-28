@@ -790,6 +790,12 @@ source set has `sourceSets.test.output` on its classpath. `@CyodaIntegrationTest
 - **Integration-test hygiene:** the unit test `IntegrationTestHygieneTest` fails when an
   integration-test class declares `@MockitoBean` or `@MockBean`.
 - **Jacoco** reports on `test` + `integrationTest`.
+- **Dependency verification:** `gradle/verification-metadata.xml` holds the SHA-256 of every
+  artifact the build and CI resolve (plugins, `buildSrc`, codegen tools, test, `testFixtures`
+  and `integrationTest` classpaths, the OTel agent, and protoc/gRPC-plugin binaries for every
+  platform via `resolveProtocNatives`). `buildLogicTest`'s nested `buildSrc` build uses
+  `buildSrc/gradle/verification-metadata.xml`, written by the same
+  `--write-verification-metadata` run (CONTRIBUTING.md has the command).
 
 ### 7.2 Removed
 

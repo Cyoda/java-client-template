@@ -114,6 +114,23 @@ Before submitting changes, ensure:
 4. **Ensure documentation** is updated appropriately
 5. **Merge** only after validation passes
 
+### Dependency verification
+
+Gradle verifies the SHA-256 of every dependency, plugin and tool it downloads against
+`gradle/verification-metadata.xml` (and `buildSrc/gradle/verification-metadata.xml` for `buildLogicTest`'s nested
+`buildSrc` build). A dependency that is new, or at a new version, fails the build with "Dependency verification
+failed" until its checksums are recorded. After a dependency or plugin bump, regenerate both files with one command:
+
+```bash
+./gradlew --no-daemon --write-verification-metadata sha256 build integrationTest jacocoTestReport bootJarWorkflowImport printOtelAgentPath resolveProtocNatives
+```
+
+It runs the build, the integration tests and every task CI runs, so every configuration they resolve is recorded,
+including `buildSrc`, the protoc and gRPC plugin binaries for every platform (`resolveProtocNatives`), the OTel agent
+and the `integrationTest` classpath. Review the diff before committing it: each new entry is an artifact you now
+trust. Gradle keeps entries it no longer needs; they are harmless. IDE downloads of `-sources`/`-javadoc` jars are
+trusted without checksums.
+
 ## 🔧 Troubleshooting
 
 ### Common Issues
@@ -132,7 +149,8 @@ Before submitting changes, ensure:
   `src/main/resources/cyoda/CYODA_VERSION`, and install it automatically first (the `installCyoda` task runs
   `scripts/install-cyoda.sh` into `.cyoda/bin`, which is git-ignored and survives `./gradlew clean`)
 - Installing a `-dev` pin builds it from source and needs Go 1.26.7 or later, `git` and network access; a released
-  pin is downloaded and needs network access. If the install fails, its message says which
+  pin is downloaded, needs network access, and must match the checksum committed in `CYODA_SHA256SUMS`. If the
+  install fails, its message says which
 - To use your own binary, pass `-Dcyoda.bin=<path>` or set `CYODA_BIN`; nothing is installed then (also the
   way to run them on Windows). A `cyoda` on `PATH` that already matches the pin is kept too, as long as
   `.cyoda/bin` is empty. To keep a binary that deliberately does not match the pin — at `.cyoda/bin` or on
