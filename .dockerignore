@@ -37,3 +37,11 @@
 # Documentation and deployment assets not read by the Gradle build.
 docs
 helm
+
+# Local configuration that may hold credentials. bootJar packages everything under src/main/resources, so a
+# git-ignored profile file there would otherwise end up inside the image. Only the shipped cyoda-local profile
+# (no credentials) is kept.
+src/main/resources/application-*.yml
+src/main/resources/application-*.yaml
+!src/main/resources/application-cyoda-local.yml
+**/.env
