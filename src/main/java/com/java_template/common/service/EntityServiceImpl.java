@@ -799,7 +799,8 @@ public class EntityServiceImpl implements EntityService {
      * no further pages (an async snapshot would not see the transaction's writes, spec §4.4), so paging at
      * pageSize would end every stream after its first page. A search that fills the limit fails loudly with
      * {@link IllegalStateException} in the repository, before anything is streamed, since whether more
-     * entities exist cannot be told. The caller's pointInTime is passed on, so it is still refused.
+     * entities exist cannot be told. The caller's pointInTime is passed on unchanged: cyoda-go reads it as a
+     * historical view of committed state and does not see this callout's own writes either way.
      */
     private static SearchAndRetrievalParams joinedStreamParams(final SearchAndRetrievalParams params) {
         return SearchAndRetrievalParams.builder()

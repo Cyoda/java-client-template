@@ -82,9 +82,11 @@ import java.util.stream.Stream;
  *   CYODA_CALLOUT_JOINED_RESPONSE_MAX_BYTES (10 MiB by default) with CyodaJoinedResponseTooLargeException.
  *   With entities larger than about 1 KB that ceiling is reached well before 9 999 matches. The remedy is to
  *   narrow the condition (or raise the ceiling on the cyoda side); paging is not available inside a callout.
- * - pointInTime must be null on every read (getById, findByBusinessId, search/findAll and the streams,
- *   getEntityCount, getEntityStatsByState, getEntityChangesMetadata): a point-in-time read is not supported
- *   inside a callout's transaction, and a non-null value throws IllegalArgumentException.
+ * - A non-null pointInTime on any read inside a callout (getById, findByBusinessId, search/findAll and the
+ *   streams, getEntityCount, getEntityStatsByState, getEntityChangesMetadata) is sent to cyoda through
+ *   unchanged, not refused: cyoda-go defines it as a historical read of committed state, so it returns
+ *   what was committed as at that time and does not see the callout's own uncommitted writes, however
+ *   recent. Reading without pointInTime is the only way to see the transaction's own writes.
  * - transactionWindow and transactionTimeoutMs must be null (IllegalArgumentException otherwise).
  * - create/update/updateByBusinessId/save/updateAll return the transaction's latest view of the entity,
  *   read without a point in time.

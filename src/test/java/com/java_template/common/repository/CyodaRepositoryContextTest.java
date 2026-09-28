@@ -1,5 +1,6 @@
 package com.java_template.common.repository;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.java_template.common.auth.CyodaTokenSource;
 import com.java_template.common.call.CalloutScope;
@@ -22,8 +23,12 @@ import org.cyoda.cloud.api.event.common.BaseEvent;
 import org.cyoda.cloud.api.event.common.DataPayload;
 import org.cyoda.cloud.api.event.common.Error;
 import org.cyoda.cloud.api.event.common.ModelSpec;
+import org.cyoda.cloud.api.event.common.EntityChangeMeta;
+import org.cyoda.cloud.api.event.search.EntityChangesMetadataResponse;
 import org.cyoda.cloud.api.event.search.EntityResponse;
 import org.cyoda.cloud.api.event.search.EntitySnapshotSearchResponse;
+import org.cyoda.cloud.api.event.search.EntityStatsByStateResponse;
+import org.cyoda.cloud.api.event.search.EntityStatsResponse;
 import org.cyoda.cloud.api.event.search.SearchSnapshotStatus;
 import org.cyoda.cloud.api.grpc.CloudEventsServiceGrpc;
 import org.junit.jupiter.api.AfterEach;
@@ -306,46 +311,78 @@ class CyodaRepositoryContextTest {
         });
     }
 
+    /**
+     * cyoda-go defines pointInTime as a historical read of committed state that ignores the
+     * transaction's own uncommitted writes (cyoda help crud; plugins/memory/entity_store.go
+     * GetAsAt), so a caller-supplied pointInTime inside a joined scope is passed through to
+     * cyoda unchanged, alongside the tx-token, rather than refused locally.
+     */
     @Test
-    void insideAScopeACallerSuppliedPointInTimeIsRefusedOnEveryReadPath() {
+    void insideAScopeACallerSuppliedPointInTimeReachesTheWireUnchangedOnEveryReadPath() {
         CyodaCallContext joined = CyodaCallContext.m2m().withTxToken("tx-1");
         OffsetDateTime pit = OffsetDateTime.parse("2026-09-27T10:11:12.123456789Z");
         UUID id = UUID.randomUUID();
 
-        assertThatThrownBy(() -> repo.findById(joined, id, pit))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
-        assertThatThrownBy(() -> repo.findAll(joined, spec, SearchAndRetrievalParams.builder().pointInTime(pit).build()))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
-        assertThatThrownBy(() -> repo.findAllByCriteria(joined, spec, all,
-                SearchAndRetrievalParams.builder().inMemory(true).pointInTime(pit).build()))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
-        assertThatThrownBy(() -> repo.getEntityCount(joined, spec, pit))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
-        assertThatThrownBy(() -> repo.getEntityStatsByState(joined, spec, pit))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
-        assertThatThrownBy(() -> repo.getEntityStatsByState(joined, spec, List.of("DRAFT"), pit))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
-        assertThatThrownBy(() -> repo.getEntityChangesMetadata(joined, id, pit))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
-        assertThat(server.seen).isEmpty();
+        server.unary = ce -> entity(1);
+        server.collection = ce -> switch (ce.getType()) {
+            case "EntitySearchRequest" -> List.of(entity(1));
+            case "EntityStatsGetRequest" -> List.of(new EntityStatsResponse().withId("r").withSuccess(true)
+                    .withModelName(spec.getName()).withModelVersion(spec.getVersion()).withCount(1L));
+            case "EntityStatsByStateGetRequest" -> List.of(new EntityStatsByStateResponse().withId("r").withSuccess(true)
+                    .withModelName(spec.getName()).withModelVersion(spec.getVersion()).withState("DRAFT").withCount(1L));
+            case "EntityChangesMetadataGetRequest" -> List.of(new EntityChangesMetadataResponse().withId("r").withSuccess(true)
+                    .withChangeMeta(new EntityChangeMeta()));
+            default -> throw new IllegalStateException(ce.getType());
+        };
+
+        repo.findById(joined, id, pit).join();
+        repo.findAll(joined, spec, SearchAndRetrievalParams.builder().pointInTime(pit).build()).join();
+        repo.findAllByCriteria(joined, spec, all,
+                SearchAndRetrievalParams.builder().inMemory(true).pointInTime(pit).build()).join();
+        repo.getEntityCount(joined, spec, pit).join();
+        repo.getEntityStatsByState(joined, spec, pit).join();
+        repo.getEntityStatsByState(joined, spec, List.of("DRAFT"), pit).join();
+        repo.getEntityChangesMetadata(joined, id, pit).join();
+
+        assertThat(server.seen).hasSizeGreaterThanOrEqualTo(7).allSatisfy(s -> {
+            assertThat(s.txToken()).isEqualTo("tx-1");
+            JsonNode wire = om.readTree(s.textData());
+            assertThat(wire.path("pointInTime").isMissingNode()).isFalse();
+            assertThat(OffsetDateTime.parse(wire.path("pointInTime").asText())).isEqualTo(pit);
+        });
     }
 
+    /**
+     * Same rule as above, exercised through EntityServiceImpl: it must not add a refusal of its own.
+     */
     @Test
-    void insideAScopeTheServiceRefusesACallerSuppliedPointInTimeOnGetByIdAndFindByBusinessId() {
+    void insideAScopeTheServicePassesACallerSuppliedPointInTimeThroughOnGetByIdAndFindByBusinessId() {
         OffsetDateTime pit = OffsetDateTime.parse("2026-09-27T10:11:12.123456789Z");
         EntityServiceImpl service = service();
+        UUID id = UUID.randomUUID();
+
+        server.unary = ce -> entity(1);
+        server.collection = ce -> switch (ce.getType()) {
+            case "EntitySearchRequest" -> List.of(entity(1));
+            case "EntityStatsGetRequest" -> List.of(new EntityStatsResponse().withId("r").withSuccess(true)
+                    .withModelName(spec.getName()).withModelVersion(spec.getVersion()).withCount(1L));
+            case "EntityChangesMetadataGetRequest" -> List.of(new EntityChangesMetadataResponse().withId("r").withSuccess(true)
+                    .withChangeMeta(new EntityChangeMeta()));
+            default -> throw new IllegalStateException(ce.getType());
+        };
 
         try (CalloutScope ignored = CalloutScope.open("tx-1")) {
-            assertThatThrownBy(() -> service.getById(UUID.randomUUID(), spec, Thing.class, pit))
-                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
-            assertThatThrownBy(() -> service.findByBusinessId(spec, "B-1", "name", Thing.class, pit))
-                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
-            assertThatThrownBy(() -> service.getEntityCount(spec, pit))
-                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
-            assertThatThrownBy(() -> service.getEntityChangesMetadata(UUID.randomUUID(), pit))
-                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("pointInTime");
+            service.getById(id, spec, Thing.class, pit);
+            service.findByBusinessId(spec, "B-1", "name", Thing.class, pit);
+            service.getEntityCount(spec, pit);
+            service.getEntityChangesMetadata(UUID.randomUUID(), pit);
         }
-        assertThat(server.seen).isEmpty();
+
+        assertThat(server.seen).hasSizeGreaterThanOrEqualTo(4).allSatisfy(s -> {
+            assertThat(s.txToken()).isEqualTo("tx-1");
+            JsonNode wire = om.readTree(s.textData());
+            assertThat(OffsetDateTime.parse(wire.path("pointInTime").asText())).isEqualTo(pit);
+        });
     }
 
     @Test

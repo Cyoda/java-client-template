@@ -171,17 +171,25 @@ class EntityServiceScopedStreamTest {
         }
     }
 
+    /**
+     * cyoda-go defines pointInTime as a historical read of committed state that ignores the
+     * transaction's own uncommitted writes (cyoda help crud; plugins/memory/entity_store.go
+     * GetAsAt), so a caller-supplied pointInTime inside a joined stream is passed through to
+     * cyoda unchanged rather than refused locally.
+     */
     @Test
-    void joinedStreamStillRefusesAPointInTime() {
+    void joinedStreamPassesACallerSuppliedPointInTimeThrough() {
         matches = 1;
+        OffsetDateTime pit = OffsetDateTime.now();
 
-        try (CalloutScope ignored = CalloutScope.open("tx-1")) {
-            assertThatThrownBy(() -> service.streamAll(MODEL, Thing.class,
-                    SearchAndRetrievalParams.builder().pointInTime(OffsetDateTime.now()).build()))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("pointInTime");
+        try (CalloutScope ignored = CalloutScope.open("tx-1");
+             Stream<EntityWithMetadata<Thing>> stream = service.streamAll(MODEL, Thing.class,
+                     SearchAndRetrievalParams.builder().pointInTime(pit).build())) {
+            assertThat(stream.toList()).hasSize(1);
         }
-        assertThat(searches).isEmpty();
+
+        assertThat(searches).singleElement()
+                .satisfies(request -> assertThat(request.getPointInTime()).isEqualTo(pit));
     }
 
     /** A minimal entity for deserialising the stubbed payloads. */

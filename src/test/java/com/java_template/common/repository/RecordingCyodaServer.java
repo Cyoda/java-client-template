@@ -35,7 +35,7 @@ import java.util.function.Supplier;
  */
 final class RecordingCyodaServer extends CloudEventsServiceGrpc.CloudEventsServiceImplBase implements AutoCloseable {
 
-    record Seen(String method, String type, String authorization, String txToken) {}
+    record Seen(String method, String type, String authorization, String txToken, String textData) {}
 
     static final Metadata.Key<String> AUTH = Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
     static final Metadata.Key<String> TX = Metadata.Key.of("tx-token", Metadata.ASCII_STRING_MARSHALLER);
@@ -66,7 +66,12 @@ final class RecordingCyodaServer extends CloudEventsServiceGrpc.CloudEventsServi
 
     private void record(String method, CloudEvent ce) {
         Metadata h = HEADERS.get();
-        seen.add(new Seen(method, ce.getType(), h.get(AUTH), h.get(TX)));
+        // CloudEventBuilder never sets a datacontenttype, so ProtoSerializer treats the request body as
+        // binary and puts it in binary_data, not text_data (io.cloudevents.protobuf.ProtoSupport.isTextContent).
+        String data = !ce.getTextData().isEmpty()
+                ? ce.getTextData()
+                : ce.getBinaryData().toStringUtf8();
+        seen.add(new Seen(method, ce.getType(), h.get(AUTH), h.get(TX), data));
     }
 
     @Override

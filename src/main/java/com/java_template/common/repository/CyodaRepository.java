@@ -225,7 +225,6 @@ public class CyodaRepository implements CrudRepository {
             final UUID entityId,
             @Nullable final OffsetDateTime pointInTime
     ) {
-        rejectPointInTimeWhenJoined(ctx, pointInTime);
         return sendAndGet(
                 ctx,
                 (stub, req) -> stub.entitySearch(req),
@@ -244,9 +243,8 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final SearchAndRetrievalParams params
     ) {
         if (ctx.isJoined()) {
-            rejectPointInTimeWhenJoined(ctx, params.pointInTime());
             requireDirectSearchable(params);
-            return findAllByConditionInScope(ctx, modelSpec, params.pageSize(), condition);
+            return findAllByConditionInScope(ctx, modelSpec, params.pageSize(), condition, params.pointInTime());
         }
         OffsetDateTime pointInTime = params.pointInTime();
         return params.inMemory()
@@ -368,9 +366,11 @@ public class CyodaRepository implements CrudRepository {
     }
 
     /**
-     * Page 0 of a direct search inside a callout scope (never at a point in time: see
-     * {@link #rejectPointInTimeWhenJoined}). One entity more than the page is asked for: if it arrives, the page
-     * reports a next page ({@code totalElements} is then a lower bound), and asking for that page fails in
+     * Page 0 of a direct search inside a callout scope. A caller-supplied pointInTime is passed through to
+     * cyoda unchanged: cyoda-go reads it as committed state as at that time, which does not see this
+     * callout's own uncommitted writes either way (cyoda help crud; plugins/memory/entity_store.go GetAsAt).
+     * One entity more than the page is asked for: if it arrives, the page reports a next page
+     * ({@code totalElements} is then a lower bound), and asking for that page fails in
      * {@link #requireDirectSearchable} instead of a stream silently ending after page 0. A page of
      * {@link #DIRECT_SEARCH_LIMIT} leaves no room for that probe, so a full one fails with
      * {@link IllegalStateException}: whether more entities exist cannot be told.
@@ -379,11 +379,12 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final CyodaCallContext ctx,
             @NotNull final ModelSpec modelSpec,
             final int pageSize,
-            @NotNull final GroupConditionDto condition
+            @NotNull final GroupConditionDto condition,
+            @Nullable final OffsetDateTime pointInTime
     ) {
         final boolean probed = pageSize < DIRECT_SEARCH_LIMIT;
         final int limit = probed ? pageSize + 1 : DIRECT_SEARCH_LIMIT;
-        return directSearch(ctx, modelSpec, limit, condition, null)
+        return directSearch(ctx, modelSpec, limit, condition, pointInTime)
                 .thenApply(data -> {
                     if (!probed && data.size() >= DIRECT_SEARCH_LIMIT) {
                         throw new IllegalStateException("inside a callout scope a direct search returns at most "
@@ -428,9 +429,8 @@ public class CyodaRepository implements CrudRepository {
                 .conditions(List.of());
 
         if (ctx.isJoined()) {
-            rejectPointInTimeWhenJoined(ctx, params.pointInTime());
             requireDirectSearchable(params);
-            return findAllByConditionInScope(ctx, modelSpec, params.pageSize(), matchAllCondition);
+            return findAllByConditionInScope(ctx, modelSpec, params.pageSize(), matchAllCondition, params.pointInTime());
         }
         OffsetDateTime pointInTime = params.pointInTime();
         return params.inMemory()
@@ -466,19 +466,6 @@ public class CyodaRepository implements CrudRepository {
     ) {
         rejectTransactionControlWhenJoined(ctx, transactionWindow, transactionTimeoutMs);
         return saveNewEntitiesWithTransactionParams(ctx, modelSpec, entities, transactionWindow, transactionTimeoutMs);
-    }
-
-    /**
-     * A point-in-time read is not part of the contract inside an open transaction (spec clarification 3): a
-     * request joined to a callout's transaction reads that transaction's latest view. Refused loudly, before
-     * sending, rather than silently dropped. The framework's own reloads inside a scope pass no point in time.
-     */
-    private static void rejectPointInTimeWhenJoined(final CyodaCallContext ctx, @Nullable final OffsetDateTime pointInTime) {
-        if (ctx.isJoined() && pointInTime != null) {
-            throw new IllegalArgumentException("pointInTime is refused on a request joined to a callout's transaction: "
-                    + "point-in-time reads are not supported inside a callout's transaction (spec clarification 3); "
-                    + "read without pointInTime to see the transaction's latest view");
-        }
     }
 
     /** cyoda refuses transaction-control parameters on a joined request (spec §4.4); refuse them before sending. */
@@ -901,7 +888,6 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final ModelSpec modelSpec,
             @Nullable final OffsetDateTime pointInTime
     ) {
-        rejectPointInTimeWhenJoined(ctx, pointInTime);
         return sendAndGetCollection(
                 ctx,
                 (stub, req) -> stub.entitySearchCollection(req),
@@ -940,7 +926,6 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final List<String> states,
             @Nullable final OffsetDateTime pointInTime
     ) {
-        rejectPointInTimeWhenJoined(ctx, pointInTime);
         return sendAndGetCollection(
                 ctx,
                 (stub, req) -> stub.entitySearchCollection(req),
@@ -966,7 +951,6 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final UUID entityId,
             @Nullable final OffsetDateTime pointInTime
     ) {
-        rejectPointInTimeWhenJoined(ctx, pointInTime);
         return sendAndGetCollection(
                 ctx,
                 (stub, req) -> stub.entitySearchCollection(req),
