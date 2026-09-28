@@ -59,13 +59,54 @@ class BigDecimalPrecisionTest {
     }
 
     @Test
-    void aHighPrecisionNumberSerializesBackAsAPlainJsonNumber() {
-        DecimalNode node = DecimalNode.valueOf(new BigDecimal(THIRTY_SIG_DIGITS));
+    void aHighPrecisionNumberRoundTripsAsAPlainJsonNumber() throws Exception {
+        String json = """
+                {"id":"test-1","entityId":"11111111-1111-1111-1111-111111111111",
+                "payload":{"data":{"amount":%s}}}""".formatted(THIRTY_SIG_DIGITS);
+        EntityProcessorCalculationRequest request =
+                mappers.protocol().readValue(json, EntityProcessorCalculationRequest.class);
 
-        String written = mappers.protocol().valueToTree(node).toString();
+        // The round trip must go through the mapper's own writer, not JsonNode.toString() (which uses
+        // Jackson's internal default ObjectMapper, not this one, and would prove nothing about our settings).
+        // Pinning the closing brace right after the digits (rather than a bare "not scientific notation"
+        // check) rules out any trailing characters, since unrelated fields like "success":true also contain "e".
+        String written = mappers.protocol().writeValueAsString(request);
 
-        assertThat(written).doesNotContain("\"").doesNotContainIgnoringCase("e");
-        assertThat(new BigDecimal(written)).isEqualByComparingTo(new BigDecimal(THIRTY_SIG_DIGITS));
+        assertThat(written).contains("\"amount\":" + THIRTY_SIG_DIGITS + "}");
+    }
+
+    @Test
+    void aTrailingZeroScaleRoundTripsExactly() throws Exception {
+        String json = """
+                {"id":"test-1","entityId":"11111111-1111-1111-1111-111111111111",
+                "payload":{"data":{"amount":10.00}}}""";
+        EntityProcessorCalculationRequest request =
+                mappers.protocol().readValue(json, EntityProcessorCalculationRequest.class);
+
+        // Jackson 2.19's JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES defaults to true, which would
+        // normalize 10.00 to a BigDecimal of scale -1 (unscaledValue 1), written back as "1E+1".
+        String written = mappers.protocol().writeValueAsString(request);
+        assertThat(written).contains("\"amount\":10.00");
+
+        EntityWithMetadata<TestEntity> withMetadata =
+                EntityWithMetadata.fromDataPayload(request.getPayload(), TestEntity.class, mappers);
+        assertThat(withMetadata.entity().getAmount()).isEqualTo(new BigDecimal("10.00"));
+        assertThat(withMetadata.entity().getAmount().scale()).isEqualTo(2);
+    }
+
+    @Test
+    void aSmallDecimalSerializesAsAPlainNumberNotScientificNotation() throws Exception {
+        String json = """
+                {"id":"test-1","entityId":"11111111-1111-1111-1111-111111111111",
+                "payload":{"data":{"amount":1e-7}}}""";
+        EntityProcessorCalculationRequest request =
+                mappers.protocol().readValue(json, EntityProcessorCalculationRequest.class);
+
+        // 1e-7 as a BigDecimal has scale 7 and an adjusted exponent of -7, so BigDecimal.toString() alone
+        // would write it back as "1E-7"; JsonGenerator.Feature.WRITE_BIGDECIMAL_AS_PLAIN forces toPlainString().
+        String written = mappers.protocol().writeValueAsString(request);
+
+        assertThat(written).contains("\"amount\":0.0000001").doesNotContainIgnoringCase("e-7");
     }
 
     @SuppressWarnings({"LombokGetterMayBeUsed", "LombokSetterMayBeUsed", "unused"})

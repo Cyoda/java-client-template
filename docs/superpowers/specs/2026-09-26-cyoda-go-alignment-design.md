@@ -801,11 +801,21 @@ Boot's `JacksonAutoConfiguration`.
   `FAIL_ON_UNKNOWN_PROPERTIES` off, so a field cyoda-go adds never breaks parsing. No
   `spring.jackson.*` setting and no app bean reaches it. `CyodaJackson.configure` registers
   `JavaTimeModule`, turns `WRITE_DATES_AS_TIMESTAMPS` off (cyoda-go expects RFC3339 text),
-  adds the processor-type handler (§3.3.3), and enables
-  `DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS`, so a decimal literal in the payload's
-  `data` tree parses as `DecimalNode`, not `DoubleNode`: a `BigDecimal` entity field beyond
-  ~17 significant digits survives an inbound callout unchanged, and still serializes back as
-  a plain JSON number.
+  adds the processor-type handler (§3.3.3), and makes every tree it parses — entity data,
+  REST responses, workflow JSON — hold decimals losslessly:
+  - `DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS`, so a decimal literal parses as
+    `DecimalNode`, not `DoubleNode`: a `BigDecimal` entity field beyond ~17 significant
+    digits survives an inbound callout unchanged. A consequence outside entity data too:
+    `JsonUtils.jsonToMap` now yields `BigDecimal` where it used to yield `Double`, and code
+    that inspects a raw `JsonNode` from this mapper sees `isBigDecimal()`, not `isDouble()`.
+  - `JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES` off. Jackson 2.19 defaults this to
+    `true`, which normalizes a `DecimalNode`'s `BigDecimal` by stripping trailing zeroes —
+    collapsing its scale to a negative exponent (`10.00` becomes `1E+1`) and then writing it
+    back that way. Off, a `DecimalNode` keeps the exact scale it was parsed with.
+  - `JsonGenerator.Feature.WRITE_BIGDECIMAL_AS_PLAIN` enabled. `BigDecimal.toString()` still
+    switches to scientific notation once its adjusted exponent passes a threshold regardless
+    of the setting above (e.g. `1e-7`); this makes the generator always use
+    `toPlainString()` instead, so every decimal serializes as a plain JSON number.
 - **Entity mapper (`entities()`)** is used for every conversion between an app entity class
   and a JSON tree: writing an entity for create, update and save, reading one from a
   payload's `data`, the serializers' `entityToJsonNode`/`extractEntity`, and the values of
