@@ -45,7 +45,6 @@ If you'd like to contribute to the examples, please follow the workflow below.
 - `llms-full.txt` - AI-friendly documentation references with line breaks
 - `README.md` - Project documentation
 - `usage-rules.md` - Developer and AI agent guidelines
-- `.augment-guidelines` - Project overview and development workflow
 
 4. Please, submit a pull request with your changes.
 
@@ -59,11 +58,10 @@ We will review your changes and provide feedback.
 
 To add a new example component:
 
-1. **Create the file** in the appropriate `llm_example/code/application/` subdirectory
+1. **Create the file** in the appropriate `src/test/java/com/example/application/` subdirectory
 2. **Use `.java.txt` extension** (e.g., `MyNewProcessor.java.txt`)
 3. **Follow existing patterns** from other examples
 4. **Include comprehensive documentation** in comments
-5. **Add to patterns guide** if introducing new concepts
 
 ### 3. Updating Framework Code
 
@@ -77,7 +75,7 @@ When making changes to `src/main/java/com/java_template/common/`:
 
 When updating documentation:
 
-1. **Keep README.md concise** - detailed info goes in `llm_example/`
+1. **Keep README.md concise** - detailed info goes in `src/test/java/com/example/` and `usage-rules.md`
 2. **Update all references** to directory structures
 3. **Ensure consistency** across all documentation files
 4. **Validate examples** still match documentation
@@ -144,14 +142,14 @@ Before submitting changes, ensure:
 ### Getting Help
 
 1. **Check existing examples** for similar patterns
-2. **Review patterns guide** in `llm_example/code/patterns/`
+2. **Review existing examples** in `src/test/java/com/example/application/`
 4. **Create an issue** if you find bugs or inconsistencies
 
 ## 📋 Example Contribution Checklist
 
 When contributing a new example:
 
-- [ ] File placed in correct `llm_example/` subdirectory
+- [ ] File placed in correct `src/test/java/com/example/` subdirectory
 - [ ] File named with `.java.txt` extension
 - [ ] Package declaration matches directory structure
 - [ ] All imports included and correct

@@ -77,7 +77,7 @@ java -jar build/libs/java-client-template-1.0-SNAPSHOT-workflow-import.jar --spr
 
 #### Option 2: Run Manually After Build
 ```bash
-./gradlew build
+./gradlew bootJar
 java -jar build/libs/app.jar --spring.profiles.active=local
 ```
 
@@ -158,9 +158,9 @@ src/main/resources/workflow/$entity_name/version_$version/$entity_name.json
 ```
 
 ### Workflow Schema Reference
-The workflow configuration schema is defined in:
+The workflow configuration schema is defined by `WorkflowConfigurationDto` in:
 ```
-src/main/resources/schema/common/statemachine/conf/WorkflowConfiguration.json
+src/main/resources/cyoda/openapi/openapi.yaml
 ```
 This schema defines the structure for workflow definitions, including states, transitions, processors, and criteria.
 
@@ -178,17 +178,16 @@ This schema defines the structure for workflow definitions, including states, tr
   - `entity/` - Entity class implementations
   - `processor/` - Workflow processor examples  
   - `criterion/` - Workflow criteria examples
-  - `patterns/` - Comprehensive patterns and anti-patterns guide
 
 ### Configuration Examples  
-- **`llm_example/config/`** - Configuration templates and examples
+- **`src/test/resources/example/config/`** - Configuration templates and examples
   - `workflow/` - Workflow JSON configuration templates
+  - `snippets/` - Processor and criterion configuration snippets
 
 ### Documentation Files
 - **`README.md`** - Complete project documentation (this file)
 - **`CONTRIBUTING.md`** - Contributors guide and validation workflow
 - **`usage-rules.md`** - Developer and AI agent guidelines
-- **`.augment-guidelines`** - Project overview and development workflow
 - **`llms.txt`** / **`llms-full.txt`** - AI-friendly documentation references
 
 ## 📝 Quick Reference
@@ -205,7 +204,7 @@ This schema defines the structure for workflow definitions, including states, tr
 - ✅ Criteria implement `CyodaCriterion` with `check()` and `supports()`
 - ✅ Use `@Component` annotation for Spring discovery
 - ✅ Place workflow JSON files in `src/main/resources/workflow/$entity_name/version_$version/`
-- ✅ Always reference `llm_example/` for implementation patterns
+- ✅ Always reference `src/test/java/com/example/application/` for implementation patterns
 
 ### Critical Limitations
 - ❌ Never modify anything in `common/` directory
@@ -213,11 +212,11 @@ This schema defines the structure for workflow definitions, including states, tr
 - ❌ Criteria must be pure functions without side effects
 - ❌ No Java reflection usage allowed
 
-> 📚 **See `llm_example/` directory for complete implementation examples, patterns, and configuration templates**
+> 📚 **See `src/test/java/com/example/application/` and `src/test/resources/example/config/` for complete implementation examples, patterns, and configuration templates**
 
 ## 🚀 Getting Started
 
-1. **Review Examples**: Start by exploring `llm_example/code/` for implementation patterns
+1. **Review Examples**: Start by exploring `src/test/java/com/example/application/` for implementation patterns
 2. **Create Entities**: Implement `CyodaEntity` in `application/entity/`
 3. **Add Processors**: Implement `CyodaProcessor` in `application/processor/`
 4. **Add Criteria**: Implement `CyodaCriterion` in `application/criterion/`
@@ -226,7 +225,7 @@ This schema defines the structure for workflow definitions, including states, tr
 
 ## 🔧 Development Workflow
 
-1. Review `llm_example/` directory for patterns before implementing new features
+1. Review `src/test/java/com/example/application/` for patterns before implementing new features
 2. Follow established architectural patterns for processors, criteria, and serializers
 3. Use `usage-rules.md` for detailed implementation guidelines
 4. Run `./gradlew build` to generate required classes before development (it also installs the pinned cyoda

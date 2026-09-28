@@ -10,24 +10,17 @@ description: "Rules for integrating with Cyoda"
 ## Schema and API Definitions
 
 ### gRPC Schema Definitions
-- **Location**: `src/main/resources/schema/`
+- **Location**: `src/main/resources/cyoda/schema/`
 - **Contents**: JSON schema files for gRPC-related objects organized by domain:
   - `common/` - Base events, metadata, data formats, state machine definitions
   - `entity/` - Entity CRUD operations (create, update, delete, transition)
   - `model/` - Entity model management (import, export, delete)
   - `processing/` - Processor and criteria calculation requests/responses
   - `search/` - Entity search, snapshots, and statistics queries
-  - `message/` - Messaging-related schemas
 
-### HTTP API OpenAPI Schemas
-- **Location**: `src/main/resources/api/`
-- **Contents**: OpenAPI specification files:
-  - `openapi.yml` - Main API specification
-  - `openapi-common.yml` - Common schema definitions
-  - `openapi-entity-search.yml` - Entity search endpoints
-  - `openapi-workflow.yml` - Workflow management endpoints
-  - `openapi-iam.yml` - Identity and access management
-  - `openapi-audit.yml` - Audit logging endpoints
+### HTTP API OpenAPI Schema
+- **Location**: `src/main/resources/cyoda/openapi/openapi.yaml`
+- **Contents**: the single OpenAPI specification covering entity search, workflow management, IAM and audit logging endpoints
 
 ## Communication Protocol Preferences
 

@@ -32,8 +32,8 @@ com/java_template/common/     # Framework code - DO NOT MODIFY
 ```
 
 ### Resource Directories
-- `src/main/resources/schema/` - gRPC JSON schema definitions (Cyoda-provided)
-- `src/main/resources/api/` - HTTP OpenAPI specifications (Cyoda-provided)
+- `src/main/resources/cyoda/schema/` - gRPC JSON schema definitions (Cyoda-provided)
+- `src/main/resources/cyoda/openapi/openapi.yaml` - HTTP OpenAPI specification (Cyoda-provided)
 
 ## Contribution Rules
 
@@ -43,7 +43,7 @@ com/java_template/common/     # Framework code - DO NOT MODIFY
 - **Risk of conflicts**: Any modifications to `com/java_template/common/` may conflict with future updates
 
 ### Schema and API Definitions
-- **DO NOT MODIFY** files in `src/main/resources/schema/` or `src/main/resources/api/`
+- **DO NOT MODIFY** files in `src/main/resources/cyoda/schema/` or `src/main/resources/cyoda/openapi/openapi.yaml`
 - These files are provided by the Cyoda platform
 - They will be provided as a library dependency in the future
 
