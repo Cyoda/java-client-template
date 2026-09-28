@@ -39,7 +39,7 @@ import java.util.stream.StreamSupport;
  * {@link CyodaCallContexts#current()}, and passes it to every repository call the operation makes,
  * including the later pages of a stream (spec §4.2). Inside a callout scope, the entity written by
  * create/update/save/updateAll is reloaded as the joined transaction's latest view, without a point in
- * time (spec clarification 3).
+ * time (spec §4.4).
  *
  * <p>Every repository future is joined with {@link Futures#joinUnwrapped}, so failures leave the public
  * methods as the typed Cyoda exceptions (spec §4.4), never wrapped in a CompletionException.
@@ -454,7 +454,7 @@ public class EntityServiceImpl implements EntityService {
         @SuppressWarnings("unchecked")
         Class<T> entityClass = (Class<T>) entity.getClass();
         if (ctx.isJoined()) {
-            // Inside the joined transaction its latest view is the right one (spec clarification 3).
+            // Inside the joined transaction its latest view is the right one (spec §4.4).
             return getById(ctx, entityId, modelSpec, entityClass, null);
         }
 
@@ -606,7 +606,7 @@ public class EntityServiceImpl implements EntityService {
             return entityIds.stream()
                     .map(entityId -> {
                         if (ctx.isJoined()) {
-                            // Inside the joined transaction its latest view is the right one (spec clarification 3).
+                            // Inside the joined transaction its latest view is the right one (spec §4.4).
                             return getById(ctx, entityId, modelSpec, entityClass, null);
                         }
 
@@ -649,7 +649,7 @@ public class EntityServiceImpl implements EntityService {
         @SuppressWarnings("unchecked")
         Class<T> entityClass = (Class<T>) entity.getClass();
         if (ctx.isJoined()) {
-            // Inside the joined transaction its latest view is the right one (spec clarification 3).
+            // Inside the joined transaction its latest view is the right one (spec §4.4).
             return getById(ctx, entityId, modelSpec, entityClass, null);
         }
 
@@ -742,7 +742,7 @@ public class EntityServiceImpl implements EntityService {
                     return entityIds.stream()
                             .map(entityId -> {
                                 if (ctx.isJoined()) {
-                                    // Inside the joined transaction its latest view is the right one (spec clarification 3).
+                                    // Inside the joined transaction its latest view is the right one (spec §4.4).
                                     return getById(ctx, entityId, modelSpec, entityClass, null);
                                 }
 

@@ -1297,7 +1297,7 @@ class EntityServiceImplTest {
     }
 
     // ========================================
-    // CALL CONTEXT (spec §4.2, §4.4, clarification 3)
+    // CALL CONTEXT (spec §4.2, §4.4)
     // ========================================
 
     private static JwtAuthenticationToken userJwt(String value) {
