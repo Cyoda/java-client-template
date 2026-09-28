@@ -14,17 +14,15 @@ The `java-client-template` project provides the shared framework layer (`com.jav
 | `src/test/java/com/example/` | Example entity, processor, criterion, controller — reference implementation that downstream projects use as a starting point |
 | `src/test/kotlin/org/cyoda/uuid/` | UUID utility tests |
 | `src/test/resources/example/` | Example workflow configs for the reference implementation |
-| `src/main/resources/api/` | OpenAPI specs for Cyoda platform APIs (codegen input) |
+| `src/main/resources/cyoda/openapi/` | OpenAPI specs for Cyoda platform APIs (codegen input) |
 | `src/main/resources/META-INF/` | Spring Boot auto-configuration registrations |
-| `src/main/resources/proto/` | Protobuf definitions for gRPC (CloudEvents, Cyoda Cloud API) |
+| `src/main/resources/cyoda/proto/` | Protobuf definitions for gRPC (CloudEvents, Cyoda Cloud API) |
 
 ### Shared config (template provides the structure, apps adapt values)
 
 | Path | Template provides | Apps customize |
 |------|-------------------|----------------|
-| `src/main/resources/schema/` | `common/`, `entity/`, `model/`, `processing/`, `search/` subdirectories | Apps may add schemas (e.g. `common/condition/`, `common/statemachine/conf/`) for jsonschema2pojo types their application code needs |
-| `src/main/resources/logback.xml` | Structure and appenders | `<contextName>` and `{"application":...}` value |
-| `src/main/resources/applicationExample.yml` | Full config template with comments | App name in issuer/key-id fields; app-specific sections added or removed |
+| `src/main/resources/cyoda/schema/` | `common/`, `entity/`, `model/`, `processing/`, `search/` subdirectories | Apps may add schemas (e.g. `common/condition/`, `common/statemachine/conf/`) for jsonschema2pojo types their application code needs |
 | `build.gradle` | Plugins, codegen config, shared deps | App-specific deps, main class references, app-specific tasks |
 | `src/main/resources/application.yml` | Structure and Cyoda platform config sections | App-specific values, ports, auth config, feature flags |
 
@@ -86,10 +84,10 @@ diff -rq $TEMPLATE/src/test/java/com/example/ \
 diff -rq $TEMPLATE/src/test/kotlin/ $SOURCE/src/test/kotlin/
 
 # Resources
-diff -rq $TEMPLATE/src/main/resources/api/ $SOURCE/src/main/resources/api/
+diff -rq $TEMPLATE/src/main/resources/cyoda/openapi/ $SOURCE/src/main/resources/cyoda/openapi/
 diff -rq $TEMPLATE/src/main/resources/META-INF/ $SOURCE/src/main/resources/META-INF/
-diff -rq $TEMPLATE/src/main/resources/proto/ $SOURCE/src/main/resources/proto/
-diff -rq $TEMPLATE/src/main/resources/schema/ $SOURCE/src/main/resources/schema/
+diff -rq $TEMPLATE/src/main/resources/cyoda/proto/ $SOURCE/src/main/resources/cyoda/proto/
+diff -rq $TEMPLATE/src/main/resources/cyoda/schema/ $SOURCE/src/main/resources/cyoda/schema/
 
 # Build config
 diff $TEMPLATE/build.gradle $SOURCE/build.gradle
@@ -135,24 +133,24 @@ cp -R $SOURCE/src/test/resources/example/ \
 find $TEMPLATE/src/test/resources/example/ -name ".DS_Store" -delete
 
 # OpenAPI specs
-rm -rf $TEMPLATE/src/main/resources/api/
-cp -R $SOURCE/src/main/resources/api/ $TEMPLATE/src/main/resources/api/
+rm -rf $TEMPLATE/src/main/resources/cyoda/openapi/
+cp -R $SOURCE/src/main/resources/cyoda/openapi/ $TEMPLATE/src/main/resources/cyoda/openapi/
 
 # Spring auto-configuration
 rm -rf $TEMPLATE/src/main/resources/META-INF/
 cp -R $SOURCE/src/main/resources/META-INF/ $TEMPLATE/src/main/resources/META-INF/
 
 # Protobuf definitions
-rm -rf $TEMPLATE/src/main/resources/proto/
-cp -R $SOURCE/src/main/resources/proto/ $TEMPLATE/src/main/resources/proto/
+rm -rf $TEMPLATE/src/main/resources/cyoda/proto/
+cp -R $SOURCE/src/main/resources/cyoda/proto/ $TEMPLATE/src/main/resources/cyoda/proto/
 ```
 
-### Step 4: Handle schema/ carefully
+### Step 4: Handle cyoda/schema/ carefully
 
 The downstream project may have added app-specific schemas that do not belong in the template. Conversely, the downstream project may have updated shared schemas.
 
 ```bash
-diff -rq $TEMPLATE/src/main/resources/schema/ $SOURCE/src/main/resources/schema/
+diff -rq $TEMPLATE/src/main/resources/cyoda/schema/ $SOURCE/src/main/resources/cyoda/schema/
 ```
 
 - **Files in both:** Compare content. If the downstream version is newer/better, take it.

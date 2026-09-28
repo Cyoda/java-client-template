@@ -24,7 +24,7 @@ java-client-template/
 │   └── resources/                       # Configuration files (usually empty in template)
 │       └── workflow/                    # Workflow configurations (usually empty in template)
 ├── src/test/java/com/example/           # Compilable examples and templates
-│   ├── application/                     # Example implementations (.java.txt files)
+│   ├── application/                     # Example implementations (compiled .java files)
 │   │   ├── controller/                  # REST controller examples
 │   │   ├── entity/                      # Entity implementation examples
 │   │   ├── processor/                   # Processor implementation examples
@@ -59,7 +59,8 @@ We will review your changes and provide feedback.
 To add a new example component:
 
 1. **Create the file** in the appropriate `src/test/java/com/example/application/` subdirectory
-2. **Use `.java.txt` extension** (e.g., `MyNewProcessor.java.txt`)
+2. **Use a plain `.java` extension** (e.g., `MyNewProcessor.java`) — examples are compiled and
+   tested like any other source, not shipped as text templates
 3. **Follow existing patterns** from other examples
 4. **Include comprehensive documentation** in comments
 
@@ -139,7 +140,7 @@ Before submitting changes, ensure:
   `./gradlew build -x integrationTest`
 
 **File Not Found:**
-- Ensure `.java.txt` files are in correct directories
+- Ensure example `.java` files are in correct directories
 - Verify directory structure matches package names
 
 ### Getting Help
@@ -153,7 +154,7 @@ Before submitting changes, ensure:
 When contributing a new example:
 
 - [ ] File placed in correct `src/test/java/com/example/` subdirectory
-- [ ] File named with `.java.txt` extension
+- [ ] File named with a plain `.java` extension
 - [ ] Package declaration matches directory structure
 - [ ] All imports included and correct
 - [ ] Comprehensive comments explaining patterns
