@@ -139,13 +139,36 @@ java -jar build/libs/java-client-template-1.0-SNAPSHOT-workflow-import.jar --spr
 
 #### Option 2: Run Manually After Build
 ```bash
-./gradlew build
+./gradlew bootJar
 java -jar build/libs/app.jar --spring.profiles.active=local
 ```
 
 > Access the app (local profile): [http://localhost:8081/api/swagger-ui/index.html](http://localhost:8081/api/swagger-ui/index.html)
 >
 > **Note**: The app runs on port 8080 by default (`src/main/resources/application.yml`) and on 8081 with the `local` profile, under the `/api` context path. You can change the port by setting the `server.port` property.
+
+### 5. 🧪 Run the Tests
+
+```bash
+./gradlew test                        # unit tests
+./gradlew check                       # unit tests + integration tests against the pinned cyoda-go
+./gradlew build -x integrationTest    # build without the integration tests
+```
+
+`./gradlew check` and `./gradlew build` run the integration tests (`src/integrationTest`), which start the
+cyoda-go version pinned in `src/main/resources/cyoda/CYODA_VERSION` as a subprocess. **The build installs it
+automatically**: the `installCyoda` task runs `scripts/install-cyoda.sh` into `.cyoda/bin` (git-ignored). The
+binary survives `./gradlew clean` and is reused while it matches the pin, so it is installed once per pin.
+Installing needs:
+
+- for a `-dev` pin (built from source): Go 1.26.7 or later, `git`, and network access to github.com;
+- for a released pin (downloaded): network access to the GitHub release.
+
+To use a cyoda binary you installed yourself, pass `-Dcyoda.bin=<path>` or set `CYODA_BIN=<path>`; the build
+then installs nothing. A `cyoda` on `PATH` that already matches the pin is kept too, as long as `.cyoda/bin`
+is empty (the tests then use it). To keep a binary that deliberately does not match the pin — at `.cyoda/bin`
+or on `PATH` — instead of it being overwritten, pass `-Dcyoda.allowVersionMismatch=true`. Windows cannot run
+the install script: use `-Dcyoda.bin` / `CYODA_BIN` there, or `-x integrationTest`.
 
 ---
 
