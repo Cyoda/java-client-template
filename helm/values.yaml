@@ -160,3 +160,5 @@ image:
   pullPolicy: Always
   imageName: client-app
   tag: ""  # REQUIRED
+# Size limit of the /tmp emptyDir (Tomcat work dir, JVM temp files).
+tmpSizeLimit: 512Mi

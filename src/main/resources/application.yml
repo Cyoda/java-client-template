@@ -9,7 +9,8 @@ server:
     context-path: /api
 
 # Liveness/readiness groups are served at /api/actuator/health/{liveness,readiness} (the Helm probes use
-# these paths); enabled explicitly rather than relying on Kubernetes detection.
+# these paths); enabled explicitly rather than relying on Kubernetes detection. An app whose own
+# SecurityFilterChain requires authentication must permit /actuator/health/** or the probes get 401.
 management:
   endpoint:
     health:

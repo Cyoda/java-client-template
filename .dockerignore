@@ -43,5 +43,7 @@ helm
 # (no credentials) is kept.
 src/main/resources/application-*.yml
 src/main/resources/application-*.yaml
+src/main/resources/application-*.properties
 !src/main/resources/application-cyoda-local.yml
 **/.env
+**/.env.*
