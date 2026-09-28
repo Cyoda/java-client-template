@@ -14,47 +14,40 @@ actuatorEnabled: true
 
 container:
   env:
+    # Plain environment variables. Names bind to app.config.* through Spring Boot's relaxed binding
+    # (APP_CONFIG_GRPC_SERVER_PORT -> app.config.grpc-server-port). Never put the client secret here: it
+    # comes from a Secret (cyodaClientSecret below).
     vars:
       # Timezone
       TZ: /usr/share/zoneinfo/Europe/Berlin
 
       # Cyoda Connection (REQUIRED - must be set via --set or values override)
-      CYODA_HOST: ""  # e.g., client-05e11da2107844fc944ee5b872fcb6b6.kube3.cyoda.org
-      CYODA_CLIENT_ID: ""
-      CYODA_CLIENT_SECRET: ""
-
-      # Cyoda API Configuration
-      CYODA_AI_API: cyoda
-      WORKFLOW_AI_API: workflow
-      CONNECTION_AI_API: connection
-      RANDOM_AI_API: random
-      TRINO_AI_API: trino
+      APP_CONFIG_CYODA_HOST: ""  # e.g., client-05e11da2107844fc944ee5b872fcb6b6.kube3.cyoda.org
+      APP_CONFIG_CYODA_CLIENT_ID: ""
 
       # gRPC Configuration
-      GRPC_PROCESSOR_TAG: cyoda_application
-      GRPC_SERVER_PORT: "443"
+      APP_CONFIG_GRPC_PROCESSOR_TAG: cyoda_application
+      APP_CONFIG_GRPC_SERVER_PORT: "443"
 
       # Optional Configuration
-      ENTITY_VERSION: "1000"
-      EXTERNAL_CALCULATIONS_THREAD_POOL: "10"
-      HANDSHAKE_TIMEOUT_MS: "5000"
-      INITIAL_RECONNECT_DELAY_MS: "200"
-      MAX_RECONNECT_DELAY_MS: "10000"
-      FAILED_RECONNECTS_LIMIT: "10"
-      GRPC_COMMUNICATION_DATA_FORMAT: "JSON"
+      APP_CONFIG_HANDSHAKE_TIMEOUT_MS: "5000"
+      APP_CONFIG_INITIAL_RECONNECT_DELAY_MS: "200"
+      APP_CONFIG_MAX_RECONNECT_DELAY_MS: "10000"
+      APP_CONFIG_FAILED_RECONNECTS_LIMIT: "10"
+      APP_CONFIG_GRPC_COMMUNICATION_DATA_FORMAT: "JSON"
 
       # Monitoring
-      SENT_EVENTS_CACHE_MAX_SIZE: "100"
-      MONITORING_SCHEDULER_INITIAL_DELAY_SECONDS: "1"
-      MONITORING_SCHEDULER_DELAY_SECONDS: "3"
-      KEEP_ALIVE_WARNING_THRESHOLD: "60000"
+      APP_CONFIG_SENT_EVENTS_CACHE_MAX_SIZE: "100"
+      APP_CONFIG_MONITORING_SCHEDULER_INITIAL_DELAY_SECONDS: "1"
+      APP_CONFIG_MONITORING_SCHEDULER_DELAY_SECONDS: "3"
+      APP_CONFIG_KEEP_ALIVE_WARNING_THRESHOLD: "60000"
 
       # SSL Configuration
-      SSL_TRUST_ALL: "false"
-      SSL_TRUSTED_HOSTS: ""
+      APP_CONFIG_SSL_TRUST_ALL: "false"
+      APP_CONFIG_SSL_TRUSTED_HOSTS: ""
 
       # Feature Flags
-      INCLUDE_DEFAULT_OPERATIONS: "false"
+      APP_CONFIG_INCLUDE_DEFAULT_OPERATIONS: "false"
 
     # Additional environment variables can be added here
     additionalVars: {}
@@ -64,6 +57,14 @@ container:
 
     # Secrets to load as environment variables
     secrets: []
+
+# The M2M client secret (app.config.cyoda-client-secret) is read from an existing Kubernetes Secret and
+# passed as APP_CONFIG_CYODA_CLIENT_SECRET through secretKeyRef; the chart never takes the value itself.
+# Create it first, e.g.:
+#   kubectl create secret generic cyoda-client-credentials --from-literal=client-secret=<secret>
+cyodaClientSecret:
+  secretName: ""  # REQUIRED
+  key: client-secret
 
 podAnnotations: {}
 
