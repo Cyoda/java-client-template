@@ -5,6 +5,7 @@ import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -111,12 +112,24 @@ class ScriptArgumentsTest {
         return callHelperResult("version_lt", a, b).exitCode() == 0;
     }
 
-    private record HelperResult(int exitCode, String stdout) {
+    private record HelperResult(int exitCode, String stdout, String stderr) {
     }
 
+    private static final String HELPER_FUNCTIONS =
+            "/^required_go_version()/,/^}/p;/^version_lt()/,/^}/p;"
+                    + "/^numeric_prefix()/,/^}/p;/^warn_if_go_too_old()/,/^}/p";
+
     private HelperResult callHelperResult(String function, String... args) throws IOException, InterruptedException {
+        return callHelperResult(Map.of(), function, args);
+    }
+
+    private HelperResult callHelperResult(Map<String, String> env, String function, String... args)
+            throws IOException, InterruptedException {
         Path script = ROOT.resolve("scripts").resolve("install-cyoda.sh");
-        String cmd = "set -e; eval \"$(sed -n '/^required_go_version()/,/^}/p;/^version_lt()/,/^}/p' '"
+        // A stub for info(): warn_if_go_too_old calls it, but it's a one-line function ("info() { ...; }"),
+        // and the sed range extraction below (built for the multi-line functions under test, each closed by
+        // its own "}" line) would either miss it or, worse, over-match past it looking for a "^}" line.
+        String cmd = "info() { :; }; set -e; eval \"$(sed -n '" + HELPER_FUNCTIONS + "' '"
                 + script + "')\"; " + function + " \"$@\"";
         String[] command = new String[args.length + 4];
         command[0] = "bash";
@@ -125,17 +138,26 @@ class ScriptArgumentsTest {
         command[3] = "install-cyoda-test";
         System.arraycopy(args, 0, command, 4, args.length);
         ProcessBuilder builder = new ProcessBuilder(command).directory(ROOT.toFile());
+        builder.environment().putAll(env);
         Process process = builder.start();
         process.getOutputStream().close();
         String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        process.getErrorStream().readAllBytes();
+        String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
         boolean finished = process.waitFor(10, TimeUnit.SECONDS);
         assertThat(finished).as("helper call terminated").isTrue();
-        return new HelperResult(process.exitValue(), stdout.trim());
+        return new HelperResult(process.exitValue(), stdout.trim(), stderr);
     }
 
     private String callHelper(String function, String... args) throws IOException, InterruptedException {
         return callHelperResult(function, args).stdout();
+    }
+
+    /** A fake `go` on PATH so `go env GOVERSION` reports a chosen string without needing a real Go install. */
+    private Path fakeGoReporting(Path binDir, String govVersionOutput) throws IOException {
+        Path go = binDir.resolve("go");
+        Files.writeString(go, "#!/usr/bin/env bash\necho \"" + govVersionOutput + "\"\n");
+        assertThat(go.toFile().setExecutable(true)).isTrue();
+        return binDir;
     }
 
     @Test
@@ -144,9 +166,19 @@ class ScriptArgumentsTest {
         assertThat(requiredGoVersion(checkout)).isEqualTo("1.26.7");
     }
 
+    /**
+     * The `go` directive is the real minimum the module needs; `toolchain` only names the version
+     * `go build` will fetch and use, which can overstate the requirement. Prefer `go`.
+     */
     @Test
-    void requiredGoVersionPrefersToolchainOverGoDirective(@TempDir Path checkout) throws Exception {
+    void requiredGoVersionPrefersTheGoDirectiveOverToolchain(@TempDir Path checkout) throws Exception {
         Files.writeString(checkout.resolve("go.mod"), "module example.com/foo\n\ngo 1.24\n\ntoolchain go1.26.7\n");
+        assertThat(requiredGoVersion(checkout)).isEqualTo("1.24");
+    }
+
+    @Test
+    void requiredGoVersionFallsBackToToolchainWithoutAGoDirective(@TempDir Path checkout) throws Exception {
+        Files.writeString(checkout.resolve("go.mod"), "module example.com/foo\n\ntoolchain go1.26.7\n");
         assertThat(requiredGoVersion(checkout)).isEqualTo("1.26.7");
     }
 
@@ -167,5 +199,59 @@ class ScriptArgumentsTest {
         assertThat(versionLt("1.26.7", "1.26.1")).isFalse();
         assertThat(versionLt("1.26.7", "1.26.7")).isFalse();
         assertThat(versionLt("1.20", "1.26.7")).isTrue();
+    }
+
+    @Test
+    void numericPrefixStripsAnRcOrBetaSuffix() throws Exception {
+        assertThat(callHelper("numeric_prefix", "1.26rc1")).isEqualTo("1.26");
+        assertThat(callHelper("numeric_prefix", "1.26.1beta2")).isEqualTo("1.26.1");
+        assertThat(callHelper("numeric_prefix", "1.26.7")).isEqualTo("1.26.7");
+    }
+
+    /**
+     * `go env GOVERSION` can report a pre-release string like "go1.26rc1" for a locally installed
+     * pre-release toolchain. Without stripping the suffix first, version_lt's numeric comparisons
+     * (`-eq`/`-lt` on "26rc1") fail with a noisy "integer expression expected" and, because the
+     * failing `[` is not guarded inside an `if`/`||`, would abort the whole call under `set -e`.
+     */
+    @Test
+    void warnIfGoTooOldTreatsAnRcVersionAsPlainAndStaysQuiet(@TempDir Path checkout, @TempDir Path bin)
+            throws Exception {
+        Files.writeString(checkout.resolve("go.mod"), "module example.com/foo\n\ngo 1.26.7\n");
+        fakeGoReporting(bin, "go1.26rc1");
+
+        HelperResult result = callHelperResult(Map.of("PATH", bin + File.pathSeparator + "/usr/bin:/bin:/usr/sbin:/sbin"), "warn_if_go_too_old",
+                checkout.toString());
+
+        assertThat(result.exitCode()).isZero();
+        assertThat(result.stderr()).doesNotContainIgnoringCase("integer expression");
+    }
+
+    /**
+     * `go env GOVERSION` failing outright (not just missing) must not kill the script silently
+     * under `set -e`: the bare (non-`local`) assignment previously let its exit code propagate.
+     */
+    @Test
+    void warnIfGoTooOldSurvivesGoEnvFailingOutright(@TempDir Path checkout, @TempDir Path bin) throws Exception {
+        Files.writeString(checkout.resolve("go.mod"), "module example.com/foo\n\ngo 1.26.7\n");
+        Path go = bin.resolve("go");
+        Files.writeString(go, "#!/usr/bin/env bash\nexit 1\n");
+        assertThat(go.toFile().setExecutable(true)).isTrue();
+
+        HelperResult result = callHelperResult(Map.of("PATH", bin + File.pathSeparator + "/usr/bin:/bin:/usr/sbin:/sbin"), "warn_if_go_too_old",
+                checkout.toString());
+
+        assertThat(result.exitCode()).isZero();
+    }
+
+    @Test
+    void warnIfGoTooOldSurvivesNoGoOnPathAtAll(@TempDir Path checkout) throws Exception {
+        assumeFalse(Files.exists(Path.of("/usr/bin/go")) || Files.exists(Path.of("/bin/go")), "no go on the bare PATH");
+        Files.writeString(checkout.resolve("go.mod"), "module example.com/foo\n\ngo 1.26.7\n");
+
+        HelperResult result = callHelperResult(Map.of("PATH", "/usr/bin:/bin"), "warn_if_go_too_old",
+                checkout.toString());
+
+        assertThat(result.exitCode()).isZero();
     }
 }

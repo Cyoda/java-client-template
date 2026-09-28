@@ -46,17 +46,25 @@ require_go() {
   command -v go >/dev/null || fail "Go >= 1.26.7 is required to build cyoda from source$why. Install Go, $OVERRIDE_HINT"
 }
 
-# Echoes the X.Y.Z version cyoda-go's go.mod asks for: its `toolchain` directive if present
-# (e.g. "toolchain go1.26.7"), else its `go` directive (e.g. "go 1.26.7"). Echoes nothing if
-# <checkout dir>/go.mod is missing or has neither.
+# Echoes the X.Y.Z version cyoda-go's go.mod asks for: its `go` directive (e.g. "go 1.26.7"), the
+# real minimum the module needs, else its `toolchain` directive if present (e.g. "toolchain
+# go1.26.7"), which only names the version `go build` will fetch and use and can overstate the
+# requirement. Echoes nothing if <checkout dir>/go.mod is missing or has neither.
 required_go_version() { # <checkout dir>
   local gomod="$1/go.mod" v
   [ -f "$gomod" ] || return 0
-  v="$(sed -n 's/^[[:space:]]*toolchain[[:space:]][[:space:]]*go\([0-9][0-9.]*\).*/\1/p' "$gomod" | head -n1)"
+  v="$(sed -n 's/^[[:space:]]*go[[:space:]][[:space:]]*\([0-9][0-9.]*\).*/\1/p' "$gomod" | head -n1)"
   if [ -z "$v" ]; then
-    v="$(sed -n 's/^[[:space:]]*go[[:space:]][[:space:]]*\([0-9][0-9.]*\).*/\1/p' "$gomod" | head -n1)"
+    v="$(sed -n 's/^[[:space:]]*toolchain[[:space:]][[:space:]]*go\([0-9][0-9.]*\).*/\1/p' "$gomod" | head -n1)"
   fi
   echo "$v"
+}
+
+# Strips a trailing pre-release marker (rc/beta, e.g. Go's own "go1.26rc1") from a dot-separated
+# version, leaving only its numeric prefix ("1.26"). Without this, version_lt's `-eq`/`-lt` numeric
+# comparisons choke on a component like "26rc1" with a noisy "integer expression expected".
+numeric_prefix() { # <version>
+  printf '%s' "$1" | sed -E 's/^([0-9]+(\.[0-9]+)*).*/\1/'
 }
 
 # True (0) if version A is older than version B. Compares up to three dot-separated numeric
@@ -79,8 +87,12 @@ warn_if_go_too_old() { # <checkout dir>
   local required local_ver
   required="$(required_go_version "$1")"
   [ -n "$required" ] || return 0
-  local_ver="$(go env GOVERSION 2>/dev/null)"
+  # `|| true`: a bare (non-`local`) assignment's exit status is not masked the way `local x=$(...)`
+  # masks it, so a `go env GOVERSION` failure here would otherwise propagate and kill the whole
+  # script under `set -e`, silently (stderr is already suppressed above).
+  local_ver="$(go env GOVERSION 2>/dev/null || true)"
   local_ver="${local_ver#go}"
+  local_ver="$(numeric_prefix "$local_ver")"
   [ -n "$local_ver" ] || return 0
   if version_lt "$local_ver" "$required"; then
     info "local Go is $local_ver; cyoda-go's go.mod asks for Go $required. Go will try to download and use toolchain go$required automatically unless GOTOOLCHAIN=local is set or the network is unavailable."
