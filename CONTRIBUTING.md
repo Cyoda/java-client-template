@@ -134,6 +134,11 @@ and the `integrationTest` classpath. Review the diff before committing it: each 
 trust. Gradle keeps entries it no longer needs; they are harmless. IDE downloads of `-sources`/`-javadoc` jars are
 trusted without checksums.
 
+IntelliJ's Gradle sync can resolve a few artifacts that no command-line task does (for example the POM of the
+Groovy version bundled with Gradle, fetched from the "Gradle Libs" repository). The regeneration command cannot
+record those. When a sync fails with "Dependency verification failed", check the artifact's SHA-256 against Maven
+Central and add it to `gradle/verification-metadata.xml` by hand. Regeneration keeps entries added this way.
+
 ## 🔧 Troubleshooting
 
 ### Common Issues
