@@ -5,8 +5,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.java_template.common.auth.Authentication;
+import com.java_template.common.auth.CyodaTokenSource;
 import com.java_template.common.config.Config;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.util.HttpUtils;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.NotNull;
@@ -27,19 +28,19 @@ public class EdgeMessageServiceImpl implements EdgeMessageService {
     private static final Logger logger = LoggerFactory.getLogger(EdgeMessageServiceImpl.class);
 
     private final HttpUtils httpUtils;
-    private final Authentication authentication;
+    private final CyodaTokenSource tokenSource;
     private final ObjectMapper objectMapper;
     private final String cyodaApiUrl;
 
     public EdgeMessageServiceImpl(
             HttpUtils httpUtils,
-            Authentication authentication,
-            ObjectMapper objectMapper,
+            CyodaTokenSource tokenSource,
+            CyodaObjectMapper wireMapper,
             Config configProperties
     ) {
         this.httpUtils = httpUtils;
-        this.authentication = authentication;
-        this.objectMapper = objectMapper;
+        this.tokenSource = tokenSource;
+        this.objectMapper = wireMapper.mapper();
         this.cyodaApiUrl = configProperties.getCyodaApiUrl();
     }
 
@@ -49,7 +50,7 @@ public class EdgeMessageServiceImpl implements EdgeMessageService {
         logger.debug("Retrieving EdgeMessage with ID: {}", messageId);
 
         // Get OAuth2 access token
-        String token = authentication.getAccessToken().getTokenValue();
+        String token = tokenSource.bearerToken().orElse(null);
 
         // Construct API path: message/get/{messageId}
         String path = String.format("message/%s", messageId);
@@ -136,7 +137,7 @@ public class EdgeMessageServiceImpl implements EdgeMessageService {
 
         try {
             // Get OAuth2 access token
-            String token = authentication.getAccessToken().getTokenValue();
+            String token = tokenSource.bearerToken().orElse(null);
 
             // Construct API path: message/new/{subject}
             String path = String.format("message/new/%s", subject);
@@ -195,7 +196,7 @@ public class EdgeMessageServiceImpl implements EdgeMessageService {
 
         try {
             // Get OAuth2 access token
-            String token = authentication.getAccessToken().getTokenValue();
+            String token = tokenSource.bearerToken().orElse(null);
 
             // Construct API path: message/{messageId}
             String path = String.format("message/%s", messageId);

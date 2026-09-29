@@ -2,6 +2,7 @@ package com.example.application.controller;
 
 import com.example.application.entity.example_entity.version_1.ExampleEntity;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.controller.ErrorResponses;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.repository.SearchAndRetrievalParams;
@@ -24,7 +25,6 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import java.net.URI;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -41,7 +41,7 @@ import java.util.stream.Stream;
  * - Pagination support for large datasets
  * - Business identifier duplicate checking
  * - Workflow transition support
- * - Error handling with ProblemDetail (RFC 7807)
+ * - Error handling with ProblemDetail (RFC 7807): a generic detail and correlation id, never the exception message
  * - Logging best practices
  * - Location header for created resources
  * <p>
@@ -114,11 +114,8 @@ public class ExampleEntityController {
 
             return ResponseEntity.created(location).body(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to create entity: %s", e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to create entity", e);
         }
     }
 
@@ -135,20 +132,14 @@ public class ExampleEntityController {
             @RequestParam(required = false) OffsetDateTime pointInTime) {
         try {
             ModelSpec modelSpec = new ModelSpec().withName(ExampleEntity.ENTITY_NAME).withVersion(ExampleEntity.ENTITY_VERSION);
-            Date pointInTimeDate = pointInTime != null
-                ? Date.from(pointInTime.toInstant())
-                : null;
-            EntityWithMetadata<ExampleEntity> response = entityService.getById(id, modelSpec, ExampleEntity.class, pointInTimeDate);
+            EntityWithMetadata<ExampleEntity> response = entityService.getById(id, modelSpec, ExampleEntity.class, pointInTime);
             if (response == null) {
                 return ResponseEntity.notFound().build();
             }
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to retrieve entity with ID '%s': %s", id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to retrieve entity " + id, e);
         }
     }
 
@@ -165,22 +156,16 @@ public class ExampleEntityController {
             @RequestParam(required = false) OffsetDateTime pointInTime) {
         try {
             ModelSpec modelSpec = new ModelSpec().withName(ExampleEntity.ENTITY_NAME).withVersion(ExampleEntity.ENTITY_VERSION);
-            Date pointInTimeDate = pointInTime != null
-                ? Date.from(pointInTime.toInstant())
-                : null;
             EntityWithMetadata<ExampleEntity> response = entityService.findByBusinessId(
-                    modelSpec, exampleId, "exampleId", ExampleEntity.class, pointInTimeDate);
+                    modelSpec, exampleId, "exampleId", ExampleEntity.class, pointInTime);
 
             if (response == null) {
                 return ResponseEntity.notFound().build();
             }
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to retrieve entity with business ID '%s': %s", exampleId, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to retrieve entity by business ID", e);
         }
     }
 
@@ -193,22 +178,16 @@ public class ExampleEntityController {
             @PathVariable UUID id,
             @RequestParam(required = false) OffsetDateTime pointInTime) {
         try {
-            Date pointInTimeDate = pointInTime != null
-                ? Date.from(pointInTime.toInstant())
-                : null;
             List<EntityChangeMeta> changes =
-                    entityService.getEntityChangesMetadata(id, pointInTimeDate);
+                    entityService.getEntityChangesMetadata(id, pointInTime);
             return ResponseEntity.ok(changes);
         } catch (Exception e) {
             // Check if it's a NOT_FOUND error (entity doesn't exist)
             if (CyodaExceptionUtil.isNotFound(e)) {
                 return ResponseEntity.notFound().build();
             }
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to retrieve change history for entity with ID '%s': %s", id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to retrieve change history for entity " + id, e);
         }
     }
 
@@ -230,11 +209,8 @@ public class ExampleEntityController {
             logger.info("ExampleEntity updated with ID: {}", id);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to update entity with ID '%s': %s", id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to update entity " + id, e);
         }
     }
 
@@ -259,17 +235,14 @@ public class ExampleEntityController {
             @RequestParam(required = false) OffsetDateTime pointInTime) {
         try {
             ModelSpec modelSpec = new ModelSpec().withName(ExampleEntity.ENTITY_NAME).withVersion(ExampleEntity.ENTITY_VERSION);
-            Date pointInTimeDate = pointInTime != null
-                ? Date.from(pointInTime.toInstant())
-                : null;
 
             SimpleConditionDto categoryCondition = new SimpleConditionDto()
                     .jsonPath("$.category")
-                    .operation(OperatorTypeDto.EQUALS)
+                    .operatorType(SimpleConditionDto.OperatorTypeEnum.EQUALS)
                     .value(objectMapper.valueToTree(category));
 
             GroupConditionDto condition = new GroupConditionDto()
-                    .operator(GroupOperatorDto.AND)
+                    .operator(GroupConditionDto.OperatorEnum.AND)
                     .conditions(List.of(categoryCondition));
 
             // Use in-memory search for small, bounded result sets
@@ -281,18 +254,15 @@ public class ExampleEntityController {
                     SearchAndRetrievalParams.builder()
                             .pageSize(1000)
                             .pageNumber(0)
-                            .pointInTime(pointInTimeDate)
+                            .pointInTime(pointInTime)
                             .inMemory(true)
                             .build());
 
             logger.info("Found {} entities in category '{}'", result.data().size(), category);
             return ResponseEntity.ok(result.data());
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to search entities by category '%s': %s", category, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to search entities by category", e);
         }
     }
 
@@ -321,23 +291,20 @@ public class ExampleEntityController {
             @RequestParam(required = false) OffsetDateTime pointInTime) {
         try {
             ModelSpec modelSpec = new ModelSpec().withName(ExampleEntity.ENTITY_NAME).withVersion(ExampleEntity.ENTITY_VERSION);
-            Date pointInTimeDate = pointInTime != null
-                ? Date.from(pointInTime.toInstant())
-                : null;
 
-            List<QueryConditionDto> conditions = new ArrayList<>();
+            List<GroupConditionDtoAllOfConditions> conditions = new ArrayList<>();
 
             if (name != null && !name.trim().isEmpty()) {
                 conditions.add(new SimpleConditionDto()
                         .jsonPath("$.name")
-                        .operation(OperatorTypeDto.CONTAINS)
+                        .operatorType(SimpleConditionDto.OperatorTypeEnum.CONTAINS)
                         .value(objectMapper.valueToTree(name)));
             }
 
             if (minAmount != null) {
                 conditions.add(new SimpleConditionDto()
                         .jsonPath("$.amount")
-                        .operation(OperatorTypeDto.GREATER_OR_EQUAL)
+                        .operatorType(SimpleConditionDto.OperatorTypeEnum.GREATER_OR_EQUAL)
                         .value(objectMapper.valueToTree(minAmount)));
             }
 
@@ -345,7 +312,7 @@ public class ExampleEntityController {
                     SearchAndRetrievalParams.builder()
                             .pageSize(size)
                             .pageNumber(page)
-                            .pointInTime(pointInTimeDate)
+                            .pointInTime(pointInTime)
                             .searchId(searchId)
                             .build();
 
@@ -357,7 +324,7 @@ public class ExampleEntityController {
             } else {
                 // With filters: use paginated search with searchId support
                 GroupConditionDto condition = new GroupConditionDto()
-                        .operator(GroupOperatorDto.AND)
+                        .operator(GroupConditionDto.OperatorEnum.AND)
                         .conditions(conditions);
 
                 // inMemory=false enables pagination with searchId support
@@ -371,11 +338,8 @@ public class ExampleEntityController {
             // Return PageResult directly - client can use searchId for next page
             return ResponseEntity.ok(pageResult);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to search entities: %s", e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to search entities", e);
         }
     }
 
@@ -400,32 +364,30 @@ public class ExampleEntityController {
             @RequestBody(required = false) SearchRequest searchRequest) {
         try {
             ModelSpec modelSpec = new ModelSpec().withName(ExampleEntity.ENTITY_NAME).withVersion(ExampleEntity.ENTITY_VERSION);
-            Date pointInTimeDate = searchRequest != null && searchRequest.getPointInTime() != null
-                ? Date.from(searchRequest.getPointInTime().toInstant())
-                : null;
+            OffsetDateTime pointInTime = searchRequest != null ? searchRequest.getPointInTime() : null;
 
             // Build search condition if criteria provided
             GroupConditionDto condition = null;
             if (searchRequest != null) {
-                List<QueryConditionDto> conditions = new ArrayList<>();
+                List<GroupConditionDtoAllOfConditions> conditions = new ArrayList<>();
 
                 if (searchRequest.getName() != null && !searchRequest.getName().trim().isEmpty()) {
                     conditions.add(new SimpleConditionDto()
                             .jsonPath("$.name")
-                            .operation(OperatorTypeDto.CONTAINS)
+                            .operatorType(SimpleConditionDto.OperatorTypeEnum.CONTAINS)
                             .value(objectMapper.valueToTree(searchRequest.getName())));
                 }
 
                 if (searchRequest.getMinAmount() != null) {
                     conditions.add(new SimpleConditionDto()
                             .jsonPath("$.amount")
-                            .operation(OperatorTypeDto.GREATER_OR_EQUAL)
+                            .operatorType(SimpleConditionDto.OperatorTypeEnum.GREATER_OR_EQUAL)
                             .value(objectMapper.valueToTree(searchRequest.getMinAmount())));
                 }
 
                 if (!conditions.isEmpty()) {
                     condition = new GroupConditionDto()
-                            .operator(GroupOperatorDto.AND)
+                            .operator(GroupConditionDto.OperatorEnum.AND)
                             .conditions(conditions);
                 }
             }
@@ -439,7 +401,7 @@ public class ExampleEntityController {
                         entityService.streamAll(modelSpec, ExampleEntity.class,
                                 SearchAndRetrievalParams.builder()
                                         .pageSize(100)
-                                        .pointInTime(pointInTimeDate)
+                                        .pointInTime(pointInTime)
                                         .build())) {
 
                     // Process each entity as it's retrieved (no memory pressure)
@@ -452,7 +414,7 @@ public class ExampleEntityController {
                                 SearchAndRetrievalParams.builder()
                                         .pageSize(100)
                                         .inMemory(false)
-                                        .pointInTime(pointInTimeDate)
+                                        .pointInTime(pointInTime)
                                         .build())) {
 
                     // Process each entity as it's retrieved (no memory pressure)
@@ -463,11 +425,8 @@ public class ExampleEntityController {
             logger.info("Exported {} entities", count);
             return ResponseEntity.ok(String.format("Exported %d entities", count));
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to export entities: %s", e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to export entities", e);
         }
     }
 
@@ -489,11 +448,8 @@ public class ExampleEntityController {
             logger.info("ExampleEntity approved with ID: {}", id);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to approve entity with ID '%s': %s", id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to approve entity " + id, e);
         }
     }
 
@@ -508,11 +464,8 @@ public class ExampleEntityController {
             logger.info("ExampleEntity deleted with ID: {}", id);
             return ResponseEntity.noContent().build();
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to delete entity with ID '%s': %s", id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to delete entity " + id, e);
         }
     }
 
@@ -533,11 +486,8 @@ public class ExampleEntityController {
             logger.info("ExampleEntity deleted with business ID: {}", exampleId);
             return ResponseEntity.noContent().build();
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to delete entity with business ID '%s': %s", exampleId, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to delete entity by business ID", e);
         }
     }
 
@@ -556,11 +506,8 @@ public class ExampleEntityController {
             logger.warn("Deleted all ExampleEntities - count: {}", deletedCount);
             return ResponseEntity.ok().body(String.format("Deleted %d entities", deletedCount));
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                HttpStatus.BAD_REQUEST,
-                String.format("Failed to delete all entities: %s", e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            // Generic body with a correlation id; the exception itself goes to the server log only
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to delete all entities", e);
         }
     }
 

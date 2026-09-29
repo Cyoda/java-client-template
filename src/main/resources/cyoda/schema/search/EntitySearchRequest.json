@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyoda.com/cloud/event/search/EntitySearchRequest.json",
+  "title": "EntitySearchRequest",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common/BaseEvent.json"
+    }
+  ],
+  "properties": {
+    "model": {
+      "$ref": "../common/ModelSpec.json",
+      "description": "Entity model to use for building this snapshot."
+    },
+    "condition": {
+      "type": "object",
+      "existingJavaType": "org.cyoda.cloud.api.common.model.GroupConditionDto",
+      "description": "Query condition to use for building this snapshot."
+    },
+    "pointInTime": {
+      "type": "string",
+      "format": "date-time",
+      "description": "point in time"
+    },
+    "timeoutMillis": {
+      "type": "integer",
+      "description": "The maximum time to wait in milliseconds for the query to complete."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Caps the matched result set; not a page size. A matched set larger than `limit` is rejected rather than returned as a truncated prefix. Values below 1 are rejected."
+    },
+    "orderBy": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path":   { "type": "string", "description": "A dotted scalar path in the entity data (`price`, `address.city`; the `$.` leader is optional) or, with `source: \"meta\"`, a canonical meta field name. Array subscripts and projections (`items[*].name`, `items[0].name`) are rejected — an ordering needs a single scalar — as is any character outside `A-Za-z0-9_-`. Refused paths answer `INVALID_FIELD_PATH`." },
+          "source": { "type": "string", "enum": ["data", "meta"], "default": "data" },
+          "desc":   { "type": "boolean", "default": false }
+        },
+        "required": ["path"]
+      }
+    },
+    "trackingRead": {
+      "type": "boolean",
+      "description": "When true and this search runs inside an active transaction, the entities it returns are recorded into the transaction's read-set so commit-time first-committer-wins validates them. Defaults to false. Ignored outside a transaction.",
+      "default": false
+    }
+  },
+  "required": [
+    "model",
+    "condition"
+  ]
+}

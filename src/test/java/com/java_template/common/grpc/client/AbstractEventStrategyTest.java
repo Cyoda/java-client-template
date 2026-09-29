@@ -1,13 +1,25 @@
 package com.java_template.common.grpc.client;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.java_template.common.grpc.client.event_handling.AbstractEventStrategy;
+import com.java_template.common.grpc.client.event_handling.ProcessorEventStrategy;
+import com.java_template.common.workflow.CyodaContextFactory;
+import com.java_template.common.workflow.OperationFactory;
 import io.cloudevents.v1.proto.CloudEvent;
+import org.cyoda.cloud.api.event.processing.EntityProcessorCalculationResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.UUID;
+
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
@@ -127,8 +139,11 @@ class AbstractEventStrategyTest {
     }
 
     @Test
-    void testRecoverRequestIdFromCloudEvent_CaseInsensitive() {
-        // Given
+    void testRecoverRequestIdFromCloudEvent_WrongCaseFieldNameInValidJsonIsNotRecovered() {
+        // Valid JSON is now parsed as a tree and looked up by its exact field name; a field
+        // named "REQUESTID" is not "requestId", so this is treated the same as a valid document
+        // with no requestId field at all (T8: dropping CASE_INSENSITIVE removes the ambiguity
+        // that let an unrelated field win when cyoda-go's alphabetical serialisation put it first).
         String jsonData = "{\"REQUESTID\": \"case-insensitive-id-404\", \"entityId\": \"entity123\"}";
         when(cloudEvent.getTextData()).thenReturn(jsonData);
 
@@ -136,9 +151,27 @@ class AbstractEventStrategyTest {
         AbstractEventStrategy.RequestIdRecoveryResult result = AbstractEventStrategy.recoverRequestIdFromCloudEvent(cloudEvent);
 
         // Then
+        assertFalse(result.requestId().isPresent());
+        assertEquals("Could not recover requestId from CloudEvent text data. No matching patterns found.", result.error());
+    }
+
+    @Test
+    void testRecoverRequestIdFromCloudEvent_TopLevelFieldWinsOverANestedFieldOfTheSameName() {
+        // cyoda-go serialises fields alphabetically, so "payload" precedes "requestId" in the
+        // wire text. A naive regex over the raw text finds the nested (wrong) value first; the
+        // JSON-tree lookup must return the top-level field regardless of byte order (T8).
+        String wrongEntityId = UUID.randomUUID().toString();
+        String rightEntityId = UUID.randomUUID().toString();
+        String jsonData = "{\"payload\":{\"data\":{\"requestId\":\"wrong\",\"entityId\":\"" + wrongEntityId + "\"}},"
+                + "\"requestId\":\"right\",\"entityId\":\"" + rightEntityId + "\"}";
+        when(cloudEvent.getTextData()).thenReturn(jsonData);
+
+        AbstractEventStrategy.RequestIdRecoveryResult result = AbstractEventStrategy.recoverRequestIdFromCloudEvent(cloudEvent);
+
         assertTrue(result.requestId().isPresent());
-        assertEquals("case-insensitive-id-404", result.requestId().get());
+        assertEquals("right", result.requestId().get());
         assertNull(result.error());
+        assertEquals(java.util.Optional.of(rightEntityId), AbstractEventStrategy.recoverEntityIdFromCloudEvent(cloudEvent));
     }
 
     @Test
@@ -206,5 +239,101 @@ class AbstractEventStrategyTest {
         assertTrue(result.requestId().isPresent());
         assertEquals("req-id_with.special@chars#606", result.requestId().get());
         assertNull(result.error());
+    }
+
+    @Test
+    void anErrorResponseCarriesAFreshIdTheRequestIdAndTheEntityId() throws Exception {
+        CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
+        ObjectMapper om = wireMapper.mapper();
+        OperationFactory factory = mock(OperationFactory.class);
+        lenient().when(factory.getProcessorForModel(any())).thenThrow(new IllegalStateException("boom"));
+        ProcessorEventStrategy strategy = new ProcessorEventStrategy(factory, wireMapper, new CyodaContextFactory(wireMapper));
+
+        String entityId = UUID.randomUUID().toString();
+        ObjectNode request = om.createObjectNode();
+        request.put("id", "evt-1");
+        request.put("requestId", "r-1");
+        request.put("entityId", entityId);
+        request.put("processorId", "p-1");
+        request.put("processorName", "SomeProcessor");
+        ObjectNode payload = request.putObject("payload");
+        payload.put("type", "ENTITY");
+        payload.putObject("meta").putObject("modelKey").put("name", "m").put("version", 1);
+        payload.putObject("data");
+        io.cloudevents.v1.proto.CloudEvent ce = io.cloudevents.v1.proto.CloudEvent.newBuilder()
+                .setId("ce-1").setSource("test").setSpecVersion("1.0")
+                .setType("EntityProcessorCalculationRequest")
+                .setTextData(om.writeValueAsString(request)).build();
+
+        EntityProcessorCalculationResponse response = strategy.handleEvent(ce);
+
+        assertEquals(Boolean.FALSE, response.getSuccess());
+        assertNotNull(response.getId());
+        assertNotEquals("evt-1", response.getId());
+        assertEquals("r-1", response.getRequestId());
+        assertEquals(entityId, response.getEntityId().toString());
+    }
+
+    @Test
+    void entityIdIsRecoveredFromCorruptedJson() {
+        when(cloudEvent.getTextData()).thenReturn(
+                "{\"requestId\":\"r-1\",\"entityId\":\"8824c480-c166-11ee-bf9f-ae468cd3ed16\", broken");
+
+        assertEquals(java.util.Optional.of("8824c480-c166-11ee-bf9f-ae468cd3ed16"),
+                AbstractEventStrategy.recoverEntityIdFromCloudEvent(cloudEvent));
+    }
+
+    @Test
+    void aFailedCalloutIsLoggedWithoutItsTxTokenOrTheCallersIdentity() throws Exception {
+        CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
+        ObjectMapper om = wireMapper.mapper();
+        OperationFactory factory = mock(OperationFactory.class);
+        lenient().when(factory.getProcessorForModel(any())).thenThrow(new IllegalStateException("boom"));
+        ProcessorEventStrategy strategy = new ProcessorEventStrategy(factory, wireMapper, new CyodaContextFactory(wireMapper));
+
+        ObjectNode request = om.createObjectNode();
+        request.put("id", "evt-1");
+        request.put("requestId", "r-1");
+        request.put("entityId", UUID.randomUUID().toString());
+        request.put("processorId", "p-1");
+        request.put("processorName", "SomeProcessor");
+        ObjectNode payload = request.putObject("payload");
+        payload.put("type", "ENTITY");
+        payload.putObject("meta").putObject("modelKey").put("name", "m").put("version", 1);
+        payload.putObject("data");
+        io.cloudevents.v1.proto.CloudEvent ce = io.cloudevents.v1.proto.CloudEvent.newBuilder()
+                .setId("ce-1").setSource("test").setSpecVersion("1.0")
+                .setType("EntityProcessorCalculationRequest")
+                .putAttributes("cyodatxtoken", ceString("secret-tx-token"))
+                .putAttributes("authtype", ceString("user"))
+                .putAttributes("authid", ceString("secret-user-id"))
+                .putAttributes("authclaims", ceString("ROLE_SECRET"))
+                .setTextData(om.writeValueAsString(request)).build();
+
+        ch.qos.logback.classic.Logger log =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(AbstractEventStrategy.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        log.addAppender(appender);
+        try {
+            strategy.handleEvent(ce);
+        } finally {
+            log.detachAppender(appender);
+        }
+
+        assertFalse(appender.list.isEmpty());
+        for (ch.qos.logback.classic.spi.ILoggingEvent event : appender.list) {
+            String line = event.getFormattedMessage();
+            assertFalse(line.contains("secret-tx-token"), line);
+            assertFalse(line.contains("secret-user-id"), line);
+            assertFalse(line.contains("ROLE_SECRET"), line);
+        }
+        assertTrue(appender.list.stream().anyMatch(e -> e.getFormattedMessage().contains("ce-1")
+                && e.getFormattedMessage().contains("r-1")));
+    }
+
+    private static io.cloudevents.v1.proto.CloudEvent.CloudEventAttributeValue ceString(String value) {
+        return io.cloudevents.v1.proto.CloudEvent.CloudEventAttributeValue.newBuilder().setCeString(value).build();
     }
 }

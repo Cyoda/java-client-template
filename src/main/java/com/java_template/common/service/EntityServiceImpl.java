@@ -3,6 +3,7 @@ package com.java_template.common.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.repository.CrudRepository;
@@ -21,6 +22,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -39,10 +41,10 @@ public class EntityServiceImpl implements EntityService {
 
     public EntityServiceImpl(
             final CrudRepository repository,
-            final ObjectMapper objectMapper
+            final CyodaObjectMapper wireMapper
     ) {
         this.repository = repository;
-        this.objectMapper = objectMapper;
+        this.objectMapper = wireMapper.mapper();
     }
 
     // ========================================
@@ -55,15 +57,20 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final ModelSpec modelSpec,
             @NotNull final Class<T> entityClass
     ) {
-        return getById(entityId, modelSpec, entityClass, null);
+        return getById(entityId, modelSpec, entityClass, (OffsetDateTime) null);
     }
 
+    /**
+     * Reload by exact point in time. Also used by create()/update()/updateByBusinessId()/updateAll(),
+     * which pass {@link EntityChangeMeta#getTimeOfChange()} untouched so the reload sees exactly the
+     * transaction just committed (a Date round-trip would truncate it to milliseconds).
+     */
     @Override
     public <T extends CyodaEntity> EntityWithMetadata<T> getById(
             @NotNull final UUID entityId,
             @NotNull final ModelSpec modelSpec,
             @NotNull final Class<T> entityClass,
-            @Nullable final Date pointInTime
+            @Nullable final OffsetDateTime pointInTime
     ) {
         DataPayload payload = repository.findById(entityId, pointInTime).join();
         return EntityWithMetadata.fromDataPayload(payload, entityClass, objectMapper);
@@ -76,7 +83,7 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final String businessIdField,
             @NotNull final Class<T> entityClass
     ) {
-        return findByBusinessId(modelSpec, businessId, businessIdField, entityClass, null);
+        return findByBusinessId(modelSpec, businessId, businessIdField, entityClass, (OffsetDateTime) null);
     }
 
     @Override
@@ -85,15 +92,15 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final String businessId,
             @NotNull final String businessIdField,
             @NotNull final Class<T> entityClass,
-            @Nullable final Date pointInTime
+            @Nullable final OffsetDateTime pointInTime
     ) {
         SimpleConditionDto simpleCondition = new SimpleConditionDto()
                 .jsonPath("$." + businessIdField)
-                .operation(OperatorTypeDto.EQUALS)
+                .operatorType(SimpleConditionDto.OperatorTypeEnum.EQUALS)
                 .value(objectMapper.valueToTree(businessId));
 
         GroupConditionDto condition = new GroupConditionDto()
-                .operator(GroupOperatorDto.AND)
+                .operator(GroupConditionDto.OperatorEnum.AND)
                 .conditions(List.of(simpleCondition));
 
         PageResult<EntityWithMetadata<T>> result = search(
@@ -133,7 +140,7 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final Class<T> entityClass
     ) {
         // Build a list of SimpleConditions for each business key field
-        List<QueryConditionDto> simpleConditions = new ArrayList<>();
+        List<GroupConditionDtoAllOfConditions> simpleConditions = new ArrayList<>();
 
         for (Map.Entry<String, java.util.function.Function<T, Object>> entry : businessIdExtractors.entrySet()) {
             String fieldName = entry.getKey();
@@ -142,7 +149,7 @@ public class EntityServiceImpl implements EntityService {
 
             SimpleConditionDto condition = new SimpleConditionDto()
                     .jsonPath("$." + fieldName)
-                    .operation(OperatorTypeDto.EQUALS)
+                    .operatorType(SimpleConditionDto.OperatorTypeEnum.EQUALS)
                     .value(objectMapper.valueToTree(value));
 
             simpleConditions.add(condition);
@@ -150,7 +157,7 @@ public class EntityServiceImpl implements EntityService {
 
         // Combine all conditions with AND operator
         GroupConditionDto groupCondition = new GroupConditionDto()
-                .operator(GroupOperatorDto.AND)
+                .operator(GroupConditionDto.OperatorEnum.AND)
                 .conditions(simpleConditions);
 
         // Search with the composite condition
@@ -203,23 +210,23 @@ public class EntityServiceImpl implements EntityService {
 
     @Override
     public long getEntityCount(@NotNull final ModelSpec modelSpec) {
-        return getEntityCount(modelSpec, null);
+        return getEntityCount(modelSpec, (OffsetDateTime) null);
     }
 
     @Override
-    public long getEntityCount(@NotNull final ModelSpec modelSpec, @Nullable final Date pointInTime) {
+    public long getEntityCount(@NotNull final ModelSpec modelSpec, @Nullable final OffsetDateTime pointInTime) {
         return repository.getEntityCount(modelSpec, pointInTime).join();
     }
 
     @Override
     public Map<String, Long> getEntityStatsByState(@NotNull final ModelSpec modelSpec) {
-        return getEntityStatsByState(modelSpec, null);
+        return getEntityStatsByState(modelSpec, (OffsetDateTime) null);
     }
 
     @Override
     public Map<String, Long> getEntityStatsByState(
             @NotNull final ModelSpec modelSpec,
-            @Nullable final Date pointInTime
+            @Nullable final OffsetDateTime pointInTime
     ) {
         return repository.getEntityStatsByState(modelSpec, pointInTime).join();
     }
@@ -228,7 +235,7 @@ public class EntityServiceImpl implements EntityService {
     public Map<String, Long> getEntityStatsByState(
             @NotNull final ModelSpec modelSpec,
             @NotNull final List<String> states,
-            @Nullable final Date pointInTime
+            @Nullable final OffsetDateTime pointInTime
     ) {
         return repository.getEntityStatsByState(modelSpec, states, pointInTime).join();
     }
@@ -617,13 +624,13 @@ public class EntityServiceImpl implements EntityService {
 
     @Override
     public List<EntityChangeMeta> getEntityChangesMetadata(@NotNull final UUID entityId) {
-        return getEntityChangesMetadata(entityId, null);
+        return getEntityChangesMetadata(entityId, (OffsetDateTime) null);
     }
 
     @Override
     public List<EntityChangeMeta> getEntityChangesMetadata(
             @NotNull final UUID entityId,
-            @Nullable final Date pointInTime
+            @Nullable final OffsetDateTime pointInTime
     ) {
         return repository.getEntityChangesMetadata(entityId, pointInTime).join();
     }

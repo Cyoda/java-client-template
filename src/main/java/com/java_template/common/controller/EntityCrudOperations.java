@@ -102,13 +102,6 @@ public class EntityCrudOperations<T extends CyodaEntity> {
     }
 
     /**
-     * Converts OffsetDateTime to Date for Cyoda API.
-     */
-    private Date toDate(OffsetDateTime pointInTime) {
-        return pointInTime != null ? Date.from(pointInTime.toInstant()) : null;
-    }
-
-    /**
      * Creates a new entity with duplicate business ID check.
      *
      * @param entity              The entity to create
@@ -152,11 +145,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
 
             return ResponseEntity.created(location).body(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to create %s: %s", entityName, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to create " + entityName, e);
         }
     }
 
@@ -191,11 +180,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
 
             return ResponseEntity.created(location).body(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to create %s: %s", entityName, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to create " + entityName, e);
         }
     }
 
@@ -250,11 +235,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
 
             return ResponseEntity.created(location).body(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to create %s: %s", entityName, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to create " + entityName, e);
         }
     }
 
@@ -273,17 +254,13 @@ public class EntityCrudOperations<T extends CyodaEntity> {
     public ResponseEntity<EntityWithMetadata<T>> getById(UUID id, OffsetDateTime pointInTime) {
         try {
             EntityWithMetadata<T> response = entityService.getById(
-                    id, modelSpec(), entityClass, toDate(pointInTime));
+                    id, modelSpec(), entityClass, pointInTime);
             if (response == null) {
                 return ResponseEntity.notFound().build();
             }
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to retrieve %s with ID '%s': %s", entityName, id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to retrieve " + entityName + " " + id, e);
         }
     }
 
@@ -295,19 +272,14 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             OffsetDateTime pointInTime) {
         try {
             EntityWithMetadata<T> response = entityService.findByBusinessId(
-                    modelSpec(), businessId, businessIdField, entityClass, toDate(pointInTime));
+                    modelSpec(), businessId, businessIdField, entityClass, pointInTime);
 
             if (response == null) {
                 return ResponseEntity.notFound().build();
             }
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to retrieve %s with business ID '%s': %s",
-                            entityName, businessId, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to retrieve " + entityName + " by business ID", e);
         }
     }
 
@@ -319,18 +291,13 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             OffsetDateTime pointInTime) {
         try {
             List<EntityChangeMeta> changes = entityService.getEntityChangesMetadata(
-                    id, toDate(pointInTime));
+                    id, pointInTime);
             return ResponseEntity.ok(changes);
         } catch (Exception e) {
             if (CyodaExceptionUtil.isNotFound(e)) {
                 return ResponseEntity.notFound().build();
             }
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to retrieve change history for %s with ID '%s': %s",
-                            entityName, id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to retrieve change history for " + entityName + " " + id, e);
         }
     }
 
@@ -346,11 +313,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             logger.info("{} updated with ID: {}", entityName, id);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to update %s with ID '%s': %s", entityName, id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to update " + entityName + " " + id, e);
         }
     }
 
@@ -374,15 +337,14 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             String stateFilter,
             OffsetDateTime pointInTime) {
         try {
-            Date pointInTimeDate = toDate(pointInTime);
-            List<QueryConditionDto> conditions = new ArrayList<>();
+            List<GroupConditionDtoAllOfConditions> conditions = new ArrayList<>();
 
             // Build search conditions from filters
             for (FieldFilter filter : filters) {
                 if (filter.value() != null && !filter.value().trim().isEmpty()) {
                     SimpleConditionDto condition = new SimpleConditionDto()
                             .jsonPath("$." + filter.fieldName())
-                            .operation(filter.operation())
+                            .operatorType(filter.operation())
                             .value(objectMapper.valueToTree(filter.value()));
                     conditions.add(condition);
                 }
@@ -392,7 +354,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             if (stateFilter != null && !stateFilter.trim().isEmpty()) {
                 LifecycleConditionDto stateCondition = new LifecycleConditionDto()
                         .field("state")
-                        .operation(OperatorTypeDto.EQUALS)
+                        .operatorType(LifecycleConditionDto.OperatorTypeEnum.EQUALS)
                         .value(objectMapper.valueToTree(stateFilter));
                 conditions.add(stateCondition);
             }
@@ -403,7 +365,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
                         modelSpec(), entityClass, SearchAndRetrievalParams.builder()
                                 .pageSize(pageSize)
                                 .pageNumber(pageNumber)
-                                .pointInTime(pointInTimeDate)
+                                .pointInTime(pointInTime)
                                 .inMemory(false)
                                 .searchId(searchId)
                                 .build()
@@ -411,13 +373,13 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             } else {
                 // For filtered results, get all matching results then manually paginate
                 GroupConditionDto groupCondition = new GroupConditionDto()
-                        .operator(GroupOperatorDto.AND)
+                        .operator(GroupConditionDto.OperatorEnum.AND)
                         .conditions(conditions);
                 PageResult<EntityWithMetadata<T>> pageResult = entityService.search(
                         modelSpec(), groupCondition, entityClass, SearchAndRetrievalParams.builder()
                                 .pageSize(pageSize)
                                 .pageNumber(pageNumber)
-                                .pointInTime(pointInTimeDate)
+                                .pointInTime(pointInTime)
                                 .inMemory(false)
                                 .searchId(searchId)
                                 .build()
@@ -426,11 +388,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
                 return ResponseEntity.ok(pageResult);
             }
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to list %ss: %s", entityName, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to list " + entityName + "s", e);
         }
     }
 
@@ -447,30 +405,25 @@ public class EntityCrudOperations<T extends CyodaEntity> {
         try {
             SimpleConditionDto condition = new SimpleConditionDto()
                     .jsonPath("$." + fieldName)
-                    .operation(OperatorTypeDto.CONTAINS)
+                    .operatorType(SimpleConditionDto.OperatorTypeEnum.CONTAINS)
                     .value(objectMapper.valueToTree(searchValue));
 
             GroupConditionDto groupCondition = new GroupConditionDto()
-                    .operator(GroupOperatorDto.AND)
+                    .operator(GroupConditionDto.OperatorEnum.AND)
                     .conditions(List.of(condition));
 
             PageResult<EntityWithMetadata<T>> pageResult = entityService.search(
                     modelSpec(), groupCondition, entityClass, SearchAndRetrievalParams.builder()
                             .pageSize(pageSize)
                             .pageNumber(pageNumber)
-                            .pointInTime(toDate(pointInTime))
+                            .pointInTime(pointInTime)
                             .inMemory(false)
                             .searchId(searchId)
                             .build()
             );
             return ResponseEntity.ok(pageResult);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to search %ss by %s '%s': %s",
-                            entityName, fieldName, searchValue, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to search " + entityName + "s", e);
         }
     }
 
@@ -486,12 +439,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             logger.info("{} transitioned with ID: {} using transition: {}", entityName, id, transitionName);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to execute transition '%s' on %s with ID '%s': %s",
-                            transitionName, entityName, id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to execute a transition on " + entityName + " " + id, e);
         }
     }
 
@@ -504,11 +452,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             logger.info("{} deleted with ID: {}", entityName, id);
             return ResponseEntity.noContent().build();
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to delete %s with ID '%s': %s", entityName, id, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to delete " + entityName + " " + id, e);
         }
     }
 
@@ -527,12 +471,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             logger.info("{} deleted with business ID: {}", entityName, businessId);
             return ResponseEntity.noContent().build();
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to delete %s with business ID '%s': %s",
-                            entityName, businessId, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to delete " + entityName + " by business ID", e);
         }
     }
 
@@ -545,11 +484,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             logger.warn("Deleted all {}s - count: {}", entityName, deletedCount);
             return ResponseEntity.ok().body(String.format("Deleted %d %ss", deletedCount, entityName));
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to delete all %ss: %s", entityName, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to delete all " + entityName + "s", e);
         }
     }
 
@@ -580,11 +515,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             logger.info("Created {} {}s", responses.size(), entityName);
             return ResponseEntity.status(HttpStatus.CREATED).body(responses);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to create %ss: %s", entityName, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to create " + entityName + "s", e);
         }
     }
 
@@ -621,11 +552,7 @@ public class EntityCrudOperations<T extends CyodaEntity> {
             logger.info("Updated {} {}s", responses.size(), entityName);
             return ResponseEntity.ok(responses);
         } catch (Exception e) {
-            ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
-                    HttpStatus.BAD_REQUEST,
-                    String.format("Failed to update %ss: %s", entityName, e.getMessage())
-            );
-            return ResponseEntity.of(problemDetail).build();
+            return ErrorResponses.failure(logger, HttpStatus.BAD_REQUEST, "Failed to update " + entityName + "s", e);
         }
     }
 
@@ -636,21 +563,21 @@ public class EntityCrudOperations<T extends CyodaEntity> {
      * @param operation The comparison operation
      * @param value     The value to compare against
      */
-    public record FieldFilter(String fieldName, OperatorTypeDto operation, String value) {
+    public record FieldFilter(String fieldName, SimpleConditionDto.OperatorTypeEnum operation, String value) {
         public static FieldFilter equals(String fieldName, String value) {
-            return new FieldFilter(fieldName, OperatorTypeDto.EQUALS, value);
+            return new FieldFilter(fieldName, SimpleConditionDto.OperatorTypeEnum.EQUALS, value);
         }
 
         public static FieldFilter contains(String fieldName, String value) {
-            return new FieldFilter(fieldName, OperatorTypeDto.CONTAINS, value);
+            return new FieldFilter(fieldName, SimpleConditionDto.OperatorTypeEnum.CONTAINS, value);
         }
 
         public static FieldFilter greaterThan(String fieldName, String value) {
-            return new FieldFilter(fieldName, OperatorTypeDto.GREATER_THAN, value);
+            return new FieldFilter(fieldName, SimpleConditionDto.OperatorTypeEnum.GREATER_THAN, value);
         }
 
         public static FieldFilter lessThan(String fieldName, String value) {
-            return new FieldFilter(fieldName, OperatorTypeDto.LESS_THAN, value);
+            return new FieldFilter(fieldName, SimpleConditionDto.OperatorTypeEnum.LESS_THAN, value);
         }
     }
 }

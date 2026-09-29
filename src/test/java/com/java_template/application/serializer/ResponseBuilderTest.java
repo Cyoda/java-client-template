@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -64,7 +65,8 @@ class ResponseBuilderTest {
 
         // Then
         assertNotNull(response);
-        assertEquals("criteria-123", response.getId());
+        assertNotNull(response.getId());
+        assertNotEquals("criteria-123", response.getId());
         assertEquals("req-456", response.getRequestId());
         assertEquals(ENTITY_ID, response.getEntityId());
         assertTrue(response.getSuccess());
@@ -120,7 +122,8 @@ class ResponseBuilderTest {
 
         // Then
         assertNotNull(response);
-        assertEquals("processor-123", response.getId());
+        assertNotNull(response.getId());
+        assertNotEquals("processor-123", response.getId());
         assertTrue(response.getSuccess());
         assertNotNull(response.getPayload());
     }
@@ -158,6 +161,20 @@ class ResponseBuilderTest {
         // Then
         assertNotNull(response);
         assertFalse(response.getSuccess());
+    }
+
+    @Test
+    void responsesCarryAFreshIdAndTheRequestAndEntityIds() {
+        UUID entityId = UUID.randomUUID();
+        EntityCriteriaCalculationRequest criteriaRequest = new EntityCriteriaCalculationRequest()
+                .withId("req-event-1").withRequestId("r-1").withEntityId(entityId);
+
+        EntityCriteriaCalculationResponse criteria = ResponseBuilder.forCriterion(criteriaRequest).withMatch().build();
+
+        assertThat(criteria.getId()).isNotBlank().isNotEqualTo("req-event-1");
+        assertThat(criteria.getRequestId()).isEqualTo("r-1");
+        assertThat(criteria.getEntityId()).isEqualTo(criteriaRequest.getEntityId());
+        assertThat(criteria.getMatches()).isTrue();
     }
 
     @Test

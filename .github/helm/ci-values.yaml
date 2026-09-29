@@ -1,0 +1,22 @@
+# Minimal values for CI's helm lint/template check: the required values only (plus an enabled ingress with TLS
+# and an existing image-pull secret, so those paths render too).
+global:
+  registry:
+    host: registry.example.com
+  imagePullSecret:
+    existingSecretName: registry-credentials
+image:
+  tag: "0.0.1"
+cyodaClientSecret:
+  secretName: cyoda-client-credentials
+host:
+  name: app.example.com
+ingress:
+  enabled: true
+  tls:
+    - secretName: app-example-com-tls
+      hosts: [app.example.com]
+container:
+  env:
+    vars:
+      APP_CONFIG_CYODA_HOST: tenant.example.com

@@ -4,6 +4,7 @@
 .gradle
 **/build/
 !src/**/build/
+!buildSrc/src/**/build/
 
 # Ignore Gradle GUI config
 gradle-app.setting
@@ -27,7 +28,7 @@ gradle-app.setting
 /backup/
 
 .playwright-mcp/
-.kotlin/sessions/
+.kotlin/
 
 .claude/worktrees
 .claude/settings.local.json
@@ -35,7 +36,14 @@ gradle-app.setting
 # agent-safehouse local settings
 .sandbox/
 
+# Profile configs may hold credentials (e.g. config/application-cloud.yml): never commit them.
 application-*.yml
+application-*.yaml
+# Except the template's own cyoda-local profile, which ships as part of the repo (no credentials).
+!src/main/resources/application-cyoda-local.yml
+
+# The cyoda binary scripts/install-cyoda.sh installs for the integration tests
+.cyoda/
 
 # Python version manager
 .python-version

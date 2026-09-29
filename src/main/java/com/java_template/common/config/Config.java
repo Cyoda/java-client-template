@@ -1,8 +1,15 @@
 package com.java_template.common.config;
 
+import java.net.InetAddress;
+import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
+import java.util.regex.Pattern;
 import org.cyoda.cloud.api.event.common.DataFormat;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -12,7 +19,10 @@ import org.springframework.stereotype.Component;
  */
 @Component
 @ConfigurationProperties(prefix = "app.config")
-public class Config {
+public class Config implements InitializingBean {
+
+    private static final Logger logger = LoggerFactory.getLogger(Config.class);
+    private static final Pattern IPV4_LITERAL = Pattern.compile("\\d{1,3}(\\.\\d{1,3}){3}");
 
     private String cyodaHost;
     private String cyodaApiUrl;
@@ -48,7 +58,7 @@ public class Config {
     private int sentEventsCacheMaxSize = 100;
     private int monitoringSchedulerInitialDelaySeconds = 1;
     private int monitoringSchedulerDelaySeconds = 3;
-    private long keepAliveWarningThreshold = 60000;
+    private long keepAliveWarningThreshold = 20000;
 
     // SSL Configuration
     private boolean sslTrustAll = false;
@@ -56,9 +66,124 @@ public class Config {
 
     private boolean includeDefaultOperations = false;
 
-    private boolean skipSsl = false;
-    private String executionMode = "platform";
-    private CyodaLight cyodaLight = new CyodaLight();
+    private String executionMode = "virtual";
+
+    public enum AuthMode { CLIENT_CREDENTIALS, NONE }
+
+    private boolean grpcTls = true;
+    private AuthMode authMode = AuthMode.CLIENT_CREDENTIALS;
+    private long grpcCallDeadlineMs = 120_000L;
+    private boolean allowInsecureTransport = false;
+
+    public boolean isGrpcTls() {
+        return grpcTls;
+    }
+
+    public void setGrpcTls(boolean grpcTls) {
+        this.grpcTls = grpcTls;
+    }
+
+    public AuthMode getAuthMode() {
+        return authMode;
+    }
+
+    public void setAuthMode(AuthMode authMode) {
+        this.authMode = authMode;
+    }
+
+    public long getGrpcCallDeadlineMs() {
+        return grpcCallDeadlineMs;
+    }
+
+    public void setGrpcCallDeadlineMs(long grpcCallDeadlineMs) {
+        if (grpcCallDeadlineMs <= 0) {
+            throw new IllegalArgumentException("app.config.grpc-call-deadline-ms must be greater than 0 (got "
+                    + grpcCallDeadlineMs + "); it is the deadline, in ms, of every unary Cyoda call");
+        }
+        this.grpcCallDeadlineMs = grpcCallDeadlineMs;
+    }
+
+    public boolean isAllowInsecureTransport() {
+        return allowInsecureTransport;
+    }
+
+    public void setAllowInsecureTransport(boolean allowInsecureTransport) {
+        this.allowInsecureTransport = allowInsecureTransport;
+    }
+
+    /**
+     * Startup check of the transport to Cyoda. With {@code auth-mode=client-credentials} the client secret goes to
+     * {@code {cyoda-api-url}/oauth/token} and the M2M token rides every call, so neither may cross the network in
+     * plaintext: an {@code http} token URI or {@code grpc-tls=false} fails startup unless the host is loopback
+     * ({@code localhost}, {@code 127.0.0.0/8}, {@code ::1}) or {@code app.config.allow-insecure-transport=true}.
+     * With {@code auth-mode=none} one warning is logged.
+     */
+    @Override
+    public void afterPropertiesSet() {
+        if (authMode == AuthMode.NONE) {
+            logger.warn("app.config.auth-mode=none: Cyoda calls carry no credentials. This is for cyoda-go's mock "
+                    + "IAM only; never use it against a shared or production Cyoda.");
+            return;
+        }
+        if (allowInsecureTransport) {
+            logger.warn("app.config.allow-insecure-transport=true: the Cyoda client secret and M2M token may be sent "
+                    + "without TLS.");
+            return;
+        }
+        if (cyodaApiUrl != null && !cyodaApiUrl.isBlank()) {
+            String tokenUri = cyodaApiUrl + "/oauth/token";
+            URI uri;
+            try {
+                uri = URI.create(tokenUri);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalStateException("app.config.cyoda-api-url '" + cyodaApiUrl + "' is not a valid URL: "
+                        + e.getMessage(), e);
+            }
+            if (!"https".equalsIgnoreCase(uri.getScheme()) && !isLoopback(uri.getHost())) {
+                throw new IllegalStateException("The Cyoda token URI " + tokenUri + " (from app.config.cyoda-api-url) "
+                        + "is not https, so app.config.auth-mode=client-credentials would send the client secret "
+                        + "and the M2M token in plaintext. Use an https app.config.cyoda-api-url, or set "
+                        + "app.config.allow-insecure-transport=true if the network is trusted.");
+            }
+        }
+        if (!grpcTls && grpcAddress != null && !grpcAddress.isBlank() && !isLoopback(grpcAddress)) {
+            throw new IllegalStateException("app.config.grpc-tls=false for the non-loopback gRPC host " + grpcAddress
+                    + ", so app.config.auth-mode=client-credentials would send the M2M token in plaintext. Set "
+                    + "app.config.grpc-tls=true, or app.config.allow-insecure-transport=true if the network is trusted.");
+        }
+    }
+
+    /** A loopback host by its literal form only ({@code localhost}, {@code 127.0.0.0/8}, {@code ::1}); no DNS lookup. */
+    static boolean isLoopback(String host) {
+        if (host == null || host.isBlank()) {
+            return false;
+        }
+        String h = host.trim().toLowerCase(Locale.ROOT);
+        if (h.startsWith("[") && h.endsWith("]")) {
+            h = h.substring(1, h.length() - 1);
+        }
+        if (h.equals("localhost")) {
+            return true;
+        }
+        if (IPV4_LITERAL.matcher(h).matches()) {
+            String[] octets = h.split("\\.");
+            for (String octet : octets) {
+                if (Integer.parseInt(octet) > 255) {
+                    return false;
+                }
+            }
+            return Integer.parseInt(octets[0]) == 127;
+        }
+        if (h.contains(":")) {
+            try {
+                // An IPv6 literal is parsed, never resolved.
+                return InetAddress.getByName(h).isLoopbackAddress();
+            } catch (Exception e) {
+                return false;
+            }
+        }
+        return false;
+    }
 
     /** Base package scanned for {@link com.java_template.common.workflow.CyodaEntity} implementations. */
     private String entityBasePackage = "com.java_template.application";
@@ -300,28 +425,12 @@ public class Config {
         this.includeDefaultOperations = includeDefaultOperations;
     }
 
-    public boolean isSkipSsl() {
-        return skipSsl;
-    }
-
-    public void setSkipSsl(boolean skipSsl) {
-        this.skipSsl = skipSsl;
-    }
-
     public String getExecutionMode() {
         return executionMode;
     }
 
     public void setExecutionMode(String executionMode) {
         this.executionMode = executionMode;
-    }
-
-    public CyodaLight getCyodaLight() {
-        return cyodaLight;
-    }
-
-    public void setCyodaLight(CyodaLight cyodaLight) {
-        this.cyodaLight = cyodaLight;
     }
 
     public String getEntityBasePackage() {
@@ -346,47 +455,4 @@ public class Config {
                 .toList();
     }
 
-    /**
-     * Configuration for the cyoda-light in-memory digital twin sidecar.
-     * When active, {@link CyodaLightConfigCustomizer} injects property overrides
-     * into the Spring Environment so Config binds directly to the sidecar's endpoints.
-     */
-    public static class CyodaLight {
-        private boolean active = false;
-        private String httpUrl = "http://cyoda-light:8080";
-        private String grpcHost = "cyoda-light";
-        private int grpcPort = 50051;
-
-        public boolean isActive() {
-            return active;
-        }
-
-        public void setActive(boolean active) {
-            this.active = active;
-        }
-
-        public String getHttpUrl() {
-            return httpUrl;
-        }
-
-        public void setHttpUrl(String httpUrl) {
-            this.httpUrl = httpUrl;
-        }
-
-        public String getGrpcHost() {
-            return grpcHost;
-        }
-
-        public void setGrpcHost(String grpcHost) {
-            this.grpcHost = grpcHost;
-        }
-
-        public int getGrpcPort() {
-            return grpcPort;
-        }
-
-        public void setGrpcPort(int grpcPort) {
-            this.grpcPort = grpcPort;
-        }
-    }
 }

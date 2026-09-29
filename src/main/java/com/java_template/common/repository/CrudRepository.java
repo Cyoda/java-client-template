@@ -11,8 +11,8 @@ import org.cyoda.cloud.api.event.entity.EntityTransitionResponse;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.time.OffsetDateTime;
 import java.util.Collection;
-import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -69,7 +69,7 @@ public interface CrudRepository {
      * @param pointInTime timestamp for historical data retrieval
      * @return CompletableFuture containing the entity data payload
      */
-    CompletableFuture<DataPayload> findById(@NotNull UUID id, @Nullable Date pointInTime);
+    CompletableFuture<DataPayload> findById(@NotNull UUID id, @Nullable OffsetDateTime pointInTime);
 
     /**
      * Gets the count of entities matching the model specification. This is a fast operation,
@@ -88,7 +88,7 @@ public interface CrudRepository {
      * @param pointInTime timestamp for historical data retrieval
      * @return CompletableFuture containing the entity count
      */
-    CompletableFuture<Long> getEntityCount(@NotNull ModelSpec modelSpec, @Nullable Date pointInTime);
+    CompletableFuture<Long> getEntityCount(@NotNull ModelSpec modelSpec, @Nullable OffsetDateTime pointInTime);
 
     /**
      * Gets entity statistics grouped by workflow state. This is a fast operation on index tables.
@@ -110,7 +110,7 @@ public interface CrudRepository {
      */
     CompletableFuture<java.util.Map<String, Long>> getEntityStatsByState(
             @NotNull ModelSpec modelSpec,
-            @Nullable Date pointInTime
+            @Nullable OffsetDateTime pointInTime
     );
 
     /**
@@ -126,7 +126,7 @@ public interface CrudRepository {
     CompletableFuture<java.util.Map<String, Long>> getEntityStatsByState(
             @NotNull ModelSpec modelSpec,
             @NotNull List<String> states,
-            @Nullable Date pointInTime
+            @Nullable OffsetDateTime pointInTime
     );
 
     /**
@@ -138,7 +138,7 @@ public interface CrudRepository {
      */
     CompletableFuture<List<org.cyoda.cloud.api.event.common.EntityChangeMeta>> getEntityChangesMetadata(
             @NotNull UUID entityId,
-            @Nullable Date pointInTime
+            @Nullable OffsetDateTime pointInTime
     );
 
     /**

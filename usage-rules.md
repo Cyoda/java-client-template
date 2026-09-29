@@ -4,14 +4,14 @@ This file provides comprehensive guidelines for developers and AI agents working
 
 ## 📚 **Code Examples Reference**
 
-**All code examples and implementation patterns are located in the `llm_example/code/` directory:**
-- `llm_example/code/application/controller/` - REST controller patterns and best practices
-- `llm_example/code/application/entity/` - Entity class implementations with CyodaEntity interface
-- `llm_example/code/application/processor/` - Workflow processor examples with serialization patterns
-  - `llm_example/code/application/criterion/` - Workflow criteria examples with evaluation logic
+**All code examples and implementation patterns are located in the `src/test/java/com/example/application/` directory:**
+- `src/test/java/com/example/application/controller/` - REST controller patterns and best practices
+- `src/test/java/com/example/application/entity/` - Entity class implementations with CyodaEntity interface
+- `src/test/java/com/example/application/processor/` - Workflow processor examples with serialization patterns
+  - `src/test/java/com/example/application/criterion/` - Workflow criteria examples with evaluation logic
 
-**Configuration examples are in the `llm_example/config/` directory:**
-- `llm_example/config/workflow/` - Workflow JSON configuration templates and examples
+**Configuration examples are in the `src/test/resources/example/config/` directory:**
+- `src/test/resources/example/config/workflow/` - Workflow JSON configuration templates and examples
 
 **Always reference these examples** when implementing new components to ensure consistency with established patterns.
 
@@ -26,7 +26,7 @@ This file provides comprehensive guidelines for developers and AI agents working
 ## 📦 **EntityService - Performance-Optimized API**
 
 ### ✅ **EntityService Method Patterns**
-See `llm_example/code/application/controller/` for complete EntityService usage examples in REST controllers.
+See `src/test/java/com/example/application/controller/` for complete EntityService usage examples in REST controllers.
 
 ## 🏗️ **Entities**
 
@@ -40,7 +40,7 @@ See `llm_example/code/application/controller/` for complete EntityService usage 
 ## ⚙️ **Processors (CyodaProcessor)**
 
 ### ✅ **Processor Implementation Patterns**
-See `llm_example/code/application/processor/` for complete processor implementation examples including:
+See `src/test/java/com/example/application/processor/` for complete processor implementation examples including:
 - Constructor patterns with SerializerFactory injection
 - EntityService integration for interacting with other entities
 - Fluent API usage with ProcessorSerializer
@@ -63,7 +63,7 @@ See `llm_example/code/application/processor/` for complete processor implementat
 ## 🔍 **Criteria (CyodaCriterion)**
 
 ### ✅ **Criteria Implementation Patterns**
-See `llm_example/code/application/criterion/` for complete criteria implementation examples including:
+See `src/test/java/com/example/application/criterion/` for complete criteria implementation examples including:
 - Constructor patterns with SerializerFactory injection
 - CriterionSerializer fluent API usage
 - EvaluationOutcome chaining for validation logic
@@ -79,7 +79,7 @@ See `llm_example/code/application/criterion/` for complete criteria implementati
 ## 🔄 **Serializers**
 
 ### ✅ **Serializer Usage Patterns**
-See `llm_example/code/application/processor/` and `llm_example/code/application/criterion/` for complete serializer usage examples including:
+See `src/test/java/com/example/application/processor/` and `src/test/java/com/example/application/criterion/` for complete serializer usage examples including:
 - SerializerFactory injection patterns
 - ProcessorSerializer fluent API usage
 - CriterionSerializer fluent API usage
@@ -95,7 +95,7 @@ See `llm_example/code/application/processor/` and `llm_example/code/application/
 ## 🎯 **Controllers**
 
 ### ✅ **Controller Implementation Patterns**
-See `llm_example/code/application/controller/` for complete controller implementation examples including:
+See `src/test/java/com/example/application/controller/` for complete controller implementation examples including:
 - REST endpoint patterns with proper annotations
 - EntityService integration and method selection
 - EntityWithMetadata response patterns
@@ -107,7 +107,7 @@ See `llm_example/code/application/controller/` for complete controller implement
 - **NEVER** return generic `Object` responses
 - **NEVER** bypass EntityService for direct repository access
 
-See `example_code/controller/` for correct patterns and anti-patterns documentation.
+See `src/test/java/com/example/application/controller/` for correct patterns and anti-patterns documentation.
 
 ### 🎯 **Controller Guidelines**
 - CAN return `ResponseEntity<EntityWithMetadata<T>>` for single entities
@@ -134,7 +134,7 @@ EntityWithMetadata follows a clean JSON structure:
 }
 ```
 
-See `llm_example/code/application/controller/` and `llm_example/code/application/processor/` for complete EntityWithMetadata usage patterns.
+See `src/test/java/com/example/application/controller/` and `src/test/java/com/example/application/processor/` for complete EntityWithMetadata usage patterns.
 
 ## 🔄 **Workflow Configuration**
 
@@ -152,12 +152,12 @@ See `llm_example/code/application/controller/` and `llm_example/code/application
 - **Without Transition**: Use `entityService.update(entityId, entity, null)` to update without state change
 - **Processor Limitation**: Processors can only update OTHER entities, not the current entity being processed
 
-See `llm_example/config/workflow/` for workflow transition examples and patterns.
+See `src/test/resources/example/config/workflow/` for workflow transition examples and patterns.
 
 ## ⚙️ **Configuration**
 
 - Use injected `Config` bean instead of hardcoded values
-- Configuration is managed via Spring Boot YAML files (see `CONFIGURATION.md`)
+- Configuration is managed via Spring Boot YAML files (see the "Configure the Application" section of `README.md`)
 - Entity versioning: Use integer constants like `public static final Integer ENTITY_VERSION = 1;`
 - Configure gRPC settings via `application.yml` or profile-specific YAML files
 - Use `config.getCyodaHost()` and related methods for Cyoda integration
@@ -191,7 +191,7 @@ See `llm_example/config/workflow/` for workflow transition examples and patterns
 - Use `ResponseBuilder` for consistent error response formatting
 - Use `EvaluationOutcome.Fail` for criteria validation failures
 
-See `example_code/processor/` and `example_code/criterion/` for complete error handling examples.
+See `src/test/java/com/example/application/processor/` and `src/test/java/com/example/application/criterion/` for complete error handling examples.
 
 ### 🎯 **Error Handling Guidelines**
 - Use `ErrorInfo` class for structured error information

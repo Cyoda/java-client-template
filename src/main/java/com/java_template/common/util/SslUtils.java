@@ -17,9 +17,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.*;
+import java.net.Socket;
 import java.security.KeyManagementException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -129,36 +131,138 @@ public class SslUtils {
     }
 
     /**
-     * Creates an SSLContext based on configuration
+     * Trust manager for {@code app.config.ssl-trusted-hosts}: a server certificate is accepted without validation
+     * only when the peer host (the name the connection was opened with) is listed. Every other host, and any
+     * check where the host is unknown, gets the JDK default validation, including hostname verification.
+     */
+    static final class TrustedHostsTrustManager extends X509ExtendedTrustManager {
+        private final X509ExtendedTrustManager defaultTrustManager;
+        private final List<String> trustedHosts;
+
+        TrustedHostsTrustManager(X509ExtendedTrustManager defaultTrustManager, List<String> trustedHosts) {
+            this.defaultTrustManager = defaultTrustManager;
+            this.trustedHosts = List.copyOf(trustedHosts);
+        }
+
+        @Override
+        public void checkServerTrusted(X509Certificate[] chain, String authType, SSLEngine engine)
+                throws CertificateException {
+            String host = engine == null ? null : engine.getPeerHost();
+            if (isListedHost(host, trustedHosts)) {
+                logger.debug("Trusting the certificate of listed host {}", host);
+                return;
+            }
+            defaultTrustManager.checkServerTrusted(chain, authType, engine);
+        }
+
+        @Override
+        public void checkServerTrusted(X509Certificate[] chain, String authType, Socket socket)
+                throws CertificateException {
+            String host = null;
+            if (socket instanceof SSLSocket sslSocket && sslSocket.getHandshakeSession() != null) {
+                host = sslSocket.getHandshakeSession().getPeerHost();
+            }
+            if (isListedHost(host, trustedHosts)) {
+                logger.debug("Trusting the certificate of listed host {}", host);
+                return;
+            }
+            defaultTrustManager.checkServerTrusted(chain, authType, socket);
+        }
+
+        @Override
+        public void checkServerTrusted(X509Certificate[] chain, String authType) throws CertificateException {
+            // No connection, so no host to match: always the default validation.
+            defaultTrustManager.checkServerTrusted(chain, authType);
+        }
+
+        @Override
+        public void checkClientTrusted(X509Certificate[] chain, String authType, Socket socket)
+                throws CertificateException {
+            defaultTrustManager.checkClientTrusted(chain, authType, socket);
+        }
+
+        @Override
+        public void checkClientTrusted(X509Certificate[] chain, String authType, SSLEngine engine)
+                throws CertificateException {
+            defaultTrustManager.checkClientTrusted(chain, authType, engine);
+        }
+
+        @Override
+        public void checkClientTrusted(X509Certificate[] chain, String authType) throws CertificateException {
+            defaultTrustManager.checkClientTrusted(chain, authType);
+        }
+
+        @Override
+        public X509Certificate[] getAcceptedIssuers() {
+            return defaultTrustManager.getAcceptedIssuers();
+        }
+    }
+
+    /** True when {@code host} is one of {@code trustedHosts}, compared case-insensitively and ignoring a listed port. */
+    static boolean isListedHost(String host, List<String> trustedHosts) {
+        if (host == null || host.isBlank()) {
+            return false;
+        }
+        for (String trusted : trustedHosts) {
+            if (host.equalsIgnoreCase(trusted) || host.equalsIgnoreCase(withoutPort(trusted))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String withoutPort(String hostAndPort) {
+        if (hostAndPort.startsWith("[")) {
+            int end = hostAndPort.indexOf(']');
+            return end > 0 ? hostAndPort.substring(1, end) : hostAndPort;
+        }
+        int colon = hostAndPort.indexOf(':');
+        return colon >= 0 && colon == hostAndPort.lastIndexOf(':') ? hostAndPort.substring(0, colon) : hostAndPort;
+    }
+
+    private static X509ExtendedTrustManager defaultTrustManager() throws Exception {
+        TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init((java.security.KeyStore) null);
+        for (TrustManager tm : tmf.getTrustManagers()) {
+            if (tm instanceof X509ExtendedTrustManager extended) {
+                return extended;
+            }
+        }
+        throw new IllegalStateException("No default X509ExtendedTrustManager");
+    }
+
+    /**
+     * Creates an SSLContext based on configuration: trust-all with {@code ssl-trust-all}; certificate checks
+     * relaxed for the {@code ssl-trusted-hosts} only; otherwise the JDK default.
      */
     public static SSLContext createSelectiveSSLContext(Config config) throws NoSuchAlgorithmException {
         List<String> trustedHosts = config.getTrustedHosts();
-        boolean shouldTrustAll = config.isSslTrustAll() || !trustedHosts.isEmpty();
 
         if (config.isSslTrustAll()) {
             logger.warn("SSL_TRUST_ALL is enabled - this should only be used in development!");
-        } else if (!trustedHosts.isEmpty()) {
-            logger.info("SSL configured to trust specific hosts: {}", trustedHosts);
+            try {
+                SSLContext sslContext = SSLContext.getInstance("TLS");
+                sslContext.init(null, new TrustManager[]{new PermissiveTrustManager(true)}, new SecureRandom());
+                return sslContext;
+            } catch (Exception e) {
+                logger.error("Failed to create permissive SSL context, falling back to default: {}", e.getMessage());
+                return SSLContext.getDefault();
+            }
         }
 
-        if (!shouldTrustAll) {
+        if (trustedHosts.isEmpty()) {
             logger.debug("Using default SSL context - no trusted hosts configured");
             return SSLContext.getDefault();
         }
 
         try {
             SSLContext sslContext = SSLContext.getInstance("TLS");
-            PermissiveTrustManager trustManager = new PermissiveTrustManager(shouldTrustAll);
-            sslContext.init(null, new TrustManager[]{trustManager}, new SecureRandom());
-
-            logger.info(
-                    "Created permissive SSL context (trustAll={}, trustedHosts={})",
-                    config.isSslTrustAll(),
-                    trustedHosts
-            );
+            sslContext.init(null, new TrustManager[]{new TrustedHostsTrustManager(defaultTrustManager(), trustedHosts)},
+                    new SecureRandom());
+            logger.info("SSL certificate checks relaxed for the listed hosts only: {}", trustedHosts);
             return sslContext;
         } catch (Exception e) {
-            logger.error("Failed to create permissive SSL context, falling back to default: {}", e.getMessage());
+            logger.error("Failed to create the trusted-hosts SSL context, falling back to default: {}", e.getMessage());
             return SSLContext.getDefault();
         }
     }

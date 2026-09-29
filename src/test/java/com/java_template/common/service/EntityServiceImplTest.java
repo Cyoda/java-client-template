@@ -1,6 +1,7 @@
 package com.java_template.common.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.repository.CrudRepository;
@@ -10,8 +11,6 @@ import com.java_template.common.workflow.OperationSpecification;
 import lombok.Getter;
 import lombok.Setter;
 import org.cyoda.cloud.api.common.model.GroupConditionDto;
-import org.cyoda.cloud.api.common.model.GroupOperatorDto;
-import org.cyoda.cloud.api.common.model.OperatorTypeDto;
 import org.cyoda.cloud.api.common.model.SimpleConditionDto;
 import org.cyoda.cloud.api.event.common.DataPayload;
 import org.cyoda.cloud.api.event.common.EntityChangeMeta;
@@ -29,6 +28,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
@@ -62,8 +63,9 @@ class EntityServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        objectMapper = new ObjectMapper();
-        entityService = new EntityServiceImpl(repository, objectMapper);
+        CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
+        objectMapper = wireMapper.mapper();
+        entityService = new EntityServiceImpl(repository, wireMapper);
         testEntityId = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
         testEntityId2 = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
         testEntity = new TestEntity(123L, "Test Entity", "ACTIVE");
@@ -82,7 +84,7 @@ class EntityServiceImplTest {
         EntityMetadata metadata = new EntityMetadata();
         metadata.setId(entityId);
         metadata.setState(state);
-        metadata.setCreationDate(new Date());
+        metadata.setCreationDate(OffsetDateTime.now());
         payload.setMeta(objectMapper.valueToTree(metadata));
 
         return payload;
@@ -117,11 +119,11 @@ class EntityServiceImplTest {
         ObjectMapper objectMapper = new ObjectMapper();
         SimpleConditionDto simpleCondition = new SimpleConditionDto()
                 .jsonPath("$.status")
-                .operation(OperatorTypeDto.EQUALS)
+                .operatorType(SimpleConditionDto.OperatorTypeEnum.EQUALS)
                 .value(objectMapper.valueToTree("ACTIVE"));
 
         return new GroupConditionDto()
-                .operator(GroupOperatorDto.AND)
+                .operator(GroupConditionDto.OperatorEnum.AND)
                 .conditions(List.of(simpleCondition));
     }
 
@@ -248,6 +250,7 @@ class EntityServiceImplTest {
     void testCreateSuccess() {
         UUID savedEntityId = SimpleSystemClock.INSTANCE.uniqueTimeUUIDinMicros();
         EntityTransactionResponse transactionResponse = createTransactionResponse(savedEntityId);
+        OffsetDateTime timeOfChange = OffsetDateTime.parse("2026-09-27T10:11:12.123456789Z");
         when(repository.save(eq(createTestModelSpec()), any()))
                 .thenReturn(CompletableFuture.completedFuture(transactionResponse));
         when(repository.findById(eq(savedEntityId), any()))
@@ -256,7 +259,7 @@ class EntityServiceImplTest {
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(transactionResponse.getTransactionInfo().getTransactionId())
-                                .withTimeOfChange(new Date())
+                                .withTimeOfChange(timeOfChange)
                 )));
 
         EntityWithMetadata<TestEntity> result = entityService.create(testEntity);
@@ -267,6 +270,9 @@ class EntityServiceImplTest {
         assertEntityMatches(result.entity(), testEntity);
         assertEquals(savedEntityId, result.metadata().getId());
         verify(repository).save(eq(createTestModelSpec()), any());
+        // Pins that the reload passes EntityChangeMeta.timeOfChange through verbatim, at full
+        // nanosecond precision, rather than losing precision by round-tripping through Date.
+        verify(repository).findById(savedEntityId, timeOfChange);
     }
 
     @Test
@@ -322,6 +328,7 @@ class EntityServiceImplTest {
     @DisplayName("update should pass null transition directly to repository")
     void testUpdateWithNullTransition() {
         EntityTransactionResponse response = createTransactionResponse(testEntityId);
+        OffsetDateTime timeOfChange = OffsetDateTime.parse("2026-09-27T10:11:12.123456789Z");
         when(repository.update(eq(testEntityId), any(), isNull()))
                 .thenReturn(CompletableFuture.completedFuture(response));
         when(repository.findById(eq(testEntityId), any()))
@@ -330,7 +337,7 @@ class EntityServiceImplTest {
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(response.getTransactionInfo().getTransactionId())
-                                .withTimeOfChange(new Date())
+                                .withTimeOfChange(timeOfChange)
                 )));
 
         EntityWithMetadata<TestEntity> result = entityService.update(testEntityId, testEntity, null);
@@ -341,6 +348,9 @@ class EntityServiceImplTest {
         assertEntityMatches(result.entity(), testEntity);
         assertEquals(testEntityId, result.metadata().getId());
         verify(repository).update(eq(testEntityId), any(), isNull());
+        // Pins that the reload passes EntityChangeMeta.timeOfChange through verbatim, at full
+        // nanosecond precision, rather than losing precision by round-tripping through Date.
+        verify(repository).findById(testEntityId, timeOfChange);
     }
 
     @Test
@@ -355,7 +365,7 @@ class EntityServiceImplTest {
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(response.getTransactionInfo().getTransactionId())
-                                .withTimeOfChange(new Date())
+                                .withTimeOfChange(OffsetDateTime.now())
                 )));
 
         EntityWithMetadata<TestEntity> result = entityService.update(testEntityId, testEntity, TRANSITION_ACTIVATE);
@@ -410,7 +420,7 @@ class EntityServiceImplTest {
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(responses.getFirst().getTransactionInfo().getTransactionId())
-                                .withTimeOfChange(new Date())
+                                .withTimeOfChange(OffsetDateTime.now())
                 )));
 
         List<EntityWithMetadata<TestEntity>> result = entityService.updateAll(entities, null);
@@ -601,7 +611,7 @@ class EntityServiceImplTest {
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(updateResponse.getTransactionInfo().getTransactionId())
-                                .withTimeOfChange(new Date())
+                                .withTimeOfChange(OffsetDateTime.now())
                 )));
 
         EntityWithMetadata<TestEntity> result = entityService.updateByBusinessId(testEntity, BUSINESS_ID_FIELD, TRANSITION_ACTIVATE);
@@ -679,7 +689,7 @@ class EntityServiceImplTest {
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(transactionResponse.getTransactionInfo().getTransactionId())
-                                .withTimeOfChange(new Date())
+                                .withTimeOfChange(OffsetDateTime.now())
                 )));
 
         when(repository.findById(eq(testEntityId2), any()))
@@ -688,7 +698,7 @@ class EntityServiceImplTest {
                 .thenReturn(CompletableFuture.completedFuture(List.of(
                         new EntityChangeMeta()
                                 .withTransactionId(transactionResponse.getTransactionInfo().getTransactionId())
-                                .withTimeOfChange(new Date())
+                                .withTimeOfChange(OffsetDateTime.now())
                 )));
 
         List<EntityWithMetadata<TestEntity>> result = entityService.save(entities);
@@ -1097,11 +1107,12 @@ class EntityServiceImplTest {
     @DisplayName("getEntityStatsByState with pointInTime should return stats map when successful")
     void testGetEntityStatsByStateWithPointInTimeSuccess() {
         Date pointInTime = new Date();
+        OffsetDateTime expectedPointInTime = pointInTime.toInstant().atOffset(ZoneOffset.UTC);
         Map<String, Long> expectedStats = Map.of(
                 "DRAFT", 3L,
                 "VALIDATED", 7L
         );
-        when(repository.getEntityStatsByState(eq(createTestModelSpec()), eq(pointInTime)))
+        when(repository.getEntityStatsByState(eq(createTestModelSpec()), eq(expectedPointInTime)))
                 .thenReturn(CompletableFuture.completedFuture(expectedStats));
 
         Map<String, Long> result = entityService.getEntityStatsByState(createTestModelSpec(), pointInTime);
@@ -1110,7 +1121,7 @@ class EntityServiceImplTest {
         assertEquals(2, result.size());
         assertEquals(3L, result.get("DRAFT"));
         assertEquals(7L, result.get("VALIDATED"));
-        verify(repository).getEntityStatsByState(eq(createTestModelSpec()), eq(pointInTime));
+        verify(repository).getEntityStatsByState(eq(createTestModelSpec()), eq(expectedPointInTime));
     }
 
     @Test
@@ -1118,11 +1129,12 @@ class EntityServiceImplTest {
     void testGetEntityStatsByStateWithSpecificStates() {
         List<String> states = List.of("DRAFT", "VALIDATED");
         Date pointInTime = new Date();
+        OffsetDateTime expectedPointInTime = pointInTime.toInstant().atOffset(ZoneOffset.UTC);
         Map<String, Long> expectedStats = Map.of(
                 "DRAFT", 5L,
                 "VALIDATED", 10L
         );
-        when(repository.getEntityStatsByState(eq(createTestModelSpec()), eq(states), eq(pointInTime)))
+        when(repository.getEntityStatsByState(eq(createTestModelSpec()), eq(states), eq(expectedPointInTime)))
                 .thenReturn(CompletableFuture.completedFuture(expectedStats));
 
         Map<String, Long> result = entityService.getEntityStatsByState(createTestModelSpec(), states, pointInTime);
@@ -1132,7 +1144,7 @@ class EntityServiceImplTest {
         assertEquals(5L, result.get("DRAFT"));
         assertEquals(10L, result.get("VALIDATED"));
         assertNull(result.get("ARCHIVED"));
-        verify(repository).getEntityStatsByState(eq(createTestModelSpec()), eq(states), eq(pointInTime));
+        verify(repository).getEntityStatsByState(eq(createTestModelSpec()), eq(states), eq(expectedPointInTime));
     }
 
     @Test
@@ -1147,5 +1159,66 @@ class EntityServiceImplTest {
         assertNotNull(result);
         assertTrue(result.isEmpty());
         verify(repository).getEntityStatsByState(eq(createTestModelSpec()), isNull());
+    }
+
+    // ========================================
+    // LOSSLESS POINT-IN-TIME OVERLOADS
+    // ========================================
+
+    private static final OffsetDateTime NANO_PIT = OffsetDateTime.parse("2026-09-27T10:11:12.123456789+02:00");
+
+    @Test
+    @DisplayName("getById(OffsetDateTime) passes a nanosecond point in time to the repository unchanged")
+    void getByIdOffsetDateTimeReachesRepositoryUnchanged() {
+        when(repository.findById(eq(testEntityId), any()))
+                .thenReturn(CompletableFuture.completedFuture(createTestDataPayload(testEntity, testEntityId)));
+
+        entityService.getById(testEntityId, createTestModelSpec(), TestEntity.class, NANO_PIT);
+
+        verify(repository).findById(eq(testEntityId), same(NANO_PIT));
+    }
+
+    @Test
+    @DisplayName("getById(Date) still works and converts to a UTC OffsetDateTime")
+    void getByIdDateStillConvertsToUtc() {
+        Date pointInTime = new Date(1_790_000_000_123L);
+        when(repository.findById(eq(testEntityId), any()))
+                .thenReturn(CompletableFuture.completedFuture(createTestDataPayload(testEntity, testEntityId)));
+
+        entityService.getById(testEntityId, createTestModelSpec(), TestEntity.class, pointInTime);
+
+        verify(repository).findById(eq(testEntityId), eq(pointInTime.toInstant().atOffset(ZoneOffset.UTC)));
+    }
+
+    @Test
+    @DisplayName("count, stats and change-history OffsetDateTime overloads pass the point in time unchanged")
+    void metadataOffsetDateTimeOverloadsReachRepositoryUnchanged() {
+        List<String> states = List.of("DRAFT");
+        when(repository.getEntityCount(eq(createTestModelSpec()), same(NANO_PIT)))
+                .thenReturn(CompletableFuture.completedFuture(4L));
+        when(repository.getEntityStatsByState(eq(createTestModelSpec()), same(NANO_PIT)))
+                .thenReturn(CompletableFuture.completedFuture(Map.of("DRAFT", 4L)));
+        when(repository.getEntityStatsByState(eq(createTestModelSpec()), eq(states), same(NANO_PIT)))
+                .thenReturn(CompletableFuture.completedFuture(Map.of("DRAFT", 4L)));
+        when(repository.getEntityChangesMetadata(eq(testEntityId), same(NANO_PIT)))
+                .thenReturn(CompletableFuture.completedFuture(List.of()));
+
+        assertEquals(4L, entityService.getEntityCount(createTestModelSpec(), NANO_PIT));
+        assertEquals(Map.of("DRAFT", 4L), entityService.getEntityStatsByState(createTestModelSpec(), NANO_PIT));
+        assertEquals(Map.of("DRAFT", 4L), entityService.getEntityStatsByState(createTestModelSpec(), states, NANO_PIT));
+        assertEquals(List.of(), entityService.getEntityChangesMetadata(testEntityId, NANO_PIT));
+    }
+
+    @Test
+    @DisplayName("findByBusinessId(OffsetDateTime) searches at the exact point in time")
+    void findByBusinessIdOffsetDateTimeSearchesAtTheExactInstant() {
+        when(repository.findAllByCriteria(eq(createTestModelSpec()), any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(
+                        PageResult.of(null, List.of(createTestDataPayload(testEntity, testEntityId)), 0, 1, 1L)));
+
+        entityService.findByBusinessId(createTestModelSpec(), "TEST-123", BUSINESS_ID_FIELD, TestEntity.class, NANO_PIT);
+
+        verify(repository).findAllByCriteria(eq(createTestModelSpec()), any(),
+                argThat(params -> NANO_PIT.equals(params.pointInTime())));
     }
 }

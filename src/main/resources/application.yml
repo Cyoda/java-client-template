@@ -8,6 +8,15 @@ server:
   servlet:
     context-path: /api
 
+# Liveness/readiness groups are served at /api/actuator/health/{liveness,readiness} (the Helm probes use
+# these paths); enabled explicitly rather than relying on Kubernetes detection. An app whose own
+# SecurityFilterChain requires authentication must permit /actuator/health/** or the probes get 401.
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
 spring:
   mvc:
     problemdetails:
@@ -32,6 +41,11 @@ springdoc:
 # Environment-specific settings for Cross-Origin Resource Sharing
 # Override via environment variables or profile-specific YAML files for different environments (dev/staging/prod)
 app:
+  admin:
+    grpc-endpoints:
+      # POST /admin/grpc/reconnect and GET /admin/grpc/status. They carry no authentication of their own:
+      # enable only where your SecurityFilterChain protects /admin/**.
+      enabled: false
   cors:
     # Comma-separated list of allowed origins (no wildcards when credentials enabled)
     # Dev: http://localhost:3000,http://localhost:5173
@@ -50,21 +64,26 @@ app:
     # URL pattern to apply CORS to
     path-pattern: /**
   config:
-    # Cyoda Platform Connection
-    # Override these via environment variables or profile-specific YAML files
-    # MUST SET cyoda-host, cyoda-client-id, cyoda-client-secret. Get them from Cyoda AI Studio, for example
+    # Cyoda connection. Cloud-shaped defaults; see application-cyoda-local.yml (profile cyoda-local) for a local cyoda-go.
     cyoda-host:
+    cyoda-api-url: https://${app.config.cyoda-host}/api
+    # client-credentials: M2M token from {cyoda-api-url}/oauth/token (cyoda-go jwt mode, Cyoda Cloud)
+    # none: no Authorization header (cyoda-go mock IAM); logs a warning at startup
+    auth-mode: client-credentials
+    # With client-credentials, startup fails if the token URI is not https or grpc-tls is false,
+    # unless the host is loopback (localhost, 127.0.0.0/8, ::1). true allows plaintext anyway.
+    allow-insecure-transport: false
     cyoda-client-id:
     cyoda-client-secret:
-    cyoda-api-url: https://${app.config.cyoda-host}/api
 
-    # gRPC Configuration
+    # gRPC
     grpc-address: grpc-${app.config.cyoda-host}
     grpc-server-port: 443
+    grpc-tls: true
+    # Deadline for each unary gRPC call to Cyoda (must be > 0); the server-streaming collection calls have none
+    grpc-call-deadline-ms: 120000
     grpc-processor-tag: cyoda_application
     grpc-communication-data-format: JSON
-
-    # gRPC Channel Configuration
     grpc-max-inbound-message-size: 16777216
     grpc-max-inbound-metadata-size: 16384
     grpc-flow-control-window: 67108864
@@ -72,32 +91,27 @@ app:
     grpc-keep-alive-timeout-seconds: 10
     grpc-idle-timeout-seconds: 300
 
-    # Thread Pool Configuration
+    # Processor/criteria/control threads: virtual or platform. Either way each is a fixed pool of the size below.
+    execution-mode: virtual
     processor-thread-pool: 20
     criteria-thread-pool: 20
     control-thread-pool: 3
 
-    # Connection Configuration
+    # Connection
     handshake-timeout-ms: 5000
     initial-reconnect-delay-ms: 200
     max-reconnect-delay-ms: 10000
     failed-reconnects-limit: 10
 
-    # Monitoring Configuration
+    # Monitoring (ms without a server keep-alive before a warning; diagnostic only)
     sent-events-cache-max-size: 100
     monitoring-scheduler-initial-delay-seconds: 1
     monitoring-scheduler-delay-seconds: 3
-    keep-alive-warning-threshold: 60000
+    keep-alive-warning-threshold: 20000
 
-    # SSL Configuration -- only needed for local development using self-signed certificates
+    # Development only: trust self-signed certificates
     ssl-trust-all: false
     ssl-trusted-hosts:
 
-    # Feature Flags
-    # This is just for testing purposes. It activates NoopProcessor and AlwaysTrueCriterion/AlwaysFalseCriterion
-    # which can be used for testing workflows without having to implement actual processors/criteria
+    # Activates NoopProcessor and AlwaysTrueCriterion/AlwaysFalseCriterion for workflow testing
     include-default-operations: false
-
-cyoda:
-  api:
-    url: https://${app.config.cyoda-host}

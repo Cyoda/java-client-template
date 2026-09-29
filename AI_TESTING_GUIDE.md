@@ -234,6 +234,16 @@ Show me the exact entity names and file paths I need for testing."
 "Run the test suite using './gradlew test' and confirm all tests pass. If any fail, analyze the failures and fix the underlying issues."
 ```
 
+**Integration tests and the cyoda binary.** `./gradlew check` and `./gradlew build` also run the integration
+tests (`src/integrationTest`) against the cyoda-go pinned in `src/main/resources/cyoda/CYODA_VERSION`. The build
+installs that binary automatically (the `installCyoda` task runs `scripts/install-cyoda.sh` into `.cyoda/bin`,
+which survives `./gradlew clean` and is reused while it matches the pin; a `cyoda` on `PATH` that already
+matches the pin is kept too, as long as `.cyoda/bin` is empty). A `-dev` pin is built from source and needs Go
+1.26.7 or later, `git` and network access; a released pin is downloaded, needs network access, and must match the SHA-256 committed in `CYODA_SHA256SUMS`. With no way
+to install it, pass `-Dcyoda.bin=<path>` / set `CYODA_BIN` to a binary you have, or build with
+`./gradlew build -x integrationTest`. To keep a binary that deliberately does not match the pin — at
+`.cyoda/bin` or on `PATH` — instead of it being overwritten, pass `-Dcyoda.allowVersionMismatch=true`.
+
 #### 5. **Code Quality Verification**
 ```
 "Run code quality checks on the Java application:
@@ -305,7 +315,7 @@ Then start the application using: ./gradlew bootRun"
 1. ./gradlew compileJava (compilation check)
 2. ./gradlew compileTestJava (test compilation check)
 3. ./gradlew test (run all tests)
-4. ./gradlew build (full build including tests and packaging)
+4. ./gradlew build (full build including tests and packaging; it installs the pinned cyoda for the integration tests, see "Integration tests and the cyoda binary" above)
 5. ./gradlew checkstyleMain (if checkstyle is configured)
 6. ./gradlew runApp (run the application)" -- you need this command to run the application
 

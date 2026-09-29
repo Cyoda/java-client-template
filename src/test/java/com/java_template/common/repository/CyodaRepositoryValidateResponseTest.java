@@ -7,9 +7,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.config.Config;
 import com.java_template.common.grpc.client.event_handling.CloudEventBuilder;
 import com.java_template.common.grpc.client.event_handling.CloudEventParser;
@@ -26,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @ExtendWith(MockitoExtension.class)
 class CyodaRepositoryValidateResponseTest {
 
-    @Mock ObjectMapper objectMapper;
+    @Spy CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
     @Mock CloudEventsServiceGrpc.CloudEventsServiceBlockingStub stub;
     @Mock CloudEventBuilder cloudEventBuilder;
     @Mock CloudEventParser cloudEventParser;

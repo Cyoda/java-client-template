@@ -3,14 +3,14 @@ plugins {
     id 'application'
     id 'org.jetbrains.kotlin.jvm' version '2.2.21'
     id 'org.jetbrains.kotlin.plugin.spring' version '2.2.21'
-    id 'org.springframework.boot' version '3.5.3'
+    id 'org.springframework.boot' version '3.5.16'
     id 'io.spring.dependency-management' version '1.1.7'
     id 'io.freefair.lombok' version '8.4'
-    id "org.jsonschema2pojo" version "1.2.1"
+    id "org.jsonschema2pojo" version "1.2.2"
     id 'com.google.protobuf' version '0.9.4'
-    id 'se.thinkcode.cucumber-runner' version '0.0.11'
     id 'jacoco'
     id 'org.openapi.generator' version '7.12.0'
+    id 'java-test-fixtures'
 }
 
 java {
@@ -31,29 +31,6 @@ kotlin {
 tasks.withType(JavaCompile).configureEach {
     // Increase maximum number of diagnostics shown by javac
     options.compilerArgs += ['-Xmaxerrs', '1000', '-Xmaxwarns', '1000']
-}
-
-task cucumberTest(type: Test) {
-  include '**/GherkinE2eTest.class'
-  testClassesDirs = sourceSets.test.output.classesDirs
-  classpath = sourceSets.test.runtimeClasspath
-  useJUnitPlatform()
-  finalizedBy jacocoTestReport
-
-  // Force test profile and cucumber env file
-  systemProperty 'spring.profiles.active', 'cucumber'
-
-  testLogging {
-    events "passed", "skipped", "failed"
-    showStandardStreams true
-    exceptionFormat "full"
-  }
-}
-
-jacocoTestReport {
-  dependsOn cucumberTest
-  executionData.from = files("$buildDir/jacoco/cucumberTest.exec")
-  reports.xml.required = true
 }
 
 jacoco {
@@ -87,7 +64,7 @@ sourceSets {
             srcDirs += "src/main/kotlin"
         }
         proto {
-            srcDir 'src/main/resources/proto'
+            srcDir layout.buildDirectory.dir('cyoda-proto/main')
         }
     }
     test {
@@ -95,6 +72,15 @@ sourceSets {
             srcDirs += "src/test/kotlin"
         }
     }
+    integrationTest {
+        compileClasspath += sourceSets.main.output + sourceSets.test.output
+        runtimeClasspath += sourceSets.main.output + sourceSets.test.output
+    }
+}
+
+configurations {
+    integrationTestImplementation.extendsFrom testImplementation
+    integrationTestRuntimeOnly.extendsFrom testRuntimeOnly
 }
 
 dependencies {
@@ -103,7 +89,7 @@ dependencies {
     implementation 'org.jetbrains.kotlin:kotlin-reflect'
     implementation 'com.fasterxml.jackson.module:jackson-module-kotlin'
 
-    implementation 'org.springframework.boot:spring-boot-starter-web:3.5.3'
+    implementation 'org.springframework.boot:spring-boot-starter-web' // Version managed by Spring Boot
     implementation 'org.springframework.boot:spring-boot-starter' // Version managed by Spring Boot
     implementation 'org.springframework.boot:spring-boot-starter-oauth2-client' // Version managed by Spring Boot
     implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server' // JWT validation; delete when switching to real IdP
@@ -124,11 +110,16 @@ dependencies {
     implementation 'io.cloudevents:cloudevents-json-jackson:4.0.1'
     implementation 'io.cloudevents:cloudevents-spring:4.0.1'
 
-    implementation 'com.fasterxml.jackson.core:jackson-databind:2.19.1'
+    // cloudevents.proto is import-only; io.cloudevents.v1.proto.CloudEvent comes from cloudevents-protobuf (spec §3.3.1)
+    compileProtoPath files(layout.buildDirectory.dir('cyoda-proto/include')) {
+        builtBy 'prepareCyodaProto'
+    }
+
+    implementation 'com.fasterxml.jackson.core:jackson-databind' // Version managed by Spring Boot (jackson-bom)
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
 
-    implementation 'org.apache.httpcomponents.client5:httpclient5:5.5'
-    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.3'
+    implementation 'org.apache.httpcomponents.client5:httpclient5:5.5.2'
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.17'
     implementation 'com.fasterxml.uuid:java-uuid-generator:4.0.1'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     // OpenTelemetry observability — API and annotations only (agent provides SDK at runtime)
@@ -145,20 +136,23 @@ dependencies {
     implementation 'com.beust:jcommander:1.82'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
-    testImplementation platform('org.junit:junit-bom:5.13.1')
-    testImplementation 'org.junit.jupiter:junit-jupiter:5.13.1'
-    testImplementation("io.cucumber:cucumber-java:7.18.0")
-    testImplementation("io.cucumber:cucumber-spring:7.18.0")
-    testImplementation("io.cucumber:cucumber-junit-platform-engine:7.18.0")
+    testImplementation platform('org.junit:junit-bom:5.13.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.13.4'
     testImplementation 'org.instancio:instancio-junit:5.5.1'
     testImplementation("org.junit.platform:junit-platform-suite")
     testImplementation 'io.opentelemetry:opentelemetry-sdk-testing:1.44.1'
     testImplementation 'org.awaitility:awaitility:4.2.2'
+
+    testFixturesImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testFixturesImplementation 'com.fasterxml.jackson.core:jackson-databind'
+    testFixturesImplementation platform('org.junit:junit-bom:5.13.4')
+    testFixturesImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation testFixtures(project)
+
+    integrationTestImplementation testFixtures(project)
 }
 
 test {
-    exclude '**/GherkinE2eTest.class'
-
     useJUnitPlatform()
 
     // Pass system properties to tests (needed for conditional test execution).
@@ -168,8 +162,65 @@ test {
     systemProperty 'user.dir', project.projectDir.absolutePath
 }
 
+def cyodaPin = file('src/main/resources/cyoda/CYODA_VERSION')
+
+// Installs the pinned cyoda into .cyoda/bin with scripts/install-cyoda.sh (spec §7.4). Nothing is installed when
+// -Dcyoda.bin or CYODA_BIN names a binary; when .cyoda/bin/cyoda, or failing that a cyoda on PATH, already matches
+// the pin; or when -Dcyoda.allowVersionMismatch=true says to keep a mismatching one at either location deliberately.
+tasks.register('installCyoda', com.cyoda.build.InstallCyodaTask) {
+    description = 'Installs the pinned cyoda binary into .cyoda/bin, unless one is configured, already installed ' +
+            '(there or on PATH), or a mismatch is allowed with -Dcyoda.allowVersionMismatch=true'
+    group = 'verification'
+    projectRoot = layout.projectDirectory
+    pinFile = cyodaPin
+    explicitBinaryProperty = providers.systemProperty('cyoda.bin')
+    explicitBinaryEnv = providers.environmentVariable('CYODA_BIN')
+    allowVersionMismatchProperty = providers.systemProperty('cyoda.allowVersionMismatch')
+    pathEnv = providers.environmentVariable('PATH')
+}
+
+tasks.register('integrationTest', Test) {
+    description = 'Tier-1 integration tests against a cyoda-go subprocess (mock IAM, memory storage)'
+    group = 'verification'
+    testClassesDirs = sourceSets.integrationTest.output.classesDirs
+    classpath = sourceSets.integrationTest.runtimeClasspath
+    useJUnitPlatform()
+    dependsOn tasks.named('installCyoda')
+    shouldRunAfter tasks.named('test')
+    systemProperty 'user.dir', project.projectDir.absolutePath
+    // CyodaBinary looks for scripts/install-cyoda.sh's default install, <project>/.cyoda/bin/cyoda, here
+    systemProperty 'cyoda.projectDir', project.projectDir.absolutePath
+    systemProperty 'cyoda.pinFile', cyodaPin.absolutePath
+    systemProperty 'cyoda.logDir', layout.buildDirectory.dir('cyoda-logs').get().asFile.absolutePath
+    ['cyoda.bin', 'cyoda.allowVersionMismatch'].each { key ->
+        if (System.getProperty(key) != null) {
+            systemProperty key, System.getProperty(key)
+        }
+    }
+    inputs.file cyodaPin
+    testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+    }
+}
+
+tasks.named('check') { dependsOn 'integrationTest' }
+
+jacocoTestReport {
+    dependsOn tasks.named('test'), tasks.named('integrationTest')
+    executionData.from = files(
+            layout.buildDirectory.file('jacoco/test.exec'),
+            layout.buildDirectory.file('jacoco/integrationTest.exec'))
+    reports.xml.required = true
+}
+
+tasks.register('prepareEventSchemas', com.cyoda.build.PrepareEventSchemasTask) {
+    sourceDir = file('src/main/resources/cyoda/schema')
+    outputDir = layout.buildDirectory.dir('cyoda-schema')
+}
+
 jsonSchema2Pojo {
-    source = files("src/main/resources/schema")
+    source = files(layout.buildDirectory.dir('cyoda-schema'))
     targetDirectory = file("$buildDir/generated-sources/js2p")
     targetPackage = 'org.cyoda.cloud.api.event'
     generateBuilders = true
@@ -183,117 +234,131 @@ jsonSchema2Pojo {
     includeConstructors = false
     includeRequiredPropertiesConstructor = false
     includeAllPropertiesConstructor = true
+    // cyoda-go emits date-time fields (format: date-time) with full nanosecond precision
+    // (Go's time.RFC3339Nano). java.util.Date (the jsonschema2pojo default) only carries
+    // millisecond precision, so round-tripping a server timestamp through it silently floors
+    // sub-millisecond digits. Since cyoda-go v0.9 compares point-in-time reads at native
+    // precision with no millisecond rounding (cyoda-go changelog, issue #349), that floored
+    // value lands strictly before the entity's true commit instant and an exact-instant
+    // reload (EntityServiceImpl.create()/update()) never finds its own just-written version.
+    // OffsetDateTime matches the openapi-generated models (org.cyoda.cloud.api.common.model),
+    // which already use it, and is lossless for RFC3339Nano text. No schema in this project
+    // uses "format": "date" or "format": "time" (date-time only), so dateType is left alone.
+    dateTimeType = 'java.time.OffsetDateTime'
 }
+
+tasks.named('generateJsonSchema2Pojo') { dependsOn 'prepareEventSchemas' }
+
+tasks.register('prepareCyodaProto', com.cyoda.build.PrepareCyodaProtoTask) {
+    sourceDir = file('src/main/resources/cyoda/proto')
+    outputDir = layout.buildDirectory.dir('cyoda-proto')
+}
+
+// buildSrc's own tests (e.g. ProtoOptionInjectorTest) are not run by :build/:test/:check in
+// Gradle 8 — buildSrc is built before the root build starts and its `test` task never becomes
+// a dependency of the root project's tasks. Wire it in explicitly so CI gates on it.
+//
+// GradleBuild cannot target buildSrc directly ("build name 'buildSrc' which cannot be used as
+// it is a reserved name" — it is Gradle's own included build, not an ordinary one), so this
+// forks the wrapper as a separate process against the buildSrc build instead.
+//
+// The nested run never starts a daemon (--no-daemon) and inherits --offline and --write-verification-metadata.
+// As its own build rooted at buildSrc, it verifies dependencies against buildSrc/gradle/verification-metadata.xml
+// (buildSrc's test classpath), which the root build's --write-verification-metadata run regenerates too. Its
+// inputs (buildSrc's sources and build files, the wrapper and the verification metadata) and its output
+// (buildSrc's test results) are declared, so it is UP-TO-DATE when none of them changed.
+tasks.register('buildLogicTest', Exec) {
+    description = 'Runs the unit tests of the build logic in buildSrc'
+    group = 'verification'
+    workingDir = rootDir
+    def offline = gradle.startParameter.offline
+    def writeVerification = gradle.startParameter.writeDependencyVerifications.join(',')
+    def nestedArgs = (offline ? ['--offline'] : []) +
+            (writeVerification ? ['--write-verification-metadata', writeVerification] : []) +
+            ['--no-daemon', '-p', 'buildSrc', 'test']
+    commandLine com.cyoda.build.GradleWrapperCommand.of(
+            System.getProperty('os.name').startsWith('Windows'), *nestedArgs)
+    inputs.files(fileTree('buildSrc') {
+        include 'src/**', '*.gradle', '*.gradle.kts', 'gradle.properties', 'settings.gradle*'
+    }).withPropertyName('buildSrcSources').withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files('gradle/wrapper/gradle-wrapper.properties', 'gradle/verification-metadata.xml',
+            'buildSrc/gradle/verification-metadata.xml')
+            .withPropertyName('buildEnvironment').withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.property('offline', offline)
+    inputs.property('writeVerificationMetadata', writeVerification)
+    outputs.dir('buildSrc/build/test-results/test').withPropertyName('buildSrcTestResults')
+}
+
+tasks.named('check') { dependsOn 'buildLogicTest' }
+
+def protocArtifact = 'com.google.protobuf:protoc:4.31.1'
+def grpcPluginArtifact = 'io.grpc:protoc-gen-grpc-java:1.73.0'
 
 protobuf {
     protoc {
-        artifact = 'com.google.protobuf:protoc:3.25.1'
+        artifact = protocArtifact
     }
-
     plugins {
         grpc {
-            artifact = 'io.grpc:protoc-gen-grpc-java:1.62.2'
+            artifact = grpcPluginArtifact
         }
     }
-
     generateProtoTasks {
-        all()*.plugins {
-            grpc {}
+        all().configureEach { task ->
+            task.dependsOn 'prepareCyodaProto'
+            task.plugins { grpc {} }
         }
     }
 }
 
-// OpenAPI Generator tasks for generating Java models from OpenAPI YAML files
-// Package structure matches Cyoda client library: org.cyoda.cloud.api.*.model with Dto suffix
-def openapiFiles = [
-    [name: 'common', file: 'openapi-common.yml', modelPackage: 'org.cyoda.cloud.api.common.model'],
-    [name: 'workflow', file: 'openapi-workflow.yml', modelPackage: 'org.cyoda.cloud.api.workflow.model',
-        // Schema mappings to reuse common DTOs for criterion and processor types
-        schemaMappings: [
-            'WorkflowConfiguration_criterion': 'QueryConditionDto',
-            'TransitionDefinition_criterion': 'QueryConditionDto',
-            'ScheduledTransitionProcessorDefinition_allOf_config': 'ScheduledTransitionConfigDto',
-        ],
-        extraImportMappings: [
-            'QueryConditionDto': 'org.cyoda.cloud.api.common.model.QueryConditionDto',
-            'ScheduledTransitionConfigDto': 'org.cyoda.cloud.api.common.model.ScheduledTransitionConfigDto',
-        ]
-    ],
-    [name: 'entitySearch', file: 'openapi-entity-search.yml', modelPackage: 'org.cyoda.cloud.api.search.model'],
-    [name: 'audit', file: 'openapi-audit.yml', modelPackage: 'org.cyoda.cloud.api.audit.model'],
-    [name: 'iam', file: 'openapi-iam.yml', modelPackage: 'org.cyoda.cloud.api.iam.model'],
-]
+tasks.matching { it.name == 'extractIncludeProto' }.configureEach { dependsOn 'prepareCyodaProto' }
 
-openapiFiles.each { spec ->
-    tasks.register("generateOpenApi${spec.name.capitalize()}", org.openapitools.generator.gradle.plugin.tasks.GenerateTask) {
-        generatorName = 'spring'
-        inputSpec = "$projectDir/src/main/resources/api/${spec.file}"
-        outputDir = "$buildDir/generated-sources/openapi"
-        modelPackage = spec.modelPackage
-        apiPackage = spec.modelPackage
-        modelNameSuffix = 'Dto'
-        generateApiTests = false
-        generateModelTests = false
-        generateApiDocumentation = false
-        generateModelDocumentation = false
-        configOptions = [
-            dateLibrary: 'java8',
-            useJakartaEe: 'true',
-            openApiNullable: 'false',
-            serializationLibrary: 'jackson',
-            interfaceOnly: 'true',
-            useSpringBoot3: 'true',
-            useBeanValidation: 'true',
-        ]
-        globalProperties = [
-            models: '',  // Generate all models
-            apis: 'false',  // Don't generate API classes
-            supportingFiles: '',  // No supporting files needed
-        ]
-        // Map 'any' and 'object' types to JsonNode (matching Cyoda client library)
-        typeMappings = [
-            'object': 'JsonNode',
-            'any': 'JsonNode',
-        ]
-        // Base import mappings
-        def imports = [
-            'JsonNode': 'com.fasterxml.jackson.databind.JsonNode',
-        ]
-        // Add spec-specific import mappings if defined
-        if (spec.extraImportMappings) {
-            imports.putAll(spec.extraImportMappings)
-        }
-        importMappings = imports
-
-        // Add spec-specific schema mappings if defined
-        if (spec.schemaMappings) {
-            schemaMappings = spec.schemaMappings
-        }
-    }
+// The protobuf plugin folds sourceSets.main.proto into main resources (so raw .proto files are
+// packaged), which makes processResources an implicit consumer of prepareCyodaProto's output.
+// Exclude the build-modified copy (with injected java_* options) so only the vendored original
+// under cyoda/proto/... ships in the jar; there is no reason to ship the same contract twice.
+tasks.named('processResources') {
+    dependsOn 'prepareCyodaProto'
+    exclude 'cyoda/cyoda-cloud-api.proto'
 }
 
-tasks.register('generateOpenApi') {
-    dependsOn openapiFiles.collect { "generateOpenApi${it.name.capitalize()}" }
-    description = 'Generates Java models from all OpenAPI YAML files'
+// OpenAPI DTOs come from cyoda-go's single api/openapi.yaml. PrepareOpenApiTask writes a patched
+// copy (cyoda-go #625 discriminator mappings, #627 array values) that the generator reads.
+tasks.register('prepareOpenApi', com.cyoda.build.PrepareOpenApiTask) {
+    sourceFile = file('src/main/resources/cyoda/openapi/openapi.yaml')
+    outputFile = layout.buildDirectory.file('cyoda-openapi/openapi.yaml')
+}
+
+tasks.register('generateOpenApi', org.openapitools.generator.gradle.plugin.tasks.GenerateTask) {
+    description = 'Generates Java DTOs from cyoda-go api/openapi.yaml (patched copy)'
     group = 'openapi tools'
-
-    // Post-process to fix @JsonAlias annotation syntax from upstream YAML files
-    // The YAML has: @JsonAlias("a", "b") but valid Java requires: @JsonAlias({"a", "b"})
-    doLast {
-        def openApiDir = file("$buildDir/generated-sources/openapi/src/main/java")
-        if (openApiDir.exists()) {
-            fileTree(openApiDir).matching { include '**/*.java' }.each { javaFile ->
-                def content = javaFile.text
-                def fixed = content.replaceAll(
-                    /@com\.fasterxml\.jackson\.annotation\.JsonAlias\(("[^"]+"),\s*("[^"]+")\)/,
-                    '@com.fasterxml.jackson.annotation.JsonAlias({$1, $2})'
-                )
-                if (fixed != content) {
-                    javaFile.text = fixed
-                }
-            }
-        }
-    }
+    dependsOn 'prepareOpenApi'
+    generatorName = 'spring'
+    inputSpec = layout.buildDirectory.file('cyoda-openapi/openapi.yaml').get().asFile.path
+    outputDir = "$buildDir/generated-sources/openapi"
+    // Drop DTOs left by the former per-area specs (workflow/search/audit/iam packages, *OperatorDto)
+    cleanupOutput = true
+    modelPackage = 'org.cyoda.cloud.api.common.model'
+    apiPackage = 'org.cyoda.cloud.api.common.api'
+    generateApiTests = false
+    generateModelTests = false
+    generateApiDocumentation = false
+    generateModelDocumentation = false
+    configOptions = [
+        dateLibrary: 'java8',
+        useJakartaEe: 'true',
+        openApiNullable: 'false',
+        serializationLibrary: 'jackson',
+        interfaceOnly: 'true',
+        useSpringBoot3: 'true',
+        useBeanValidation: 'true',
+        containerDefaultToNull: 'true',
+    ]
+    globalProperties = [models: '', apis: 'false', supportingFiles: '']
+    typeMappings = [object: 'JsonNode', any: 'JsonNode', AnyType: 'JsonNode']
+    importMappings = [JsonNode: 'com.fasterxml.jackson.databind.JsonNode']
+    // The only inline oneOf wrapper that does not compile (spec §3.3.3)
+    schemaMappings = [TransitionDefinitionDto_processors_inner: 'ExternalizedProcessorDefinitionDto']
 }
 
 ["bootRun", "build", "compileJava", "compileKotlin"].each { taskName ->
@@ -317,8 +382,14 @@ bootJar {
     archiveFileName.set("app.jar")
 }
 
+// java-test-fixtures wires `testImplementation testFixtures(project)` as a project dependency on
+// this project's own testFixtures capability, which transitively resolves main's apiElements /
+// runtimeElements — i.e. the plain jar. Disabling it left that artifact missing and broke
+// compileTestKotlin (Kotlin's build-tools-api classpath snapshot transform silently drops the
+// unresolvable entry, then reports symbols in src/main/kotlin as unresolved in test code).
+// The plain jar is otherwise unused; bootJar (app.jar) remains the shipped artifact.
 jar {
-    enabled = false
+    enabled = true
 }
 
 bootRun {
@@ -340,6 +411,7 @@ task bootJarWorkflowImport(type: org.springframework.boot.gradle.tasks.bundling.
     dependsOn configurations.runtimeClasspath
 }
 
+// Against a local cyoda-go (mock IAM, app on 127.0.0.1:8081): ./gradlew runApp --args='--spring.profiles.active=cyoda-local'
 tasks.register('runApp', JavaExec) {
     group = 'application'
     description = 'Run arbitrary main class'
@@ -425,4 +497,28 @@ tasks.register('printOtelAgentPath') {
     }
 }
 
-
+// protoc and the gRPC plugin are native binaries: a build resolves only its own platform's. This resolves every
+// platform's, so the dependency-verification command (CONTRIBUTING.md) records checksums for CI (Linux), macOS and
+// Windows alike, whichever machine runs it.
+configurations {
+    protocNatives {
+        canBeConsumed = false
+        canBeResolved = true
+        transitive = false
+    }
+}
+dependencies {
+    ['linux-x86_64', 'linux-aarch_64', 'osx-x86_64', 'osx-aarch_64', 'windows-x86_64'].each { classifier ->
+        protocNatives "${protocArtifact}:${classifier}@exe"
+        protocNatives "${grpcPluginArtifact}:${classifier}@exe"
+    }
+}
+tasks.register('resolveProtocNatives') {
+    group = 'help'
+    description = 'Resolves protoc and protoc-gen-grpc-java for every platform (for --write-verification-metadata)'
+    def natives = configurations.protocNatives
+    inputs.files(natives)
+    doLast {
+        natives.files.each { logger.info("resolved {}", it.name) }
+    }
+}

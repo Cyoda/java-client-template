@@ -2,7 +2,7 @@ package com.java_template.common.grpc.client.event_handling;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.java_template.common.auth.EventAuthContextHandler;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.workflow.*;
 import org.cyoda.cloud.api.event.common.CloudEventType;
 import org.cyoda.cloud.api.event.common.EntityMetadata;
@@ -25,11 +25,10 @@ public class ProcessorEventStrategy extends AbstractEventStrategy<
 
     public ProcessorEventStrategy(
             OperationFactory operationFactory,
-            ObjectMapper objectMapper,
-            CyodaContextFactory eventContextFactory,
-            EventAuthContextHandler authContextHandler
+            CyodaObjectMapper wireMapper,
+            CyodaContextFactory eventContextFactory
     ) {
-        super(operationFactory, objectMapper, eventContextFactory, authContextHandler);
+        super(operationFactory, wireMapper, eventContextFactory);
     }
 
     @Override
@@ -67,6 +66,22 @@ public class ProcessorEventStrategy extends AbstractEventStrategy<
             String requestId
     ) {
         errorResponse.setRequestId(requestId);
+    }
+
+    @Override
+    protected String requestIdOf(EntityProcessorCalculationRequest request) {
+        return request.getRequestId();
+    }
+
+    @Override
+    protected void setEntityIdInErrorResponse(EntityProcessorCalculationResponse errorResponse,
+                                              EntityProcessorCalculationRequest request) {
+        errorResponse.setEntityId(request.getEntityId());
+    }
+
+    @Override
+    protected void setRecoveredEntityId(EntityProcessorCalculationResponse errorResponse, String entityId) {
+        errorResponse.setEntityId(java.util.UUID.fromString(entityId));
     }
 
     @Override

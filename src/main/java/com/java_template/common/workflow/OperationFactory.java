@@ -2,6 +2,7 @@ package com.java_template.common.workflow;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,9 +26,9 @@ public class OperationFactory {
     public OperationFactory(
             List<CyodaProcessor> processorBeans,
             List<CyodaCriterion> criteriaBeans,
-            ObjectMapper objectMapper
+            CyodaObjectMapper wireMapper
     ) {
-        this.objectMapper = objectMapper;
+        this.objectMapper = wireMapper.mapper();
         log.debug(
                 "Initializing OperationFactory with {} processor beans",
                 processorBeans.size()

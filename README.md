@@ -17,48 +17,104 @@ cd java-client-template
 
 ### 2. ⚙️ Configure the Application
 
-Configuration is managed via Spring Boot YAML files. For local development:
+Configuration is managed via Spring Boot YAML files. `application.yml` holds Cloud-shaped defaults.
+
+**Local cyoda-go (the `cyoda-local` profile).** `src/main/resources/application-cyoda-local.yml` ships
+with the template and targets a local cyoda-go on its defaults (REST `http://localhost:8080/api`, gRPC
+`localhost:9090`, no TLS, `auth-mode: none`). It moves the app to port **8081** so it does not clash
+with cyoda-go on 8080, and binds it to `127.0.0.1` only. It is tracked in git: do not put credentials in it.
 
 ```bash
-# Option 1: Create a local profile
-# For example, create src/main/resources/application-local.yml with your settings
-./gradlew runApp --args='--spring.profiles.active=local'
+./gradlew runApp --args='--spring.profiles.active=cyoda-local'
+```
 
-# Option 2: Use environment variables
-export APP_CONFIG_CYODA_HOST=your-cyoda-host:8443
+**Cyoda Cloud.** Never commit credentials. Either use environment variables:
+
+```bash
+export APP_CONFIG_CYODA_HOST=your-cyoda-host
 export APP_CONFIG_CYODA_CLIENT_ID=your-client-id
 export APP_CONFIG_CYODA_CLIENT_SECRET=your-client-secret
+./gradlew runApp
+```
+
+or a git-ignored `application-cloud.yml` (every `application-*.yml` except the shipped
+`application-cyoda-local.yml` is git-ignored, including an `application-local.yml` you may already have). Put it in `config/` at the project root rather than in
+`src/main/resources`, so it is not packaged into the jar; Spring Boot reads `./config/` from the
+working directory:
+
+```yaml
+# config/application-cloud.yml
+app:
+  config:
+    cyoda-host: your-cyoda-host
+    cyoda-client-id: your-client-id
+    cyoda-client-secret: your-client-secret
+```
+
+```bash
+./gradlew runApp --args='--spring.profiles.active=cloud'
 ```
 
 ### 3. 🧰 Run Workflow Import Tool
 
 #### Option 1: Run via Gradle (recommended for local development)
 ```bash
-./gradlew runApp -PmainClass=com.java_template.common.tool.WorkflowImportTool --args='--spring.profiles.active=local'
+./gradlew runApp -PmainClass=com.java_template.common.tool.WorkflowImportTool --args='--spring.profiles.active=cyoda-local'
 ```
 
 #### Option 2: Build and Run JAR (recommended for CI or scripting)
 ```bash
 ./gradlew bootJarWorkflowImport
-java -jar build/libs/java-client-template-1.0-SNAPSHOT-workflow-import.jar --spring.profiles.active=local
+java -jar build/libs/java-client-template-1.0-SNAPSHOT-workflow-import.jar --spring.profiles.active=cyoda-local
 ```
 
 ### 4. ▶️ Run the Application
 
 #### Option 1: Run via Gradle
 ```bash
-./gradlew runApp --args='--spring.profiles.active=local'
+./gradlew runApp --args='--spring.profiles.active=cyoda-local'
 ```
 
 #### Option 2: Run Manually After Build
 ```bash
-./gradlew build
-java -jar build/libs/java-client-template-1.0-SNAPSHOT.jar --spring.profiles.active=local
+./gradlew bootJar
+java -jar build/libs/app.jar --spring.profiles.active=cyoda-local
 ```
 
-> Access the app: [http://localhost:8080/swagger-ui/index.html](http://localhost:8080/swagger-ui/index.html)
+> Access the app (cyoda-local profile): [http://localhost:8081/api/swagger-ui/index.html](http://localhost:8081/api/swagger-ui/index.html)
 >
-> **Note**: The default port is 8080 as configured in `src/main/resources/application.yml`. You can change this by setting the `server.port` property.
+> **Note**: The app runs on port 8080 by default (`src/main/resources/application.yml`) and on 127.0.0.1:8081 with the `cyoda-local` profile, under the `/api` context path. You can change the port by setting the `server.port` property.
+
+### 5. 🧪 Run the Tests
+
+```bash
+./gradlew test                        # unit tests
+./gradlew check                       # unit tests + integration tests against the pinned cyoda-go
+./gradlew build -x integrationTest    # build without the integration tests
+```
+
+`./gradlew check` and `./gradlew build` run the integration tests (`src/integrationTest`), which start the
+cyoda-go version pinned in `src/main/resources/cyoda/CYODA_VERSION` as a subprocess. **The build installs it
+automatically**: the `installCyoda` task runs `scripts/install-cyoda.sh` into `.cyoda/bin` (git-ignored). The
+binary survives `./gradlew clean` and is reused while it matches the pin, so it is installed once per pin.
+Installing needs:
+
+- for a `-dev` pin (built from source): Go 1.26.7 or later, `git`, and network access to github.com;
+- for a released pin (downloaded): network access to the GitHub release; the archive must match the SHA-256
+  committed next to the pin (`CYODA_SHA256SUMS`).
+
+To use a cyoda binary you installed yourself, pass `-Dcyoda.bin=<path>` or set `CYODA_BIN=<path>`; the build
+then installs nothing. A `cyoda` on `PATH` that already matches the pin is kept too, as long as `.cyoda/bin`
+is empty (the tests then use it). To keep a binary that deliberately does not match the pin — at `.cyoda/bin`
+or on `PATH` — instead of it being overwritten, pass `-Dcyoda.allowVersionMismatch=true`. Windows cannot run
+the install script: use `-Dcyoda.bin` / `CYODA_BIN` there, or `-x integrationTest`.
+
+**Dependency verification.** Gradle checks every downloaded dependency against `gradle/verification-metadata.xml`.
+After adding or bumping a dependency, regenerate the checksums with one command (details in `CONTRIBUTING.md`):
+
+```bash
+GRADLE_USER_HOME="$(mktemp -d)" ./gradlew --no-daemon --write-verification-metadata sha256 build integrationTest jacocoTestReport bootJarWorkflowImport printOtelAgentPath resolveProtocNatives
+```
 
 ---
 
@@ -112,9 +168,9 @@ src/main/resources/workflow/$entity_name/version_$version/$entity_name.json
 ```
 
 ### Workflow Schema Reference
-The workflow configuration schema is defined in:
+The workflow configuration schema is defined by `WorkflowConfigurationDto` in:
 ```
-src/main/resources/schema/common/statemachine/conf/WorkflowConfiguration.json
+src/main/resources/cyoda/openapi/openapi.yaml
 ```
 This schema defines the structure for workflow definitions, including states, transitions, processors, and criteria.
 
@@ -132,17 +188,16 @@ This schema defines the structure for workflow definitions, including states, tr
   - `entity/` - Entity class implementations
   - `processor/` - Workflow processor examples  
   - `criterion/` - Workflow criteria examples
-  - `patterns/` - Comprehensive patterns and anti-patterns guide
 
 ### Configuration Examples  
-- **`llm_example/config/`** - Configuration templates and examples
+- **`src/test/resources/example/config/`** - Configuration templates and examples
   - `workflow/` - Workflow JSON configuration templates
+  - `snippets/` - Processor and criterion configuration snippets
 
 ### Documentation Files
 - **`README.md`** - Complete project documentation (this file)
 - **`CONTRIBUTING.md`** - Contributors guide and validation workflow
 - **`usage-rules.md`** - Developer and AI agent guidelines
-- **`.augment-guidelines`** - Project overview and development workflow
 - **`llms.txt`** / **`llms-full.txt`** - AI-friendly documentation references
 
 ## 📝 Quick Reference
@@ -159,7 +214,7 @@ This schema defines the structure for workflow definitions, including states, tr
 - ✅ Criteria implement `CyodaCriterion` with `check()` and `supports()`
 - ✅ Use `@Component` annotation for Spring discovery
 - ✅ Place workflow JSON files in `src/main/resources/workflow/$entity_name/version_$version/`
-- ✅ Always reference `llm_example/` for implementation patterns
+- ✅ Always reference `src/test/java/com/example/application/` for implementation patterns
 
 ### Critical Limitations
 - ❌ Never modify anything in `common/` directory
@@ -167,11 +222,11 @@ This schema defines the structure for workflow definitions, including states, tr
 - ❌ Criteria must be pure functions without side effects
 - ❌ No Java reflection usage allowed
 
-> 📚 **See `llm_example/` directory for complete implementation examples, patterns, and configuration templates**
+> 📚 **See `src/test/java/com/example/application/` and `src/test/resources/example/config/` for complete implementation examples, patterns, and configuration templates**
 
 ## 🚀 Getting Started
 
-1. **Review Examples**: Start by exploring `llm_example/code/` for implementation patterns
+1. **Review Examples**: Start by exploring `src/test/java/com/example/application/` for implementation patterns
 2. **Create Entities**: Implement `CyodaEntity` in `application/entity/`
 3. **Add Processors**: Implement `CyodaProcessor` in `application/processor/`
 4. **Add Criteria**: Implement `CyodaCriterion` in `application/criterion/`
@@ -180,10 +235,11 @@ This schema defines the structure for workflow definitions, including states, tr
 
 ## 🔧 Development Workflow
 
-1. Review `llm_example/` directory for patterns before implementing new features
+1. Review `src/test/java/com/example/application/` for patterns before implementing new features
 2. Follow established architectural patterns for processors, criteria, and serializers
 3. Use `usage-rules.md` for detailed implementation guidelines
-4. Run `./gradlew build` to generate required classes before development
+4. Run `./gradlew build` to generate required classes before development (it also installs the pinned cyoda
+   for the integration tests; see "5. Run the Tests" above)
 
 **For Contributors:**
 

@@ -27,7 +27,7 @@ spec:
     spec:
       {{- if .Values.global.hostAliases }}
       hostAliases:
-        {{ toYaml .Values.global.hostAliases | nindent 8 }}
+        {{- toYaml .Values.global.hostAliases | nindent 8 }}
       {{- end }}
       {{- if .Values.nodeSelector }}
       nodeSelector: {{- .Values.nodeSelector | toYaml | nindent 8 }}
@@ -45,7 +45,8 @@ spec:
       {{- end }}
       volumes:
         - name: tmp
-          emptyDir: { }
+          emptyDir:
+            sizeLimit: {{ .Values.tmpSizeLimit | default "512Mi" }}
         {{- with .Values.extraVolumes }}
         {{- tpl . $ | nindent 8 }}
         {{- end }}
@@ -53,13 +54,13 @@ spec:
       {{- if .Values.serviceAccountName }}
       serviceAccountName: {{ .Values.serviceAccountName }}
       {{- end }}
-      {{- with .Values.securityContext }}
+      {{- with .Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
         - name: {{ .Values.name }}
-          image: "{{ .Values.global.registry.host }}/{{ .Values.image.imageName }}:{{ .Values.image.tag }}"
+          image: "{{ required "global.registry.host is required" .Values.global.registry.host }}/{{ .Values.image.imageName }}:{{ required "image.tag is required" .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           resources: {{- toYaml .Values.resources | nindent 12 }}
           {{- with .Values.securityContext }}
@@ -100,12 +101,17 @@ spec:
           env:
             {{- range $k, $v := .Values.container.env.vars }}
             - name: {{ $k }}
-              value: "{{ $v }}"
+              value: {{ $v | quote }}
             {{- end }}
             {{- range $k, $v := .Values.container.env.additionalVars }}
             - name: {{ $k }}
-              value: "{{ $v }}"
+              value: {{ $v | quote }}
             {{- end }}
+            - name: APP_CONFIG_CYODA_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "cyodaClientSecret.secretName must name the Secret holding the Cyoda M2M client secret" .Values.cyodaClientSecret.secretName }}
+                  key: {{ .Values.cyodaClientSecret.key | default "client-secret" }}
           envFrom:
             {{- range .Values.container.env.configMaps }}
             - configMapRef:
@@ -115,11 +121,10 @@ spec:
             - secretRef:
                 name: {{ . }}
              {{- end }}
-    {{- with .Values.global.hostAliases }}
-      hostAliases:
-{{ toYaml . | indent 8 }}
-    {{- end }}
-      {{- if .Values.global.imagePullSecret.enabled | default false }}
+      {{- if .Values.global.imagePullSecret.existingSecretName }}
+      imagePullSecrets:
+        - name: {{ .Values.global.imagePullSecret.existingSecretName }}
+      {{- else if .Values.global.imagePullSecret.enabled }}
       imagePullSecrets:
         - name: regcred
       {{- end }}

@@ -1,32 +1,38 @@
 # Syncing the Java Client Template
 
-The `java-client-template` project provides the shared framework layer (`com.java_template.common`) used by Cyoda client applications. This guide describes how to pull improvements made in downstream projects back into the template so all projects benefit.
+The `java-client-template` project provides the shared framework layer (`com.java_template.common`), the cyoda-go contract it is generated from, and the test harness used by Cyoda client applications. This guide describes how to pull improvements made in downstream projects back into the template, and how downstream projects take template updates, so all projects benefit.
 
 ## What the template owns
 
-### Framework code (canonical home is the template)
+### Framework (canonical home is the template: replace, do not merge)
 
 | Path (relative to `apps/backend/`) | Description |
 |------|-------------|
 | `src/main/java/com/java_template/common/` | Framework code: auth, config, gRPC, serializer, service, workflow, util, tool, observability, controller, dto, repository, exception |
 | `src/main/kotlin/org/cyoda/uuid/` | UUID utility functions |
-| `src/test/java/com/java_template/common/` | Unit tests for the framework layer |
-| `src/test/java/com/example/` | Example entity, processor, criterion, controller — reference implementation that downstream projects use as a starting point |
-| `src/test/kotlin/org/cyoda/uuid/` | UUID utility tests |
-| `src/test/resources/example/` | Example workflow configs for the reference implementation |
-| `src/main/resources/api/` | OpenAPI specs for Cyoda platform APIs (codegen input) |
 | `src/main/resources/META-INF/` | Spring Boot auto-configuration registrations |
-| `src/main/resources/proto/` | Protobuf definitions for gRPC (CloudEvents, Cyoda Cloud API) |
+| `src/main/resources/cyoda/` | The cyoda-go contract: `CYODA_VERSION` (the pin), `CYODA_SHA256SUMS` (for a released pin), `proto/`, `schema/`, `openapi/openapi.yaml`. Vendored unmodified by `scripts/sync-cyoda-contract.sh`; never edit by hand |
+| `src/main/resources/application-cyoda-local.yml` | The `cyoda-local` profile for a local cyoda-go (no credentials) |
+| `buildSrc/` | Build logic: contract transforms for code generation, and the `installCyoda` task; `buildSrc/gradle/verification-metadata.xml` holds the checksums of its nested test build |
+| `scripts/` | `sync-cyoda-contract.sh` (refresh the contract) and `install-cyoda.sh` (install the pinned cyoda) |
+| `src/testFixtures/` | The cyoda test harness: `@CyodaIntegrationTest`, `CyodaServer`, `CyodaBinary`, `CyodaRest`, `CyodaModelSetup`, … |
+| `src/test/java/com/java_template/common/` | Unit tests for the framework layer |
+| `src/test/java/com/java_template/testing/` | Unit tests for the harness and the docs (`DocsLinksTest`) |
+| `src/test/java/com/example/`, `src/test/resources/example/` | Example entity, processor, criterion, controller and workflow configs: the reference implementation downstream projects start from |
+| `src/test/kotlin/org/cyoda/uuid/` | UUID utility tests |
+| `src/integrationTest/java/com/java_template/it/`, `src/integrationTest/resources/it-workflows/`, `src/integrationTest/resources/entity-schemas/examples/ExampleEntity/` | The template's tier-1 integration suite (framework behaviour against a real cyoda-go) |
+| `.dockerignore` | Keeps the image build context lean |
 
 ### Shared config (template provides the structure, apps adapt values)
 
 | Path | Template provides | Apps customize |
 |------|-------------------|----------------|
-| `src/main/resources/schema/` | `common/`, `entity/`, `model/`, `processing/`, `search/` subdirectories | Apps may add schemas (e.g. `common/condition/`, `common/statemachine/conf/`) for jsonschema2pojo types their application code needs |
-| `src/main/resources/logback.xml` | Structure and appenders | `<contextName>` and `{"application":...}` value |
-| `src/main/resources/applicationExample.yml` | Full config template with comments | App name in issuer/key-id fields; app-specific sections added or removed |
-| `build.gradle` | Plugins, codegen config, shared deps | App-specific deps, main class references, app-specific tasks |
+| `build.gradle` | Plugins, codegen config, shared deps, the `integrationTest` source set and task (with its `installCyoda` dependency), `buildLogicTest`, `testFixtures` wiring | App-specific deps, main class references, app-specific tasks |
+| `gradle/verification-metadata.xml` | SHA-256 checksums for every dependency the template's build resolves | Regenerate it after merging `build.gradle` (see Step 5); never hand-edit checksums |
 | `src/main/resources/application.yml` | Structure and Cyoda platform config sections | App-specific values, ports, auth config, feature flags |
+| `.gitignore` | Ignores every `application-*.yml` except `application-cyoda-local.yml`, and `.cyoda/` | App-specific entries |
+
+**App-specific JSON schemas.** jsonschema2pojo reads only the vendored `src/main/resources/cyoda/schema/` tree (through `prepareEventSchemas`) and generates it into `org.cyoda.cloud.api.event`. App schemas are not generated: do not add them under `cyoda/schema/`, which `sync-cyoda-contract.sh` replaces wholesale. An app that wants generated types adds its own jsonschema2pojo configuration and source directory in its own `build.gradle`, or writes the classes by hand.
 
 ### Not part of the template (app-specific, never pull)
 
@@ -37,8 +43,7 @@ The `java-client-template` project provides the shared framework layer (`com.jav
 | `src/main/resources/entity/` | App entity JSON schemas |
 | `src/main/resources/entity-schemas/` | App entity example data |
 | `src/test/java/com/<app_package>/application/` | App-specific unit tests |
-| `src/test/java/e2e/` | App-specific E2E tests |
-| `src/test/resources/features/` | App-specific Gherkin features |
+| `src/integrationTest/java/com/<app_package>/` | App-specific integration tests (`@CyodaIntegrationTest`) |
 
 ---
 
@@ -51,20 +56,17 @@ When a downstream project improves something in the shared framework layer, thos
 Before pulling, understand what the downstream project changed and why. Not every change belongs in the template.
 
 **Pull into the template:**
-- Bug fixes in `common/` classes
+- Bug fixes in `common/` classes, the harness (`src/testFixtures/`) or the build logic (`buildSrc/`, `scripts/`)
 - New framework capabilities (new service methods, new utility classes)
 - Performance improvements in shared infrastructure
-- Test coverage improvements for `common/`
-- Schema updates that reflect Cyoda platform API changes
-- OpenAPI spec updates
-- Protobuf definition updates
+- Test coverage improvements for `common/` and the harness
 - Build plugin or shared dependency version bumps
 
 **Do not pull:**
-- App-specific workarounds (e.g. changing `OboKeyRegistrationService` resource paths to avoid mixing with app workflows)
+- App-specific workarounds in `common/` (e.g. a resource path changed to suit one app's layout)
 - Changes that only make sense in the context of that app's business logic
 - Temporary fixes that should be solved differently in the template
-- Extra schemas that only exist because the app's `application/` code needs them
+- Edits to the vendored contract under `src/main/resources/cyoda/`: the contract changes only through `scripts/sync-cyoda-contract.sh` (Step 4)
 
 ### Step 2: Diff to understand the delta
 
@@ -75,25 +77,32 @@ TEMPLATE=apps/backend
 # Framework source
 diff -rq $TEMPLATE/src/main/java/com/java_template/common/ \
          $SOURCE/src/main/java/com/java_template/common/
-
-# Kotlin utilities
 diff -rq $TEMPLATE/src/main/kotlin/ $SOURCE/src/main/kotlin/
 
-# Tests
-diff -rq $TEMPLATE/src/test/java/com/java_template/common/ \
-         $SOURCE/src/test/java/com/java_template/common/
-diff -rq $TEMPLATE/src/test/java/com/example/ \
-         $SOURCE/src/test/java/com/example/
-diff -rq $TEMPLATE/src/test/kotlin/ $SOURCE/src/test/kotlin/
-
 # Resources
-diff -rq $TEMPLATE/src/main/resources/api/ $SOURCE/src/main/resources/api/
 diff -rq $TEMPLATE/src/main/resources/META-INF/ $SOURCE/src/main/resources/META-INF/
-diff -rq $TEMPLATE/src/main/resources/proto/ $SOURCE/src/main/resources/proto/
-diff -rq $TEMPLATE/src/main/resources/schema/ $SOURCE/src/main/resources/schema/
+diff -rq $TEMPLATE/src/main/resources/cyoda/ $SOURCE/src/main/resources/cyoda/
+diff $TEMPLATE/src/main/resources/application-cyoda-local.yml $SOURCE/src/main/resources/application-cyoda-local.yml
+
+# Build logic and scripts
+diff -rq -x build -x .gradle $TEMPLATE/buildSrc/ $SOURCE/buildSrc/
+diff -rq $TEMPLATE/scripts/ $SOURCE/scripts/
+
+# Harness and tests
+diff -rq $TEMPLATE/src/testFixtures/ $SOURCE/src/testFixtures/
+diff -rq $TEMPLATE/src/test/java/com/java_template/ \
+         $SOURCE/src/test/java/com/java_template/
+diff -rq $TEMPLATE/src/test/java/com/example/ $SOURCE/src/test/java/com/example/
+diff -rq $TEMPLATE/src/test/resources/example/ $SOURCE/src/test/resources/example/
+diff -rq $TEMPLATE/src/test/kotlin/ $SOURCE/src/test/kotlin/
+diff -rq $TEMPLATE/src/integrationTest/java/com/java_template/it/ \
+         $SOURCE/src/integrationTest/java/com/java_template/it/
+diff -rq $TEMPLATE/src/integrationTest/resources/it-workflows/ \
+         $SOURCE/src/integrationTest/resources/it-workflows/
 
 # Build config
 diff $TEMPLATE/build.gradle $SOURCE/build.gradle
+diff $TEMPLATE/.dockerignore $SOURCE/.dockerignore
 ```
 
 Review each difference. Classify it as "template improvement" or "app-specific divergence."
@@ -106,68 +115,50 @@ For files classified as template improvements, replace wholesale. **Do not merge
 SOURCE=~/dev/<downstream-project>/apps/backend
 TEMPLATE=apps/backend
 
-# Framework source code
-rm -rf $TEMPLATE/src/main/java/com/java_template/common/
-cp -R $SOURCE/src/main/java/com/java_template/common/ \
-      $TEMPLATE/src/main/java/com/java_template/common/
+replace() { # <relative dir>
+  rm -rf "$TEMPLATE/$1"
+  mkdir -p "$(dirname "$TEMPLATE/$1")"
+  cp -R "$SOURCE/$1" "$TEMPLATE/$1"
+}
 
-# Kotlin utilities
-rm -rf $TEMPLATE/src/main/kotlin/org/
-cp -R $SOURCE/src/main/kotlin/org/ $TEMPLATE/src/main/kotlin/org/
+# Framework source, Kotlin utilities and Spring auto-configuration
+replace src/main/java/com/java_template/common/
+replace src/main/kotlin/org/
+replace src/main/resources/META-INF/
 
-# Framework tests
-rm -rf $TEMPLATE/src/test/java/com/java_template/common/
-cp -R $SOURCE/src/test/java/com/java_template/common/ \
-      $TEMPLATE/src/test/java/com/java_template/common/
+# Build logic (without its build output) and scripts
+rm -rf $TEMPLATE/buildSrc/src/
+cp -R $SOURCE/buildSrc/src/ $TEMPLATE/buildSrc/src/
+cp $SOURCE/buildSrc/build.gradle $TEMPLATE/buildSrc/build.gradle
+mkdir -p $TEMPLATE/buildSrc/gradle
+cp $SOURCE/buildSrc/gradle/verification-metadata.xml $TEMPLATE/buildSrc/gradle/verification-metadata.xml
+replace scripts/
 
-# Example entity tests
-rm -rf $TEMPLATE/src/test/java/com/example/
-cp -R $SOURCE/src/test/java/com/example/ \
-      $TEMPLATE/src/test/java/com/example/
+# Harness, framework tests, the reference implementation and the tier-1 suite
+replace src/testFixtures/
+replace src/test/java/com/java_template/
+replace src/test/java/com/example/
+replace src/test/resources/example/
+replace src/test/kotlin/org/
+replace src/integrationTest/java/com/java_template/it/
+replace src/integrationTest/resources/it-workflows/
 
-# Kotlin tests
-rm -rf $TEMPLATE/src/test/kotlin/org/
-cp -R $SOURCE/src/test/kotlin/org/ $TEMPLATE/src/test/kotlin/org/
+# Single files
+cp $SOURCE/src/main/resources/application-cyoda-local.yml $TEMPLATE/src/main/resources/
+cp $SOURCE/.dockerignore $TEMPLATE/.dockerignore
 
-# Example test resources
-rm -rf $TEMPLATE/src/test/resources/example/
-cp -R $SOURCE/src/test/resources/example/ \
-      $TEMPLATE/src/test/resources/example/
-find $TEMPLATE/src/test/resources/example/ -name ".DS_Store" -delete
-
-# OpenAPI specs
-rm -rf $TEMPLATE/src/main/resources/api/
-cp -R $SOURCE/src/main/resources/api/ $TEMPLATE/src/main/resources/api/
-
-# Spring auto-configuration
-rm -rf $TEMPLATE/src/main/resources/META-INF/
-cp -R $SOURCE/src/main/resources/META-INF/ $TEMPLATE/src/main/resources/META-INF/
-
-# Protobuf definitions
-rm -rf $TEMPLATE/src/main/resources/proto/
-cp -R $SOURCE/src/main/resources/proto/ $TEMPLATE/src/main/resources/proto/
+find $TEMPLATE/src/ -name ".DS_Store" -delete
 ```
 
-### Step 4: Handle schema/ carefully
+### Step 4: The cyoda-go contract
 
-The downstream project may have added app-specific schemas that do not belong in the template. Conversely, the downstream project may have updated shared schemas.
+`src/main/resources/cyoda/` is cyoda-go's contract, vendored unmodified, never merged. If the downstream project is on a newer pin (`CYODA_VERSION`), re-run the sync in the template instead of copying files:
 
 ```bash
-diff -rq $TEMPLATE/src/main/resources/schema/ $SOURCE/src/main/resources/schema/
+scripts/sync-cyoda-contract.sh --from-src <cyoda-go checkout at that commit> --version <x.y.z[-dev]>
 ```
 
-- **Files in both:** Compare content. If the downstream version is newer/better, take it.
-- **Files only in the source:** Evaluate — is this a shared schema improvement or an app-specific addition? Only copy shared improvements.
-- **Files only in the template:** Keep them — the downstream project may have deleted schemas it doesn't use but other projects do.
-
-**Known app-specific schemas to skip** (these exist in some downstream projects but should not be in the template):
-
-| Schema | Why it exists downstream |
-|--------|------------------------|
-| `common/condition/*.json` | App uses jsonschema2pojo-generated condition types instead of OpenAPI Dto types |
-| `common/statemachine/conf/*.json` | App uses jsonschema2pojo-generated workflow configuration types |
-| `common/ExternalizedFunctionConfig.json` | App-specific jsonschema2pojo type |
-| `common/ScheduledTransitionConfig.json` | App-specific jsonschema2pojo type |
+For a released version this also records `CYODA_SHA256SUMS`, which `scripts/install-cyoda.sh` checks the downloaded binary against. The resulting `git diff` is the contract change; codegen and the tests then show what it breaks.
 
 ### Step 5: Handle build.gradle
 
@@ -181,7 +172,7 @@ diff $TEMPLATE/build.gradle $SOURCE/build.gradle
 - Plugin version bumps
 - New shared dependencies used by `common/`
 - Codegen config changes (jsonSchema2Pojo, protobuf, openapi)
-- Source set changes
+- Source set changes, and the `integrationTest`, `installCyoda`, `buildLogicTest` and `testFixtures` wiring
 - Shared dependency version bumps
 
 **Do not pull:**
@@ -190,17 +181,11 @@ diff $TEMPLATE/build.gradle $SOURCE/build.gradle
 - App-specific Gradle tasks
 - Removal of `repositories {}` block (downstream projects may use root `settings.gradle` for this; the template may need it standalone)
 
+After any dependency change, regenerate the checksums (see "Dependency verification" in `CONTRIBUTING.md`) and review the diff of `gradle/verification-metadata.xml`.
+
 ### Step 6: Revert app-specific divergences
 
-After copying, check for known app-specific changes that the downstream project made to `common/` files. These should NOT be pulled into the template.
-
-Example from cyoda-test-management-system:
-
-| File | App-specific change | Template should have |
-|------|---------------------|---------------------|
-| `common/auth/OboKeyRegistrationService.java` | Resource paths changed to `/obo-signing-key/workflow.json` | Original paths: `/workflow/v<version>/<entityname>.json` and `/entity-schemas/examples/<EntityName>/` |
-
-After copying, revert these to the template's original convention:
+After copying, check for app-specific changes the downstream project made to framework files (Step 1's "Do not pull" list). Revert them to the template's convention:
 
 ```bash
 git diff $TEMPLATE/src/main/java/com/java_template/common/
@@ -212,22 +197,22 @@ git diff $TEMPLATE/src/main/java/com/java_template/common/
 ```bash
 ./gradlew :apps:backend:compileJava :apps:backend:compileKotlin
 ./gradlew :apps:backend:test
+./gradlew :apps:backend:integrationTest   # installs the pinned cyoda into .cyoda/bin if needed
 ```
 
-The template has no application code beyond the `com/example/` reference implementation. If the pulled changes compile and the example tests pass, the framework is self-consistent.
+The template has no application code beyond the `com/example/` reference implementation. If the pulled changes compile and the example and integration tests pass, the framework is self-consistent.
 
 If compilation fails, the downstream project introduced a dependency on their application code — that change should not have been pulled. Identify and revert it.
 
 ### Step 8: Verify the example project still works
 
-The `com/example/` test suite is the template's integration test. It exercises:
-- Entity creation, retrieval, update
-- Processor execution
-- Criterion evaluation
+The `com/example/` unit tests and the tier-1 integration suite (`src/integrationTest/`, against a real cyoda-go) exercise:
+- Entity creation, retrieval, update, search
+- Processor execution and criterion evaluation
 - Controller CRUD operations
-- Workflow configuration marshalling
+- Model and workflow setup, and workflow configuration marshalling
 
-All example tests must pass. If a framework change breaks the example, the example needs updating (this is part of the template, so update it here).
+All of them must pass. If a framework change breaks the example, the example needs updating (this is part of the template, so update it here).
 
 ---
 
@@ -235,12 +220,12 @@ All example tests must pass. If a framework change breaks the example, the examp
 
 After updating the template, downstream projects need to pull the changes. Each downstream project should have its own syncing guide (e.g. `SYNCING_WITH_JAVA_TEMPLATE.md`). The general process for a downstream project:
 
-1. Replace shared directories from the template (same copy commands as above, reversed)
-2. Handle schema/ carefully — keep app-specific schemas, update shared ones
+1. Replace the framework paths from the template (same copy commands as above, reversed)
+2. Take the template's `src/main/resources/cyoda/` as a whole (or re-run `scripts/sync-cyoda-contract.sh` at the template's pin)
 3. Re-apply any known app-specific divergences
 4. Compile — fix any breakage in application code caused by framework API changes
-5. Run tests — fix any test failures
-6. Align build.gradle shared sections
+5. Run the unit and integration tests — fix any failures
+6. Align build.gradle shared sections, then regenerate `gradle/verification-metadata.xml`
 
 ### Common breakage in downstream projects after a template update
 
@@ -251,7 +236,7 @@ These are the failure patterns we've observed. Document new ones here as they oc
 | `no suitable method found for search(ModelSpec, GroupCondition, ...)` | `EntityService` method signatures changed parameter types | Update application code to use new types (e.g. `GroupCondition` → `GroupConditionDto`) |
 | `incompatible types: String cannot be converted to UUID` | Schema change altered generated class field types | Update application code and tests to use `UUID` |
 | `package X does not exist` | New dependency added in `common/` | Add the dependency to the downstream `build.gradle` |
-| `OboSigningKey workflow file not found on classpath` | OBO bootstrap resources missing | Add `workflow/v1/obosigningkey.json` and `entity-schemas/examples/OboSigningKey/obo-signing-key.json` (or the app's equivalent paths) |
+| `Dependency verification failed` | A dependency (new, or a different version) has no checksum in `gradle/verification-metadata.xml` | Regenerate the metadata (`CONTRIBUTING.md`, "Dependency verification") and review the diff |
 | CORS validation failure at startup | `CorsProperties.validateSecurityConstraints()` rejects wildcard + credentials | Ensure `allow-credentials` is `false` when using wildcard CORS origins (typically in Docker/K8s) |
 
 ---
@@ -269,10 +254,59 @@ After any sync (pull or propagate), verify:
 # 2. Compilation succeeds
 ./gradlew :apps:backend:compileJava :apps:backend:compileKotlin
 
-# 3. Tests pass
-./gradlew :apps:backend:test
+# 3. Unit and integration tests pass
+./gradlew :apps:backend:test :apps:backend:integrationTest
 
 # 4. No stray files
 git status
 find apps/backend/src/ -name ".DS_Store" -delete
 ```
+
+## Breaking changes in the cyoda-go v0.9.0 alignment
+
+The template now implements cyoda-go's contract. Contract files are vendored under
+`src/main/resources/cyoda/` (refresh with `scripts/sync-cyoda-contract.sh`). Replace, do not merge.
+
+| Area | Before | After |
+|---|---|---|
+| Local profile file | `.gitignore` ignored every `application-*.yml`; the README told you to create `application-local.yml` with your own settings | the template ships `src/main/resources/application-cyoda-local.yml` (profile `cyoda-local`: a local cyoda-go with mock IAM, app on `127.0.0.1:8081`, no credentials), the only `application-*.yml` that `.gitignore` un-ignores. An existing `application-local.yml` is untouched and still ignored, so settings in it stay out of git. But if it holds credentials and sits in `src/main/resources`, move them out (to `config/application-cloud.yml` at the project root, or environment variables): `bootJar` packages everything under `src/main/resources` into the jar, git-ignored or not. The image build (`.dockerignore`) excludes every `application-*.yml` under `src/main/resources/` except `application-cyoda-local.yml`, and `.env` files |
+| Contract files | `src/main/resources/{proto,schema,api}` | `src/main/resources/cyoda/{proto,schema,openapi}` + `CYODA_VERSION`; transforms in `buildSrc/` |
+| OpenAPI DTO packages | `org.cyoda.cloud.api.{common,workflow,search,audit,iam}.model` | `org.cyoda.cloud.api.common.model` only |
+| Condition operators | `OperatorTypeDto`, `GroupOperatorDto`, `.operation(…)` | `SimpleConditionDto.OperatorTypeEnum`, `LifecycleConditionDto.OperatorTypeEnum`, `GroupConditionDto.OperatorEnum`, `.operatorType(…)` |
+| Nested conditions | `List<QueryConditionDto>` | `List<GroupConditionDtoAllOfConditions>` |
+| `EntityCrudOperations.FieldFilter.operation` | `OperatorTypeDto` | `SimpleConditionDto.OperatorTypeEnum` |
+| Simple-name clashes | — | `EntityChangeMeta`, `EntityMetadata`, `EntityTransactionResponse` exist in both `org.cyoda.cloud.api.common.model` and `org.cyoda.cloud.api.event.*`; do not wildcard-import both |
+| Generated proto | `CloudEventBatch`, `Cloudevents` generated | not generated; `io.cloudevents.v1.proto.CloudEvent` comes from `cloudevents-protobuf` |
+| Event DTO date-times | `java.util.Date` (millisecond precision) | `java.time.OffsetDateTime` for all generated event DTOs, lossless with cyoda-go's RFC3339Nano. Also covers `EntityWithMetadata.getCreationDate()` and the `CrudRepository` pointInTime params. `CyodaJackson` registers `JavaTimeModule` with `WRITE_DATES_AS_TIMESTAMPS` off |
+| `EntityService` point in time | `java.util.Date pointInTime` only | every `EntityService` method with a `pointInTime` gains an `OffsetDateTime` overload (lossless; use it with `EntityChangeMeta.getTimeOfChange()`). The `Date` overloads remain as default methods that convert to UTC. A bare `null` literal for `pointInTime` is now ambiguous: cast it (`(OffsetDateTime) null`) or call the overload without `pointInTime`; the same applies to Mockito `isNull()`/`any()` for that argument (`isNull(OffsetDateTime.class)`). A custom `EntityService` implementation must implement the `OffsetDateTime` methods |
+| `SearchAndRetrievalParams.pointInTime` | record component `Date`; builder `pointInTime(Date)` | record component `OffsetDateTime` (so `params.pointInTime()` returns `OffsetDateTime`); builder has `pointInTime(OffsetDateTime)` (full precision) and still `pointInTime(Date)` (converted to UTC); `pointInTime(null)` needs a cast |
+| `EntityCrudOperations` point in time | REST `OffsetDateTime` converted to `Date` before the call (truncated to ms) | passed through unchanged — a test stubbing the `Date` overload (e.g. `any(Date.class)`) no longer matches these calls: the mock returns `null` and the test fails at runtime (e.g. a 404) without any compile error; stub the `OffsetDateTime` overload |
+| `EntityWithMetadata` JSON (`metadata.creationDate`, `getCreationDate()`) | `Date` written by Jackson's `StdDateFormat`: `2026-09-27T10:11:12.123+00:00` | `OffsetDateTime` written as ISO-8601 by the app's own mapper, e.g. `2026-09-27T10:11:12.123456789Z` (nanosecond digits, `Z`). A client parsing the old fixed-millisecond pattern must accept ISO-8601. The app's mapper needs `JavaTimeModule` (Spring Boot's default mapper has it) |
+| Framework `ObjectMapper` | the framework injected Spring's primary `ObjectMapper` and used it as-is for Cyoda payloads and event/OpenAPI DTOs (no Cyoda-specific configuration of its own) | the framework has its own wire mapper, the `CyodaObjectMapper` bean (a copy of the app's primary mapper plus `CyodaJackson.configure`). The app's primary mapper is no longer modified: set `spring.jackson.*` as you want for your own REST API. `CyodaRepository`, `EntityServiceImpl`, `CloudEventBuilder`/`CloudEventParser`, the event strategies, `CyodaContextFactory`, `OperationFactory`, `JsonUtils`, `HttpUtils`, `CyodaInit` and `EdgeMessageServiceImpl` take `CyodaObjectMapper` instead of `ObjectMapper`; in tests pass `CyodaObjectMapper.standalone()`. `JacksonProcessorSerializer`/`JacksonCriterionSerializer` keep their `ObjectMapper` constructor for tests (pass `CyodaObjectMapper.standalone().mapper()` or `CyodaJackson.configure(new ObjectMapper())`) |
+| `AbstractEventStrategy` (custom strategies) | constructor `(OperationFactory, ObjectMapper, CyodaContextFactory, EventAuthContextHandler)`; abstract hooks `getRequestClass`, `createOperationSpecification`, `executeOperation`, `createErrorResponse`, `setRequestIdInErrorResponse` | constructor `(OperationFactory, CyodaObjectMapper, CyodaContextFactory)`, and three new abstract hooks: `requestIdOf(TRequest)` (the callout's `requestId`, not the event `id`), `setEntityIdInErrorResponse(TResponse, TRequest)`, `setRecoveredEntityId(TResponse, String)` |
+| Callout response `id` / `requestId` / `entityId` | response `id` echoed the request's `id`; an error response's `requestId` was the request event's `id` | response `id` is a fresh UUID; `requestId` echoes the callout's `requestId` and `entityId` is carried separately, on success and error responses (error responses recover them from unparsable JSON where possible) |
+| `Authentication` bean | always present (`@Service`), injected directly | conditional: present only when `app.config.auth-mode` is `client-credentials` (either spelling, e.g. `CLIENT_CREDENTIALS`); with `none` the token source is `NoCyodaAuthentication`. Inject `CyodaTokenSource` instead of `Authentication` |
+| Cyoda calls for a logged-in user | with its own `SecurityFilterChain`, an app's calls attempted OBO and, with OBO unconfigured, threw `OboTokenException` | refused until the credential model lands: while the calling thread's `SecurityContext` holds an authenticated, non-anonymous user, `Authentication` will not attach the M2M token, so the call fails with `CyodaCredentialException` (on gRPC, `UNAUTHENTICATED` with that cause) instead of running with the service account's rights. Anonymous requests (the default permit-all `SecurityConfig`), processor/criterion callouts, startup tasks and `auth-mode=none` are unaffected |
+| REST error bodies (`EntityCrudOperations`, example controller) | the ProblemDetail `detail` included the exception's message (internal hosts, URLs, Cyoda error text) | a generic `detail` plus a `correlationId` (also a ProblemDetail property); the exception is logged at ERROR with that id (`ErrorResponses`). The status stays 400, except 500 for a call refused for a logged-in user (`CyodaCredentialException`) or rejected by Cyoda as `UNAUTHENTICATED`: a server-side limitation, not the client's fault. The gRPC `UNAUTHENTICATED` description for a failed token fetch is the generic "failed to obtain a Cyoda token"; the cause stays attached for server-side logs |
+| `app.config.ssl-trusted-hosts` | listing any host made the REST and token `HttpClient` trust every certificate from every host | certificate checks are skipped only for a listed host (matched on the name the connection uses, port ignored); every other host is validated normally. `ssl-trust-all` still trusts everything |
+| Helm chart (`helm/`) | `values.yaml` set `CYODA_HOST`, `CYODA_CLIENT_ID`, `CYODA_CLIENT_SECRET`, `GRPC_*`, `SSL_*`, … as plain env values, none of which bind to `app.config.*`, and the client secret was a plain value | the env names are `APP_CONFIG_*` (relaxed binding, e.g. `APP_CONFIG_GRPC_SERVER_PORT`); the unbound `*_AI_API`, `ENTITY_VERSION` and `EXTERNAL_CALCULATIONS_THREAD_POOL` are gone. The client secret comes from an existing Secret through `secretKeyRef` (`cyodaClientSecret.secretName`, required; `cyodaClientSecret.key`, default `client-secret`) as `APP_CONFIG_CYODA_CLIENT_SECRET`. `global.registry.host` and `image.tag` are required (defaults exist for every other `global.*`/`host.*` value, so the chart renders standalone). Ingress is off by default; when enabled it requires `host.name` and `ingress.tls`. Pod and container run as uid/gid 10001 (the Dockerfile's user), non-root, read-only root filesystem with an emptyDir `/tmp`, no privilege escalation, all capabilities dropped. Image pulls use an existing Secret (`global.imagePullSecret.existingSecretName`); building `regcred` from plaintext `global.registry.username/password` (`global.imagePullSecret.enabled`) is legacy and off by default. The unused top-level `imagePullSecret`/`imagePullSecrets` values are gone |
+| gRPC admin endpoints (`GrpcAdminController`) | `POST /admin/grpc/reconnect?force=…` and `GET /admin/grpc/status` always on, unauthenticated under the default permit-all `SecurityConfig` | off unless `app.admin.grpc-endpoints.enabled=true`; enable only where your `SecurityFilterChain` protects `/admin/**`. The `force` parameter is gone: the reconnection strategy ignored a resurrect outside IDLE anyway, so "forcing" did nothing. `reconnect` works only in IDLE and answers 400 otherwise |
+| Health probes | Helm probed `/actuator/health/...` (outside the `/api` context path) | Helm probes `/api/actuator/health/{liveness,readiness}`; `management.endpoint.health.probes.enabled: true`. If your `SecurityFilterChain` requires authentication, permit `/actuator/health/**`, or the probes get 401 and the pods never become ready |
+| `CalculationExecutionStrategy` beans | `processorThreadExecutor`, `criteriaThreadExecutor`, `controlThreadExecutor` (+ `…Virtual`) `@Bean`s selected by `execution.mode` | removed: `GrpcClientAutoConfiguration.eventExecutionRouter()` builds the three executors itself from `app.config.execution-mode` and the `*-thread-pool` sizes; the executor constructors are now `(boolean useVirtualThreads, int threadPoolSize)`. Do not inject them |
+| New and changed config | — | `app.config.auth-mode` (`client-credentials` default, or `none`); `app.config.grpc-call-deadline-ms` (default 120000, must be > 0; applies to each unary gRPC call only, never to the server-streaming `entityManageCollection`/`entitySearchCollection` calls); `app.config.allow-insecure-transport` (default `false`: with `client-credentials`, startup fails when the token URI derived from `cyoda-api-url` is not `https` or `grpc-tls=false`, unless the host is loopback; `true` allows plaintext on a trusted network; `auth-mode=none` logs a warning instead); `app.config.keep-alive-warning-threshold` (ms without a server keep-alive before a diagnostic warning, default 20000) |
+| `--recreate-models` (`CyodaInit`) | deleted the model directly, so it failed with 409 `MODEL_ALREADY_LOCKED` on any model an earlier run had created (and locked) | unlocks the model first (`PUT model/{name}/{version}/unlock`, tolerating `MODEL_ALREADY_UNLOCKED`), then deletes and recreates it. It still fails with `MODEL_HAS_ENTITIES` while entities of that model exist |
+| `build/libs` | only the runnable `app.jar` (plain `jar` disabled) | also `*-plain.jar` (the plain jar is needed by the `testFixtures` wiring) and `*-test-fixtures.jar`. The runnable jar is still `build/libs/app.jar`; do not glob `build/libs/*.jar` |
+| `.cyoda/bin` | — | `integrationTest` depends on the new `installCyoda` task (`buildSrc` `InstallCyodaTask`), which runs `scripts/install-cyoda.sh` to install the pinned binary to `.cyoda/bin/cyoda` in the project root (git-ignored; add `.cyoda/` to your own `.gitignore`). It installs nothing when `-Dcyoda.bin` or `CYODA_BIN` is set, or when `.cyoda/bin/cyoda --version` already matches `CYODA_VERSION`, or, when `.cyoda/bin/cyoda` is absent, when a `cyoda` on `PATH` already matches it (the same binary `CyodaBinary.locate()` would then use). `-Dcyoda.allowVersionMismatch=true` also skips the install over a mismatching binary at `.cyoda/bin` or on `PATH`, so one placed there deliberately is never overwritten. The binary survives `./gradlew clean`, and the integration tests find it there automatically, after `-Dcyoda.bin` and `CYODA_BIN` and before `PATH`. Installing a `-dev` pin builds from source (Go ≥ 1.26.7, `git`, network); a released pin is downloaded (network). On Windows, or without those, pass `-Dcyoda.bin`/`CYODA_BIN` or build with `-x integrationTest`. A binary installed elsewhere (`--dest <dir>`) is named with `CYODA_BIN` or `-Dcyoda.bin` |
+| `CYODA_SHA256SUMS` | — | for a released pin, `scripts/sync-cyoda-contract.sh` records the release archives' SHA-256 in `CYODA_SHA256SUMS`, next to `CYODA_VERSION` (from the release's `SHA256SUMS`, or `--sha256sums <file>`), and `scripts/install-cyoda.sh` refuses an archive that does not match it, or a release pin without it. A `-dev` pin (source build) needs none. Sync the file together with `CYODA_VERSION` |
+| Dependency versions | Spring Boot 3.5.3; `jackson-databind` pinned at 2.19.1 | Spring Boot 3.5.16 (latest 3.5 patch); `jackson-databind` and `spring-boot-starter-web` versions come from Boot's BOM (Jackson 2.21.4); patch bumps for httpclient5 (5.5.2), springdoc (2.8.17), JUnit (5.13.4), jsonschema2pojo (1.2.2) and, in `buildSrc`, Jackson (2.19.4) and AssertJ (3.27.7) |
+| Dependency verification | — | Gradle verifies every downloaded artifact against `gradle/verification-metadata.xml` (and `buildSrc/gradle/verification-metadata.xml` for the nested `buildSrc` test run). After merging `build.gradle`, regenerate both with the command in `CONTRIBUTING.md` ("Dependency verification") and review the diff; a dependency without a checksum fails the build with "Dependency verification failed" |
+| `deleteAll` | chunked (`transactionSize` 1000) | one transaction by default: the template no longer sends `transactionSize` (cyoda-go still honours it when sent, #379); `pageSize` removed from `EntityDeleteAllRequest` |
+| Snapshot search paging | a page request with a searchId could silently start a new search, and `totalElements` was the running count (often 0) | a searchId (= snapshotId) always pages the same snapshot, and `totalElements` is the final count. An expired or unknown searchId fails instead of re-searching |
+| Config | `app.config.cyoda-light.*`, `skip-ssl`, `execution.mode`, `cyoda.api.url` | removed; use `cyoda-api-url`, `grpc-*`, `grpc-tls`, `app.config.execution-mode` (default `virtual`), `auth-mode` |
+| Local cyoda-go | cyoda-light toggle | `--spring.profiles.active=cyoda-local` (app on `127.0.0.1:8081`, `auth-mode: none`) |
+| OBO | `app.obo.*`, `OboAwareAuthentication`, `OboKeyRegistrationService`, … | removed; compute calls Cyoda as M2M |
+| Event user resolver | `app.event.auth-context.*`, `EventAuthContextHandler`, … | removed |
+| `authtype` values | `user`, `service_account` | `user`, `service`, `system` |
+| Workflow JSON | `"version": "1.0"` | `"version": "1.5"`; `$.` on every `jsonPath` |
+| `CyodaInit` | imported a workflow without checking for its model | creates the model before importing its workflow; a workflow import for a missing model is rejected by cyoda-go with `MODEL_NOT_FOUND` |
+| Tests | Cucumber `GherkinE2eTest` | JUnit `src/integrationTest` with `@CyodaIntegrationTest`; `./gradlew check` needs the pinned cyoda binary, which the build installs to `.cyoda/bin` itself (see the `.cyoda/bin` row); `./gradlew build -x integrationTest` without one |

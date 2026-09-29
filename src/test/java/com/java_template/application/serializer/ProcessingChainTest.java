@@ -2,6 +2,7 @@ package com.java_template.application.serializer;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaJackson;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.serializer.ErrorInfo;
@@ -73,7 +74,9 @@ class ProcessingChainTest {
 
     @BeforeEach
     void setUp() {
-        objectMapper = new ObjectMapper();
+        // The framework's wire mapper settings (JavaTimeModule for the OffsetDateTime event fields,
+        // RFC 3339 text dates, blank processor type handler), as CyodaObjectMapper applies them.
+        objectMapper = CyodaJackson.configure(new ObjectMapper());
         serializer = new JacksonProcessorSerializer(objectMapper);
 
         // Create test request with real data

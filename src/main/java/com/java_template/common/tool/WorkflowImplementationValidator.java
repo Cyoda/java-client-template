@@ -28,17 +28,24 @@ import java.util.stream.Stream;
 public class WorkflowImplementationValidator {
     private static final Logger logger = LoggerFactory.getLogger(WorkflowImplementationValidator.class);
 
-    private static final Path WORKFLOW_DIR = Paths.get(System.getProperty("user.dir"))
-            .resolve("src/main/resources/workflow");
-    private static final Path PROCESSOR_DIR = Paths.get(System.getProperty("user.dir"))
-            .resolve("src/main/java/com/java_template/application/processor");
-    private static final Path CRITERION_DIR = Paths.get(System.getProperty("user.dir"))
-            .resolve("src/main/java/com/java_template/application/criterion");
-
     private final ObjectMapper objectMapper;
+    private final Path workflowDir;
+    private final Path processorDir;
+    private final Path criterionDir;
 
     public WorkflowImplementationValidator(ObjectMapper objectMapper) {
+        this(objectMapper,
+                Paths.get(System.getProperty("user.dir")).resolve("src/main/resources/workflow"),
+                Paths.get(System.getProperty("user.dir")).resolve("src/main/java/com/java_template/application/processor"),
+                Paths.get(System.getProperty("user.dir")).resolve("src/main/java/com/java_template/application/criterion"));
+    }
+
+    /** Visible for testing: validates against arbitrary directories instead of the fixed project layout. */
+    WorkflowImplementationValidator(ObjectMapper objectMapper, Path workflowDir, Path processorDir, Path criterionDir) {
         this.objectMapper = objectMapper;
+        this.workflowDir = workflowDir;
+        this.processorDir = processorDir;
+        this.criterionDir = criterionDir;
     }
 
     public static void main(String[] args) {
@@ -71,12 +78,14 @@ public class WorkflowImplementationValidator {
 
         List<Path> workflowFiles = findWorkflowFiles();
         if (workflowFiles.isEmpty()) {
-            logger.error("❌ No workflow files found!");
-            return false;
+            // Not every app ships workflow JSON under src/main/resources/workflow (the template itself
+            // does not); with nothing to check, there is nothing to fail on.
+            logger.warn("⚠️  No workflow files found under {}; nothing to validate.", workflowDir);
+            return true;
         }
 
-        Set<String> existingProcessors = findJavaClasses(PROCESSOR_DIR);
-        Set<String> existingCriteria = findJavaClasses(CRITERION_DIR);
+        Set<String> existingProcessors = findJavaClasses(processorDir);
+        Set<String> existingCriteria = findJavaClasses(criterionDir);
 
         logger.info("📁 Found {} processor classes", existingProcessors.size());
         logger.info("📁 Found {} criterion classes", existingCriteria.size());
@@ -166,8 +175,8 @@ public class WorkflowImplementationValidator {
             return false;
         }
 
-        Set<String> existingProcessors = findJavaClasses(PROCESSOR_DIR);
-        Set<String> existingCriteria = findJavaClasses(CRITERION_DIR);
+        Set<String> existingProcessors = findJavaClasses(processorDir);
+        Set<String> existingCriteria = findJavaClasses(criterionDir);
 
         logger.info("📁 Found {} processor classes", existingProcessors.size());
         logger.info("📁 Found {} criterion classes", existingCriteria.size());
@@ -232,12 +241,12 @@ public class WorkflowImplementationValidator {
     private List<Path> findWorkflowFiles() {
         List<Path> workflowFiles = new ArrayList<>();
 
-        if (!Files.exists(WORKFLOW_DIR)) {
-            logger.error("❌ Workflow directory not found: {}", WORKFLOW_DIR);
+        if (!Files.exists(workflowDir)) {
+            logger.debug("No workflow directory at {}", workflowDir);
             return workflowFiles;
         }
 
-        try (Stream<Path> entityDirs = Files.list(WORKFLOW_DIR)) {
+        try (Stream<Path> entityDirs = Files.list(workflowDir)) {
             entityDirs.filter(Files::isDirectory)
                     .forEach(entityDir -> {
                         try (Stream<Path> versionDirs = Files.list(entityDir)) {

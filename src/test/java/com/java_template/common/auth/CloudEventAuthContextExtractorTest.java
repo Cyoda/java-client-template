@@ -36,18 +36,18 @@ class CloudEventAuthContextExtractorTest {
     @Test
     void extract_returnsContext_withNullAuthId_whenAuthIdAbsent() {
         CloudEvent event = CloudEvent.newBuilder()
-                .putAttributes("authtype", strAttr("service_account"))
+                .putAttributes("authtype", strAttr("service"))
                 .build();
         Optional<CloudEventAuthContext> result = extractor.extract(event);
         assertThat(result).isPresent();
-        assertThat(result.get().authType()).isEqualTo("service_account");
+        assertThat(result.get().authType()).isEqualTo("service");
         assertThat(result.get().authId()).isNull();
         assertThat(result.get().authClaimsJson()).isNull();
     }
 
     @Test
     void extract_handlesAllAuthTypeValues() {
-        for (String authType : new String[]{"user", "service_account", "system", "unauthenticated", "unknown"}) {
+        for (String authType : new String[]{"user", "service", "system"}) {
             CloudEvent event = CloudEvent.newBuilder()
                     .putAttributes("authtype", strAttr(authType))
                     .build();
@@ -60,9 +60,14 @@ class CloudEventAuthContextExtractorTest {
     @Test
     void isUserContext_trueOnlyForUser() {
         assertThat(new CloudEventAuthContext("user", null, null).isUserContext()).isTrue();
-        assertThat(new CloudEventAuthContext("service_account", null, null).isUserContext()).isFalse();
+        assertThat(new CloudEventAuthContext("service", null, null).isUserContext()).isFalse();
         assertThat(new CloudEventAuthContext("system", null, null).isUserContext()).isFalse();
         assertThat(new CloudEventAuthContext("unauthenticated", null, null).isUserContext()).isFalse();
+    }
+
+    @Test
+    void knowsExactlyTheThreeCyodaGoAuthTypes() {
+        assertThat(CloudEventAuthContext.AUTH_TYPES).containsExactlyInAnyOrder("user", "service", "system");
     }
 
     @SuppressWarnings("SameParameterValue")

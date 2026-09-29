@@ -2,6 +2,7 @@ package com.java_template.common.serializer;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaJackson;
 import com.java_template.common.serializer.jackson.JacksonCriterionSerializer;
 import com.java_template.common.serializer.jackson.JacksonProcessorSerializer;
 import org.cyoda.cloud.api.event.common.DataPayload;
@@ -30,7 +31,7 @@ class SimpleContextTest {
 
     @BeforeEach
     void setUp() {
-        objectMapper = new ObjectMapper();
+        objectMapper = CyodaJackson.configure(new ObjectMapper());
         criterionSerializer = new JacksonCriterionSerializer(objectMapper);
         processorSerializer = new JacksonProcessorSerializer(objectMapper);
     }

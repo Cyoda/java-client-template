@@ -3,6 +3,7 @@ package com.java_template.common.service;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.repository.SearchAndRetrievalParams;
+import com.java_template.common.util.PointInTime;
 import com.java_template.common.workflow.CyodaEntity;
 import org.cyoda.cloud.api.common.model.GroupConditionDto;
 import org.cyoda.cloud.api.event.common.EntityChangeMeta;
@@ -10,7 +11,9 @@ import org.cyoda.cloud.api.event.common.ModelSpec;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.time.OffsetDateTime;
 import java.util.Collection;
+import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -42,6 +45,14 @@ import java.util.stream.Stream;
  * - Paginated methods (findAll/search) support searchId for efficient multipage retrieval
  * - Streaming methods automatically handle pagination and are memory-efficient for large datasets
  * - Set inMemory=true in search operations for small result sets.
+
+ * POINT IN TIME:
+ * - Every pointInTime parameter has an OffsetDateTime overload that keeps full (nanosecond) precision;
+ *   use it, e.g. with EntityChangeMeta.getTimeOfChange(). The java.util.Date overloads are kept for
+ *   compatibility and delegate after converting to UTC; a Date truncates to milliseconds, so reading
+ *   as-at a truncated change time can return the version before that change.
+ * - Passing a bare null literal is ambiguous between the two overloads; cast it, e.g. (OffsetDateTime) null,
+ *   or call the overload without pointInTime.
  */
 public interface EntityService {
 
@@ -69,15 +80,28 @@ public interface EntityService {
      * @param entityId Technical UUID from EntityWithMetadata.getMetadata().getId()
      * @param modelSpec Model specification containing name and version
      * @param entityClass Entity class type for deserialization
-     * @param pointInTime Point in time to retrieve the entity as-at (null for current state)
+     * @param pointInTime Point in time to retrieve the entity as-at, at full precision (null for current state)
      * @return EntityWithMetadata with entity and metadata
      */
     <T extends CyodaEntity> EntityWithMetadata<T> getById(
             @NotNull UUID entityId,
             @NotNull ModelSpec modelSpec,
             @NotNull Class<T> entityClass,
-            @Nullable java.util.Date pointInTime
+            @Nullable OffsetDateTime pointInTime
     );
+
+    /**
+     * Millisecond {@link Date} variant of {@link #getById(UUID, ModelSpec, Class, OffsetDateTime)}.
+     * Prefer the OffsetDateTime overload; see the class notes on point in time.
+     */
+    default <T extends CyodaEntity> EntityWithMetadata<T> getById(
+            @NotNull UUID entityId,
+            @NotNull ModelSpec modelSpec,
+            @NotNull Class<T> entityClass,
+            @Nullable Date pointInTime
+    ) {
+        return getById(entityId, modelSpec, entityClass, PointInTime.toOffsetDateTime(pointInTime));
+    }
 
     /**
      * Find entity by business identifier (MEDIUM SPEED - use for user-facing IDs)
@@ -104,7 +128,7 @@ public interface EntityService {
      * @param businessId Business identifier value (e.g., "CART-123")
      * @param businessIdField Field name containing the business ID (e.g., "cartId")
      * @param entityClass Entity class type for deserialization
-     * @param pointInTime Point in time to retrieve the entity as-at (null for current state)
+     * @param pointInTime Point in time to retrieve the entity as-at, at full precision (null for current state)
      * @return EntityWithMetadata with entity and metadata, or null if not found
      */
     <T extends CyodaEntity> EntityWithMetadata<T> findByBusinessId(
@@ -112,8 +136,24 @@ public interface EntityService {
             @NotNull String businessId,
             @NotNull String businessIdField,
             @NotNull Class<T> entityClass,
-            @Nullable java.util.Date pointInTime
+            @Nullable OffsetDateTime pointInTime
     );
+
+    /**
+     * Millisecond {@link Date} variant of
+     * {@link #findByBusinessId(ModelSpec, String, String, Class, OffsetDateTime)}.
+     * Prefer the OffsetDateTime overload; see the class notes on point in time.
+     */
+    default <T extends CyodaEntity> EntityWithMetadata<T> findByBusinessId(
+            @NotNull ModelSpec modelSpec,
+            @NotNull String businessId,
+            @NotNull String businessIdField,
+            @NotNull Class<T> entityClass,
+            @Nullable Date pointInTime
+    ) {
+        return findByBusinessId(modelSpec, businessId, businessIdField, entityClass,
+                PointInTime.toOffsetDateTime(pointInTime));
+    }
 
     /**
      * Find entity by business identifier, returning null on any exception (MEDIUM SPEED)
@@ -182,7 +222,10 @@ public interface EntityService {
     /**
      * Get all entities with pagination support using PageResult.
      * Returns pagination metadata including searchId for subsequent page requests.
-     * Use searchId from previous PageResult to efficiently retrieve next pages from cached snapshot.
+     * Pass the searchId from a previous PageResult to read further pages of that same server-side
+     * snapshot; no new search is started. The snapshot expires on the server: an expired or unknown
+     * searchId fails (the call throws) rather than silently re-running the search, so start a new
+     * search (searchId null) in that case.
      *
      * @param modelSpec Model specification containing name and version
      * @param entityClass Entity class type for deserialization
@@ -221,7 +264,10 @@ public interface EntityService {
     /**
      * Search entities with conditions using pagination support with PageResult.
      * Returns pagination metadata including searchId for subsequent page requests.
-     * Use searchId from previous PageResult to efficiently retrieve next pages from cached snapshot.
+     * Pass the searchId from a previous PageResult to read further pages of that same server-side
+     * snapshot; no new search is started. The snapshot expires on the server: an expired or unknown
+     * searchId fails (the call throws) rather than silently re-running the search, so start a new
+     * search (searchId null) in that case.
      *
      * @param modelSpec Model specification containing name and version
      * @param condition Search condition (use SearchConditionBuilder.group())
@@ -276,10 +322,18 @@ public interface EntityService {
      * Uses Cyoda's entity statistics API.
      *
      * @param modelSpec Model specification containing name and version
-     * @param pointInTime Point in time to retrieve entity count as-at (null for current state)
+     * @param pointInTime Point in time to retrieve entity count as-at, at full precision (null for current state)
      * @return Total count of entities
      */
-    long getEntityCount(@NotNull ModelSpec modelSpec, @Nullable java.util.Date pointInTime);
+    long getEntityCount(@NotNull ModelSpec modelSpec, @Nullable OffsetDateTime pointInTime);
+
+    /**
+     * Millisecond {@link Date} variant of {@link #getEntityCount(ModelSpec, OffsetDateTime)}.
+     * Prefer the OffsetDateTime overload; see the class notes on point in time.
+     */
+    default long getEntityCount(@NotNull ModelSpec modelSpec, @Nullable Date pointInTime) {
+        return getEntityCount(modelSpec, PointInTime.toOffsetDateTime(pointInTime));
+    }
 
     /**
      * Get entity statistics grouped by workflow state (FAST - uses index tables)
@@ -297,13 +351,24 @@ public interface EntityService {
      * Uses Cyoda's entity statistics API.
      *
      * @param modelSpec Model specification containing name and version
-     * @param pointInTime Point in time to retrieve statistics as-at (null for current state)
+     * @param pointInTime Point in time to retrieve statistics as-at, at full precision (null for current state)
      * @return Map of state names to entity counts
      */
     java.util.Map<String, Long> getEntityStatsByState(
             @NotNull ModelSpec modelSpec,
-            @Nullable java.util.Date pointInTime
+            @Nullable OffsetDateTime pointInTime
     );
+
+    /**
+     * Millisecond {@link Date} variant of {@link #getEntityStatsByState(ModelSpec, OffsetDateTime)}.
+     * Prefer the OffsetDateTime overload; see the class notes on point in time.
+     */
+    default java.util.Map<String, Long> getEntityStatsByState(
+            @NotNull ModelSpec modelSpec,
+            @Nullable Date pointInTime
+    ) {
+        return getEntityStatsByState(modelSpec, PointInTime.toOffsetDateTime(pointInTime));
+    }
 
     /**
      * Get entity statistics for specific workflow states (FAST - uses index tables)
@@ -313,14 +378,26 @@ public interface EntityService {
      *
      * @param modelSpec Model specification containing name and version
      * @param states List of state names to get statistics for
-     * @param pointInTime Point in time to retrieve statistics as-at (null for current state)
+     * @param pointInTime Point in time to retrieve statistics as-at, at full precision (null for current state)
      * @return Map of state names to entity counts
      */
     java.util.Map<String, Long> getEntityStatsByState(
             @NotNull ModelSpec modelSpec,
             @NotNull java.util.List<String> states,
-            @Nullable java.util.Date pointInTime
+            @Nullable OffsetDateTime pointInTime
     );
+
+    /**
+     * Millisecond {@link Date} variant of {@link #getEntityStatsByState(ModelSpec, List, OffsetDateTime)}.
+     * Prefer the OffsetDateTime overload; see the class notes on point in time.
+     */
+    default java.util.Map<String, Long> getEntityStatsByState(
+            @NotNull ModelSpec modelSpec,
+            @NotNull java.util.List<String> states,
+            @Nullable Date pointInTime
+    ) {
+        return getEntityStatsByState(modelSpec, states, PointInTime.toOffsetDateTime(pointInTime));
+    }
 
     // ========================================
     // PRIMARY MUTATION METHODS (Use These)
@@ -466,12 +543,23 @@ public interface EntityService {
      * Retrieves metadata about all changes made to an entity up to a specific point in time.
      *
      * @param entityId Technical UUID of the entity
-     * @param pointInTime Point in time to retrieve changes up to (null for all changes)
+     * @param pointInTime Point in time to retrieve changes up to, at full precision (null for all changes)
      * @return List of EntityChangeMeta with change history information
      */
     List<EntityChangeMeta> getEntityChangesMetadata(
             @NotNull UUID entityId,
-            @Nullable java.util.Date pointInTime
+            @Nullable OffsetDateTime pointInTime
     );
+
+    /**
+     * Millisecond {@link Date} variant of {@link #getEntityChangesMetadata(UUID, OffsetDateTime)}.
+     * Prefer the OffsetDateTime overload; see the class notes on point in time.
+     */
+    default List<EntityChangeMeta> getEntityChangesMetadata(
+            @NotNull UUID entityId,
+            @Nullable Date pointInTime
+    ) {
+        return getEntityChangesMetadata(entityId, PointInTime.toOffsetDateTime(pointInTime));
+    }
 
 }

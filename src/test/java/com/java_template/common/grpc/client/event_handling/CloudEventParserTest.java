@@ -1,6 +1,7 @@
 package com.java_template.common.grpc.client.event_handling;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.exception.CyodaOperationException;
 import io.cloudevents.v1.proto.CloudEvent;
 import org.cyoda.cloud.api.event.search.EntityResponse;
@@ -14,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class CloudEventParserTest {
 
-    private final CloudEventParser parser = new CloudEventParser(new ObjectMapper());
+    private final CloudEventParser parser = new CloudEventParser(CyodaObjectMapper.standalone());
 
     @Test
     void validJsonReturnsTypedResponse() {

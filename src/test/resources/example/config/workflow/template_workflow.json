@@ -1,5 +1,5 @@
 {
-  "version": "1.0",
+  "version": "1.5",
   "name": "template_workflow",
   "desc": "Template FSM with structured states, transitions, processors, and criterions",
   "initialState": "none",
@@ -9,7 +9,8 @@
       "transitions": [
         {
           "name": "transition_to_01",
-          "next": "state_01"
+          "next": "state_01",
+          "manual": false
         }
       ]
     },
@@ -40,6 +41,7 @@
         {
           "name": "transition_with_criterion_simple",
           "next": "state_criterion_check_01",
+          "manual": false,
           "processors": [
             {
               "name": "example_function_name",
@@ -73,6 +75,7 @@
         {
           "name": "transition_with_criterion_group",
           "next": "state_terminal",
+          "manual": false,
           "criterion": {
             "type": "group",
             "operator": "AND",
@@ -80,7 +83,7 @@
               {
                 "type": "simple",
                 "jsonPath": "$.sampleFieldA",
-                "operation": "EQUALS",
+                "operatorType": "EQUALS",
                 "value": "template_value_01"
               }
             ]

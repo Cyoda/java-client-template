@@ -2,21 +2,22 @@ package com.java_template.common.repository;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Expiry;
-import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.google.common.collect.Streams;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.java_template.common.config.Config;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.exception.CyodaOperationException;
 import com.java_template.common.grpc.client.event_handling.CloudEventBuilder;
 import com.java_template.common.grpc.client.event_handling.CloudEventParser;
+import com.java_template.common.grpc.client.event_handling.CloudEvents;
 import io.cloudevents.v1.proto.CloudEvent;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import org.cyoda.cloud.api.common.model.GroupConditionDto;
-import org.cyoda.cloud.api.common.model.GroupOperatorDto;
 import org.cyoda.cloud.api.event.common.BaseEvent;
 import org.cyoda.cloud.api.event.common.DataPayload;
 import org.cyoda.cloud.api.event.common.ModelSpec;
@@ -27,18 +28,20 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Repository;
-
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Repository;
 
 import java.io.IOException;
+import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -57,36 +60,49 @@ public class CyodaRepository implements CrudRepository {
     private final CloudEventBuilder cloudEventBuilder;
     private final CloudEventParser cloudEventParser;
 
+    /** Fallback lifetime for a cached snapshot whose expiration date can't be determined. */
+    static final long DEFAULT_SNAPSHOT_CACHE_TTL_NANOS = TimeUnit.HOURS.toNanos(1);
+
+    /** Upper bound on cached snapshot statuses, so many distinct searches cannot grow the cache without limit. */
+    static final long SNAPSHOT_CACHE_MAX_SIZE = 1000;
+
     /**
-     * Cache for snapshot search results. Only caches searches with pointInTime.
-     * Entries are evicted based on the snapshot's expirationDate.
+     * Cache of completed (never RUNNING) snapshot search statuses, keyed by model/condition/
+     * pointInTime/searchId. Entries are evicted based on the snapshot's expirationDate, or by size
+     * beyond {@link #SNAPSHOT_CACHE_MAX_SIZE} (an evicted entry is re-read from cyoda-go on the next page).
      */
-    private final LoadingCache<SearchCacheKey, CompletableFuture<SearchSnapshotStatus>> snapshotCache;
+    private final Cache<SearchCacheKey, CompletableFuture<SearchSnapshotStatus>> snapshotCache;
 
     public CyodaRepository(
-            final ObjectMapper objectMapper,
+            final CyodaObjectMapper wireMapper,
             final CloudEventsServiceGrpc.CloudEventsServiceBlockingStub cloudEventsServiceBlockingStub,
             final CloudEventBuilder cloudEventBuilder,
             final CloudEventParser cloudEventParser,
             final Config config
     ) {
-        this.objectMapper = objectMapper;
+        this.objectMapper = wireMapper.mapper();
         this.cloudEventsServiceBlockingStub = cloudEventsServiceBlockingStub;
         this.cloudEventBuilder = cloudEventBuilder;
         this.cloudEventParser = cloudEventParser;
         this.config = config;
 
-        // Initialize cache with expiry based on snapshot expiration
+        // Initialize cache with expiry based on the snapshot's own expirationDate (wall-clock).
+        // This is a plain Cache, not a LoadingCache: entries are populated explicitly, in
+        // findAllByCondition, only once a snapshot's status is known to be final (SUCCESSFUL) -
+        // never a still-RUNNING creation response. There is no automatic loader, since that used
+        // to create a brand-new, unrelated snapshot search on a cache miss instead of reading the
+        // existing snapshot a caller's searchId names.
         this.snapshotCache = Caffeine.newBuilder()
+                .maximumSize(SNAPSHOT_CACHE_MAX_SIZE)
                 .expireAfter(new Expiry<SearchCacheKey, CompletableFuture<SearchSnapshotStatus>>() {
                     @Override
                     public long expireAfterCreate(SearchCacheKey key, CompletableFuture<SearchSnapshotStatus> value, long currentTime) {
-                        return getExpirationDuration(value, currentTime);
+                        return getExpirationDuration(value);
                     }
 
                     @Override
                     public long expireAfterUpdate(SearchCacheKey key, CompletableFuture<SearchSnapshotStatus> value, long currentTime, long currentDuration) {
-                        return getExpirationDuration(value, currentTime);
+                        return getExpirationDuration(value);
                     }
 
                     @Override
@@ -94,42 +110,64 @@ public class CyodaRepository implements CrudRepository {
                         return currentDuration;
                     }
 
-                    private long getExpirationDuration(CompletableFuture<SearchSnapshotStatus> value, long currentTime) {
+                    private long getExpirationDuration(CompletableFuture<SearchSnapshotStatus> value) {
                         try {
                             SearchSnapshotStatus status = value.getNow(null);
-                            if (status != null && status.getExpirationDate() != null) {
-                                long expirationTime = status.getExpirationDate().getTime();
-                                long currentTimeMillis = TimeUnit.NANOSECONDS.toMillis(currentTime);
-                                long durationMillis = expirationTime - currentTimeMillis;
-                                return durationMillis > 0 ? TimeUnit.MILLISECONDS.toNanos(durationMillis) : 0;
-                            }
+                            OffsetDateTime expirationDate = status != null ? status.getExpirationDate() : null;
+                            return remainingNanosUntil(expirationDate, OffsetDateTime.now());
                         } catch (Exception e) {
                             logger.debug("Could not determine expiration time, using default", e);
+                            return DEFAULT_SNAPSHOT_CACHE_TTL_NANOS;
                         }
-                        // Default to 1 hour if we can't determine expiration
-                        return TimeUnit.HOURS.toNanos(1);
                     }
                 })
-                .build(key -> {
-                    if (key.pointInTime != null) {
-                        return createSnapshotSearch(key.modelSpec, key.condition, key.pointInTime);
-                    } else return null;
-                });
+                .build();
+    }
+
+    /**
+     * Remaining nanoseconds from {@code now} (wall-clock) until {@code expirationDate}, floored at
+     * 0 for an already-expired snapshot. Falls back to {@link #DEFAULT_SNAPSHOT_CACHE_TTL_NANOS}
+     * when {@code expirationDate} is unknown. Caffeine's {@code Expiry} callbacks receive a
+     * ticker time ({@code System.nanoTime()}-based, not epoch) that cannot be compared against an
+     * epoch-millis value directly, so this deliberately ignores that ticker time and only uses
+     * wall-clock instants. Package-private so it can be unit tested directly.
+     */
+    static long remainingNanosUntil(@Nullable final OffsetDateTime expirationDate, @NotNull final OffsetDateTime now) {
+        if (expirationDate == null) {
+            return DEFAULT_SNAPSHOT_CACHE_TTL_NANOS;
+        }
+        return Math.max(0L, Duration.between(now, expirationDate).toNanos());
+    }
+
+    /** Stub for unary calls: each carries grpc-call-deadline-ms (spec §4.1, "every unary Cyoda call"). */
+    private CloudEventsServiceGrpc.CloudEventsServiceBlockingStub unary() {
+        return cloudEventsServiceBlockingStub.withDeadlineAfter(config.getGrpcCallDeadlineMs(), TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * Stub for the server-streaming entityManageCollection/entitySearchCollection calls. No deadline: their
+     * duration grows with the result size, and a deadline would cut a long but healthy stream short.
+     */
+    private CloudEventsServiceGrpc.CloudEventsServiceBlockingStub streaming() {
+        return cloudEventsServiceBlockingStub;
     }
 
     @Override
     public CompletableFuture<DataPayload> findById(@NotNull final UUID id) {
-        return getById(id, null);
+        final SecurityContext caller = callersSecurityContext();
+        return getById(caller, id, null);
     }
 
     @Override
-    public CompletableFuture<DataPayload> findById(@NotNull final UUID id, @Nullable final Date pointInTime) {
-        return getById(id, pointInTime);
+    public CompletableFuture<DataPayload> findById(@NotNull final UUID id, @Nullable final OffsetDateTime pointInTime) {
+        final SecurityContext caller = callersSecurityContext();
+        return getById(caller, id, pointInTime);
     }
 
-    private CompletableFuture<DataPayload> getById(final UUID entityId, @Nullable final Date pointInTime) {
+    private CompletableFuture<DataPayload> getById(final SecurityContext caller, final UUID entityId, @Nullable final OffsetDateTime pointInTime) {
         return sendAndGet(
-                cloudEventsServiceBlockingStub::entitySearch,
+                caller,
+                req -> unary().entitySearch(req),
                 new EntityGetRequest().withId(UUID.randomUUID().toString())
                         .withEntityId(entityId)
                         .withPointInTime(pointInTime),
@@ -143,33 +181,41 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final GroupConditionDto condition,
             @NotNull final SearchAndRetrievalParams params
     ) {
+        final SecurityContext caller = callersSecurityContext();
+        OffsetDateTime pointInTime = params.pointInTime();
         return params.inMemory()
-                ? findAllByConditionInMemory(modelSpec, params.pageSize(), condition, params.pointInTime())
-                : findAllByCondition(modelSpec, params.pageSize(), params.pageNumber(), condition, params.pointInTime(), params.searchId(), params.awaitLimitMs(), params.pollIntervalMs());
+                ? findAllByConditionInMemory(caller, modelSpec, params.pageSize(), condition, pointInTime)
+                : findAllByCondition(caller, modelSpec, params.pageSize(), params.pageNumber(), condition, pointInTime, params.searchId(), params.awaitLimitMs(), params.pollIntervalMs());
     }
 
     private CompletableFuture<PageResult<DataPayload>> findAllByCondition(
+            final SecurityContext caller,
             @NotNull final ModelSpec modelSpec,
             final int pageSize,
             final int pageNumber,
             @NotNull final GroupConditionDto condition,
-            @Nullable final Date pointInTime,
+            @Nullable final OffsetDateTime pointInTime,
             @Nullable final UUID searchId, int awaitLimitMs, int pollIntervalMs
     ) {
-        CompletableFuture<SearchSnapshotStatus> snapshot;
+        CompletableFuture<SearchSnapshotStatus> finalStatus;
 
         if (searchId == null) {
-            // New search - create snapshot and don't use cache
-            snapshot = createSnapshotSearch(modelSpec, condition, pointInTime);
+            // New search - create a snapshot and wait for it to reach a final status.
+            finalStatus = createSnapshotSearch(caller, modelSpec, condition, pointInTime)
+                    .thenCompose(created -> resolveFinalStatus(caller, created, awaitLimitMs, pollIntervalMs));
         } else {
-            // Existing search - use cache with searchId as key
+            // A searchId IS the snapshotId of an already-created search (see effectiveSearchId
+            // below). Reuse its cached completed status if we have one; otherwise read that same
+            // snapshot by ID. Never create a second, unrelated snapshot search for a page request.
             SearchCacheKey cacheKey = new SearchCacheKey(modelSpec, condition, pointInTime, searchId);
-            snapshot = Optional.ofNullable(snapshotCache.get(cacheKey))
-                    .orElseGet(() -> createSnapshotSearch(modelSpec, condition, pointInTime));
+            CompletableFuture<SearchSnapshotStatus> cached = snapshotCache.getIfPresent(cacheKey);
+            finalStatus = cached != null
+                    ? cached
+                    : getSnapshotStatus(caller, searchId).thenCompose(fetched -> resolveFinalStatus(caller, fetched, awaitLimitMs, pollIntervalMs));
         }
 
-        return snapshot.thenComposeAsync(snapshotInfo -> {
-                    if (snapshotInfo.getSnapshotId() == null) {
+        return finalStatus.thenComposeAsync(status -> {
+                    if (status.getSnapshotId() == null) {
                         throw new CyodaOperationException(
                                 "MISSING_SNAPSHOT_ID",
                                 "Snapshot search returned no snapshot ID",
@@ -178,58 +224,59 @@ public class CyodaRepository implements CrudRepository {
                     }
 
                     // Use the snapshot ID from Cyoda as the search ID
-                    UUID effectiveSearchId = snapshotInfo.getSnapshotId();
+                    UUID effectiveSearchId = status.getSnapshotId();
 
-                    // Cache the snapshot for subsequent page requests
-                    if (searchId == null && pointInTime != null) {
-                        SearchCacheKey cacheKey = new SearchCacheKey(modelSpec, condition, pointInTime, effectiveSearchId);
-                        snapshotCache.put(cacheKey, CompletableFuture.completedFuture(snapshotInfo));
-                    }
+                    // Cache the final (completed) status for subsequent page requests.
+                    SearchCacheKey cacheKey = new SearchCacheKey(modelSpec, condition, pointInTime, effectiveSearchId);
+                    snapshotCache.put(cacheKey, CompletableFuture.completedFuture(status));
 
-                    return getSnapShotIdCompletableFuture(snapshotInfo, awaitLimitMs, pollIntervalMs)
-                            .thenApply(snapshotId -> new SnapshotWithMetadata(snapshotId, snapshotInfo.getEntitiesCount(), effectiveSearchId));
-                }).thenCompose(snapshotWithMetadata ->
-                        getSearchResult(snapshotWithMetadata.snapshotId, pageSize, pageNumber)
-                                .thenApply(data -> PageResult.of(
-                                        snapshotWithMetadata.searchId,
-                                        data,
-                                        pageNumber,
-                                        pageSize,
-                                        snapshotWithMetadata.totalElements != null ? snapshotWithMetadata.totalElements : 0L
-                                ))
-                )
+                    return getSearchResult(caller, effectiveSearchId, pageSize, pageNumber)
+                            .thenApply(data -> PageResult.of(
+                                    effectiveSearchId,
+                                    data,
+                                    pageNumber,
+                                    pageSize,
+                                    status.getEntitiesCount() != null ? status.getEntitiesCount() : 0L
+                            ));
+                })
                 .exceptionally(this::handleNotFoundOrThrowPageResult);
     }
 
-    private record SnapshotWithMetadata(UUID snapshotId, Long totalElements, UUID searchId) {
-    }
-
+    /**
+     * Resolves the final ({@code SUCCESSFUL}) status for a snapshot search, polling if needed.
+     * If {@code snapshotInfo} is already {@code SUCCESSFUL} - a fast/synchronous search, or one
+     * just fetched fresh by ID - its count is used directly without any extra round trip.
+     */
     @NotNull
-    private CompletableFuture<UUID> getSnapShotIdCompletableFuture(SearchSnapshotStatus snapshotInfo, int awaitLimitMs, int pollIntervalMs) {
-        // NOTE: To avoid redundant polling, if snapshot is already done
+    private CompletableFuture<SearchSnapshotStatus> resolveFinalStatus(
+            final SecurityContext caller,
+            @NotNull final SearchSnapshotStatus snapshotInfo, final int awaitLimitMs, final int pollIntervalMs
+    ) {
         if (SearchSnapshotStatus.Status.SUCCESSFUL.equals(snapshotInfo.getStatus())) {
-            return CompletableFuture.completedFuture(snapshotInfo.getSnapshotId());
+            return CompletableFuture.completedFuture(snapshotInfo);
         }
 
         try {
-            return waitForSearchCompletion(
+            return waitForSearchCompletion(caller,
                     snapshotInfo.getSnapshotId(),
                     awaitLimitMs,
                     pollIntervalMs
-            ).thenApply(it -> snapshotInfo.getSnapshotId());
+            );
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
     private CompletableFuture<PageResult<DataPayload>> findAllByConditionInMemory(
+            final SecurityContext caller,
             @NotNull final ModelSpec modelSpec,
             final int pageSize,
             @NotNull final GroupConditionDto condition,
-            @Nullable final Date pointInTime
+            @Nullable final OffsetDateTime pointInTime
     ) {
         return sendAndGetCollection(
-                cloudEventsServiceBlockingStub::entitySearchCollection,
+                caller,
+                req -> streaming().entitySearchCollection(req),
                 new EntitySearchRequest().withId(generateEventId())
                         .withModel(modelSpec)
                         .withLimit(pageSize)
@@ -248,14 +295,16 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final ModelSpec modelSpec,
             @NotNull final SearchAndRetrievalParams params
     ) {
+        final SecurityContext caller = callersSecurityContext();
         // Create an empty condition to match all entities
         GroupConditionDto matchAllCondition = new GroupConditionDto()
-                .operator(GroupOperatorDto.AND)
+                .operator(GroupConditionDto.OperatorEnum.AND)
                 .conditions(List.of());
 
+        OffsetDateTime pointInTime = params.pointInTime();
         return params.inMemory()
-                ? findAllByConditionInMemory(modelSpec, params.pageSize(), matchAllCondition, params.pointInTime())
-                : findAllByCondition(modelSpec, params.pageSize(), params.pageNumber(), matchAllCondition, params.pointInTime(), params.searchId(), params.awaitLimitMs(), params.pollIntervalMs());
+                ? findAllByConditionInMemory(caller, modelSpec, params.pageSize(), matchAllCondition, pointInTime)
+                : findAllByCondition(caller, modelSpec, params.pageSize(), params.pageNumber(), matchAllCondition, pointInTime, params.searchId(), params.awaitLimitMs(), params.pollIntervalMs());
     }
 
     @Override
@@ -263,7 +312,8 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final ModelSpec modelSpec,
             @NotNull final ENTITY_TYPE entity
     ) {
-        return saveNewEntities(modelSpec, entity);
+        final SecurityContext caller = callersSecurityContext();
+        return saveNewEntities(caller, modelSpec, entity);
     }
 
     @Override
@@ -271,7 +321,8 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final ModelSpec modelSpec,
             @NotNull final Collection<ENTITY_TYPE> entities
     ) {
-        return saveNewEntities(modelSpec, entities);
+        final SecurityContext caller = callersSecurityContext();
+        return saveNewEntities(caller, modelSpec, entities);
     }
 
     @Override
@@ -281,7 +332,8 @@ public class CyodaRepository implements CrudRepository {
             @Nullable final Integer transactionWindow,
             @Nullable final Long transactionTimeoutMs
     ) {
-        return saveNewEntitiesWithTransactionParams(modelSpec, entities, transactionWindow, transactionTimeoutMs);
+        final SecurityContext caller = callersSecurityContext();
+        return saveNewEntitiesWithTransactionParams(caller, modelSpec, entities, transactionWindow, transactionTimeoutMs);
     }
 
     @Override
@@ -289,8 +341,10 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final UUID entityId,
             @NotNull final String transitionName
     ) {
+        final SecurityContext caller = callersSecurityContext();
         return sendAndGet(
-                cloudEventsServiceBlockingStub::entityManage,
+                caller,
+                req -> unary().entityManage(req),
                 new EntityTransitionRequest().withId(generateEventId())
                         .withEntityId(entityId)
                         .withTransition(transitionName),
@@ -304,8 +358,10 @@ public class CyodaRepository implements CrudRepository {
             @NotNull final ENTITY_TYPE entity,
             @Nullable final String transition
     ) {
+        final SecurityContext caller = callersSecurityContext();
         return sendAndGet(
-                cloudEventsServiceBlockingStub::entityManage,
+                caller,
+                req -> unary().entityManage(req),
                 new EntityUpdateRequest().withId(generateEventId())
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
                         .withPayload(
@@ -332,6 +388,7 @@ public class CyodaRepository implements CrudRepository {
             @Nullable final Integer transactionWindow,
             @Nullable final Long transactionTimeoutMs
     ) {
+        final SecurityContext caller = callersSecurityContext();
         final var entitiesByIds = entities.stream()
                 .map(objectMapper::valueToTree)
                 .map(entity -> (JsonNode) entity)
@@ -342,7 +399,8 @@ public class CyodaRepository implements CrudRepository {
                 );
 
         return sendAndGetCollection(
-                cloudEventsServiceBlockingStub::entityManageCollection,
+                caller,
+                req -> streaming().entityManageCollection(req),
                 new EntityUpdateCollectionRequest().withId(generateEventId())
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
                         .withTransactionWindow(transactionWindow)
@@ -359,40 +417,36 @@ public class CyodaRepository implements CrudRepository {
 
     @Override
     public CompletableFuture<EntityDeleteResponse> deleteById(@NotNull final UUID id) {
-        return deleteEntity(id);
+        final SecurityContext caller = callersSecurityContext();
+        return deleteEntity(caller, id);
     }
 
     @Override
     public CompletableFuture<List<EntityDeleteAllResponse>> deleteAll(
             @NotNull final ModelSpec modelSpec
     ) {
-        return deleteAllByModel(modelSpec);
+        final SecurityContext caller = callersSecurityContext();
+        return deleteAllByModel(caller, modelSpec);
     }
 
     private <RESPONSE_PAYLOAD_TYPE extends BaseEvent> CompletableFuture<RESPONSE_PAYLOAD_TYPE> sendAndGet(
+            final SecurityContext caller,
             final Function<CloudEvent, CloudEvent> apiCall,
             final BaseEvent baseEvent,
             final Class<RESPONSE_PAYLOAD_TYPE> responsePayloadType
     ) {
         try {
             final CloudEvent requestEvent = cloudEventBuilder.buildEvent(baseEvent);
-            // Capture the SecurityContext from the calling thread so that OboAwareAuthentication
-            // can perform the OBO token exchange on the ForkJoinPool thread that executes the gRPC call.
-            // Without this capture, CompletableFuture.supplyAsync() runs on a different thread whose
-            // ThreadLocal is empty, causing a silent fallback to the M2M service-account token.
-            final SecurityContext callerContext = SecurityContextHolder.getContext();
-            return CompletableFuture.supplyAsync(() -> {
-                        SecurityContext previous = SecurityContextHolder.getContext();
-                        SecurityContextHolder.setContext(callerContext);
-                        try {
-                            logger.debug("Sending event: {}", requestEvent);
-                            CloudEvent cloudEvent = requestAndGetOrThrow(apiCall, requestEvent);
-                            logger.debug("Received event: {}", cloudEvent);
-                            return cloudEvent;
-                        } finally {
-                            SecurityContextHolder.setContext(previous);
+            return CompletableFuture.supplyAsync(withSecurityContext(caller, () -> {
+                        if (logger.isDebugEnabled()) {
+                            logger.debug("Sending event: {}", CloudEvents.describe(requestEvent));
                         }
-                    })
+                        CloudEvent cloudEvent = requestAndGetOrThrow(apiCall, requestEvent);
+                        if (logger.isDebugEnabled()) {
+                            logger.debug("Received event: {}", CloudEvents.describe(cloudEvent));
+                        }
+                        return cloudEvent;
+                    }))
                     .thenApply(response -> cloudEventParser.parseCloudEvent(response, responsePayloadType))
                     .thenApply(this::validateResponse);
         } catch (InvalidProtocolBufferException e) {
@@ -401,23 +455,14 @@ public class CyodaRepository implements CrudRepository {
     }
 
     private <RESPONSE_PAYLOAD_TYPE extends BaseEvent> CompletableFuture<Stream<RESPONSE_PAYLOAD_TYPE>> sendAndGetCollection(
+            final SecurityContext caller,
             final Function<CloudEvent, Iterator<CloudEvent>> apiCall,
             final BaseEvent baseEvent,
             final Class<RESPONSE_PAYLOAD_TYPE> responsePayloadClass
     ) {
         try {
             final var requestEvent = cloudEventBuilder.buildEvent(baseEvent);
-            // Same context-capture pattern as sendAndGet — see comment there.
-            final SecurityContext callerContext = SecurityContextHolder.getContext();
-            return CompletableFuture.supplyAsync(() -> {
-                        SecurityContext previous = SecurityContextHolder.getContext();
-                        SecurityContextHolder.setContext(callerContext);
-                        try {
-                            return requestAndGetOrThrow(apiCall, requestEvent);
-                        } finally {
-                            SecurityContextHolder.setContext(previous);
-                        }
-                    })
+            return CompletableFuture.supplyAsync(withSecurityContext(caller, () -> requestAndGetOrThrow(apiCall, requestEvent)))
                     .thenApply(response -> processCollection(Streams.stream(response), responsePayloadClass));
         } catch (InvalidProtocolBufferException e) {
             throw new RuntimeException(e);
@@ -432,6 +477,32 @@ public class CyodaRepository implements CrudRepository {
         return stream.filter(Objects::nonNull)
                 .map(elm -> cloudEventParser.parseCloudEvent(elm, payloadType))
                 .map(this::validateResponse);
+    }
+
+    /**
+     * The SecurityContext of one repository operation, captured once, on the caller's thread, when the public
+     * method is entered: a copy, so later changes to the caller's thread-local cannot reach it. Every Cyoda call
+     * the operation makes, including continuations on pool threads (snapshot-cache hits, status polls, page
+     * fetches), runs with this context, never with whatever the pool thread holds. The auth interceptor sees it
+     * there, so a call made for an authenticated user is refused, never sent with the M2M token.
+     */
+    private static SecurityContext callersSecurityContext() {
+        SecurityContext copy = SecurityContextHolder.createEmptyContext();
+        copy.setAuthentication(SecurityContextHolder.getContext().getAuthentication());
+        return copy;
+    }
+
+    /** Runs {@code call} with {@code caller} as the SecurityContext, restoring the thread's own afterwards. */
+    private static <T> Supplier<T> withSecurityContext(final SecurityContext caller, final Supplier<T> call) {
+        return () -> {
+            final SecurityContext previous = SecurityContextHolder.getContext();
+            SecurityContextHolder.setContext(caller);
+            try {
+                return call.get();
+            } finally {
+                SecurityContextHolder.setContext(previous);
+            }
+        };
     }
 
     private <RESPONSE_PAYLOAD_TYPE> RESPONSE_PAYLOAD_TYPE requestAndGetOrThrow(
@@ -464,11 +535,13 @@ public class CyodaRepository implements CrudRepository {
     }
 
     private <PAYLOAD_TYPE> CompletableFuture<EntityTransactionResponse> saveNewEntities(
+            final SecurityContext caller,
             @NotNull final ModelSpec modelSpec,
             @NotNull final PAYLOAD_TYPE entities
     ) {
         return sendAndGet(
-                cloudEventsServiceBlockingStub::entityManage,
+                caller,
+                req -> unary().entityManage(req),
                 new EntityCreateRequest().withId(generateEventId())
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
                         .withPayload(new EntityCreatePayload().withData(objectMapper.valueToTree(entities))
@@ -479,6 +552,7 @@ public class CyodaRepository implements CrudRepository {
     }
 
     private <PAYLOAD_TYPE> CompletableFuture<List<EntityTransactionResponse>> saveNewEntitiesWithTransactionParams(
+            final SecurityContext caller,
             @NotNull final ModelSpec modelSpec,
             @NotNull final PAYLOAD_TYPE entities,
             @Nullable final Integer transactionWindow,
@@ -496,7 +570,8 @@ public class CyodaRepository implements CrudRepository {
                 .toList();
 
         return sendAndGetCollection(
-                cloudEventsServiceBlockingStub::entityManageCollection,
+                caller,
+                req -> streaming().entityManageCollection(req),
                 new EntityCreateCollectionRequest().withId(generateEventId())
                         .withDataFormat(config.getGrpcCommunicationDataFormat())
                         .withTransactionWindow(transactionWindow)
@@ -506,19 +581,22 @@ public class CyodaRepository implements CrudRepository {
         ).thenApply(Stream::toList);
     }
 
-    private CompletableFuture<EntityDeleteResponse> deleteEntity(@NotNull final UUID id) {
+    private CompletableFuture<EntityDeleteResponse> deleteEntity(final SecurityContext caller, @NotNull final UUID id) {
         return sendAndGet(
-                cloudEventsServiceBlockingStub::entityManage,
+                caller,
+                req -> unary().entityManage(req),
                 new EntityDeleteRequest().withId(generateEventId()).withEntityId(id),
                 EntityDeleteResponse.class
         );
     }
 
     private CompletableFuture<List<EntityDeleteAllResponse>> deleteAllByModel(
+            final SecurityContext caller,
             @NotNull final ModelSpec modelSpec
     ) {
         return sendAndGetCollection(
-                cloudEventsServiceBlockingStub::entityManageCollection,
+                caller,
+                req -> streaming().entityManageCollection(req),
                 new EntityDeleteAllRequest().withId(generateEventId())
                         .withModel(modelSpec),
                 EntityDeleteAllResponse.class
@@ -530,12 +608,14 @@ public class CyodaRepository implements CrudRepository {
     }
 
     private CompletableFuture<SearchSnapshotStatus> createSnapshotSearch(
+            final SecurityContext caller,
             final ModelSpec modelSpec,
             final GroupConditionDto condition,
-            @Nullable final Date pointInTime
+            @Nullable final OffsetDateTime pointInTime
     ) {
         return sendAndGet(
-                cloudEventsServiceBlockingStub::entitySearch,
+                caller,
+                req -> unary().entitySearch(req),
                 new EntitySnapshotSearchRequest().withId(generateEventId())
                         .withModel(modelSpec)
                         .withCondition(condition)
@@ -544,30 +624,32 @@ public class CyodaRepository implements CrudRepository {
         ).thenApply(EntitySnapshotSearchResponse::getStatus);
     }
 
-    private CompletableFuture<SearchSnapshotStatus.Status> waitForSearchCompletion(
+    private CompletableFuture<SearchSnapshotStatus> waitForSearchCompletion(
+            final SecurityContext caller,
             @NotNull final UUID snapshotId,
             final long awaitLimitMillis,
             final long intervalMillis
     ) throws IOException {
         final var startTime = System.currentTimeMillis();
-        return pollSnapshotStatus(snapshotId, startTime, awaitLimitMillis, intervalMillis);
+        return pollSnapshotStatus(caller, snapshotId, startTime, awaitLimitMillis, intervalMillis);
     }
 
-    private CompletableFuture<SearchSnapshotStatus.Status> pollSnapshotStatus(
+    private CompletableFuture<SearchSnapshotStatus> pollSnapshotStatus(
+            final SecurityContext caller,
             @NotNull final UUID snapshotId,
             final long startTime,
             final long awaitLimitMillis,
             final long intervalMillis
     ) throws IOException {
         logger.debug("Polling snapshot: {}", snapshotId);
-        return getSnapshotStatus(snapshotId).thenCompose(snapshotStatus -> {
-            if (SearchSnapshotStatus.Status.SUCCESSFUL.equals(snapshotStatus)) {
+        return getSnapshotStatus(caller, snapshotId).thenCompose(snapshotStatus -> {
+            if (SearchSnapshotStatus.Status.SUCCESSFUL.equals(snapshotStatus.getStatus())) {
                 logger.debug("Snapshot is ready!");
                 return CompletableFuture.completedFuture(snapshotStatus);
             }
-            if (!SearchSnapshotStatus.Status.RUNNING.equals(snapshotStatus)) {
+            if (!SearchSnapshotStatus.Status.RUNNING.equals(snapshotStatus.getStatus())) {
                 return CompletableFuture.failedFuture(
-                        new RuntimeException("Snapshot search failed: " + snapshotStatus)
+                        new RuntimeException("Snapshot search failed: " + snapshotStatus.getStatus())
                 );
             }
 
@@ -583,7 +665,7 @@ public class CyodaRepository implements CrudRepository {
                     CompletableFuture.delayedExecutor(intervalMillis, TimeUnit.MILLISECONDS)
             ).thenCompose(ignored -> {
                 try {
-                    return pollSnapshotStatus(snapshotId, startTime, awaitLimitMillis, intervalMillis);
+                    return pollSnapshotStatus(caller, snapshotId, startTime, awaitLimitMillis, intervalMillis);
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
@@ -591,22 +673,24 @@ public class CyodaRepository implements CrudRepository {
         });
     }
 
-    private CompletableFuture<SearchSnapshotStatus.Status> getSnapshotStatus(@NotNull final UUID snapshotId) {
+    private CompletableFuture<SearchSnapshotStatus> getSnapshotStatus(final SecurityContext caller, @NotNull final UUID snapshotId) {
         return sendAndGet(
-                cloudEventsServiceBlockingStub::entitySearch,
+                caller,
+                req -> unary().entitySearch(req),
                 new SnapshotGetStatusRequest().withId(generateEventId()).withSnapshotId(snapshotId),
                 EntitySnapshotSearchResponse.class
-        ).thenApply(EntitySnapshotSearchResponse::getStatus)
-                .thenApply(SearchSnapshotStatus::getStatus);
+        ).thenApply(EntitySnapshotSearchResponse::getStatus);
     }
 
     private CompletableFuture<List<DataPayload>> getSearchResult(
+            final SecurityContext caller,
             @NotNull final UUID snapshotId,
             final int pageSize,
             final int pageNumber
     ) {
         return sendAndGetCollection(
-                cloudEventsServiceBlockingStub::entitySearchCollection,
+                caller,
+                req -> streaming().entitySearchCollection(req),
                 new SnapshotGetRequest().withId(generateEventId())
                         .withSnapshotId(snapshotId)
                         .withPageSize(pageSize)
@@ -637,9 +721,11 @@ public class CyodaRepository implements CrudRepository {
     }
 
     @Override
-    public CompletableFuture<Long> getEntityCount(@NotNull final ModelSpec modelSpec, @Nullable final Date pointInTime) {
+    public CompletableFuture<Long> getEntityCount(@NotNull final ModelSpec modelSpec, @Nullable final OffsetDateTime pointInTime) {
+        final SecurityContext caller = callersSecurityContext();
         return sendAndGetCollection(
-                cloudEventsServiceBlockingStub::entitySearchCollection,
+                caller,
+                req -> streaming().entitySearchCollection(req),
                 new EntityStatsGetRequest()
                         .withId(generateEventId())
                         .withPointInTime(pointInTime)
@@ -662,7 +748,7 @@ public class CyodaRepository implements CrudRepository {
     @Override
     public CompletableFuture<Map<String, Long>> getEntityStatsByState(
             @NotNull final ModelSpec modelSpec,
-            @Nullable final Date pointInTime
+            @Nullable final OffsetDateTime pointInTime
     ) {
         return getEntityStatsByState(modelSpec, Collections.emptyList(), pointInTime);
     }
@@ -671,10 +757,12 @@ public class CyodaRepository implements CrudRepository {
     public CompletableFuture<Map<String, Long>> getEntityStatsByState(
             @NotNull final ModelSpec modelSpec,
             @NotNull final List<String> states,
-            @Nullable final Date pointInTime
+            @Nullable final OffsetDateTime pointInTime
     ) {
+        final SecurityContext caller = callersSecurityContext();
         return sendAndGetCollection(
-                cloudEventsServiceBlockingStub::entitySearchCollection,
+                caller,
+                req -> streaming().entitySearchCollection(req),
                 new EntityStatsByStateGetRequest()
                         .withId(generateEventId())
                         .withModel(modelSpec)
@@ -694,10 +782,12 @@ public class CyodaRepository implements CrudRepository {
     @Override
     public CompletableFuture<List<org.cyoda.cloud.api.event.common.EntityChangeMeta>> getEntityChangesMetadata(
             @NotNull final UUID entityId,
-            @Nullable final Date pointInTime
+            @Nullable final OffsetDateTime pointInTime
     ) {
+        final SecurityContext caller = callersSecurityContext();
         return sendAndGetCollection(
-                cloudEventsServiceBlockingStub::entitySearchCollection,
+                caller,
+                req -> streaming().entitySearchCollection(req),
                 new EntityChangesMetadataGetRequest()
                         .withId(generateEventId())
                         .withEntityId(entityId)
@@ -712,6 +802,6 @@ public class CyodaRepository implements CrudRepository {
     /**
      * Cache key for snapshot searches. Combines model spec, condition, point in time, and search ID.
      */
-    private record SearchCacheKey(ModelSpec modelSpec, GroupConditionDto condition, Date pointInTime, UUID searchId) {}
+    private record SearchCacheKey(ModelSpec modelSpec, GroupConditionDto condition, OffsetDateTime pointInTime, UUID searchId) {}
 
 }

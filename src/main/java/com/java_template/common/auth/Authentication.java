@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -28,11 +29,18 @@ import java.util.concurrent.ConcurrentMap;
  * for secure communication with Cyoda platform services.
  */
 @Service
-public class Authentication {
+@ConditionalOnAuthMode(Config.AuthMode.CLIENT_CREDENTIALS)
+public class Authentication implements CyodaTokenSource {
 
     private static final Logger logger = LoggerFactory.getLogger(Authentication.class);
 
+    private static final String REGISTRATION_ID = "cyoda";
+    private static final String PRINCIPAL_NAME = "cyoda-client";
+
     private final OAuth2AuthorizedClientManager authorizedClientManager;
+    // The manager stores the authorized client here and hands it back while its token is unexpired, so
+    // invalidation must remove it here too, or the "refetch" would return the token Cyoda just rejected.
+    private final OAuth2AuthorizedClientService authorizedClientService;
     private final ConcurrentMap<String, CachedToken> tokenCache = new ConcurrentHashMap<>();
     private final Config config;
 
@@ -41,17 +49,22 @@ public class Authentication {
     public Authentication(Config config) {
         this.config = config;
 
-        ClientRegistration registration = ClientRegistration.withRegistrationId("cyoda")
+        if (isBlank(config.getCyodaClientId()) || isBlank(config.getCyodaClientSecret())) {
+            throw new IllegalStateException("app.config.cyoda-client-id and app.config.cyoda-client-secret must be set "
+                    + "when app.config.auth-mode=client-credentials (use auth-mode=none for cyoda-go mock IAM)");
+        }
+
+        ClientRegistration registration = ClientRegistration.withRegistrationId(REGISTRATION_ID)
                 .tokenUri(config.getCyodaApiUrl() + "/oauth/token")
                 .clientId(config.getCyodaClientId())
                 .clientSecret(config.getCyodaClientSecret())
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
                 .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
-                .scope("ROLE_M2M")
                 .build();
 
         var registrationRepo = new InMemoryClientRegistrationRepository(registration);
         var clientService = new InMemoryOAuth2AuthorizedClientService(registrationRepo);
+        this.authorizedClientService = clientService;
         AuthorizedClientServiceOAuth2AuthorizedClientManager acm = new AuthorizedClientServiceOAuth2AuthorizedClientManager(
                 registrationRepo, clientService
         );
@@ -95,8 +108,8 @@ public class Authentication {
             }
 
             logger.info("Fetching new OAuth2 access token");
-            OAuth2AuthorizeRequest request = OAuth2AuthorizeRequest.withClientRegistrationId("cyoda")
-                    .principal("cyoda-client")
+            OAuth2AuthorizeRequest request = OAuth2AuthorizeRequest.withClientRegistrationId(REGISTRATION_ID)
+                    .principal(PRINCIPAL_NAME)
                     .build();
 
             OAuth2AuthorizedClient client = authorizedClientManager.authorize(request);
@@ -119,7 +132,27 @@ public class Authentication {
      */
     public void invalidateTokens() {
         tokenCache.remove(CACHE_KEY);
+        authorizedClientService.removeAuthorizedClient(REGISTRATION_ID, PRINCIPAL_NAME);
         logger.info("Manually invalidated cached token");
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
+    }
+
+    /**
+     * The M2M token for an outbound Cyoda call. Refused with {@link com.java_template.common.exception.CyodaCredentialException}
+     * while the current thread carries an authenticated user ({@link AuthenticatedCallerGuard}).
+     */
+    @Override
+    public Optional<String> bearerToken() {
+        AuthenticatedCallerGuard.refuseM2mForAuthenticatedUser();
+        return Optional.of(getAccessToken().getTokenValue());
+    }
+
+    @Override
+    public void invalidate() {
+        invalidateTokens();
     }
 
     /**

@@ -3,8 +3,8 @@ package com.example.tests;
 import com.example.application.criterion.ExampleEntityCriterion;
 import com.example.application.entity.example_entity.version_1.ExampleEntity;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.java_template.common.serializer.CriterionSerializer;
 import com.java_template.common.serializer.SerializerFactory;
 import com.java_template.common.serializer.jackson.JacksonCriterionSerializer;
@@ -48,8 +48,8 @@ class ExampleEntityCriterionTest {
     @BeforeEach
     void setUp() {
         autoCloseable = MockitoAnnotations.openMocks(this);
-        objectMapper = new ObjectMapper();
-        objectMapper.registerModule(new JavaTimeModule());
+        // The framework's wire mapper: Jackson defaults plus the cyoda-go contract settings.
+        objectMapper = CyodaObjectMapper.standalone().mapper();
         CriterionSerializer serializer = new JacksonCriterionSerializer(objectMapper);
 
         when(serializerFactory.getDefaultCriteriaSerializer()).thenReturn(serializer);
@@ -101,7 +101,8 @@ class ExampleEntityCriterionTest {
         // Verify response
         assertNotNull(response);
         assertTrue(response.getSuccess());
-        assertEquals(request.getId(), response.getId());
+        assertNotNull(response.getId());
+        assertNotEquals(request.getId(), response.getId());
         assertEquals(request.getRequestId(), response.getRequestId());
         assertEquals(request.getEntityId(), response.getEntityId());
     }
@@ -229,7 +230,8 @@ class ExampleEntityCriterionTest {
         EntityCriteriaCalculationResponse response = criterion.check(context);
 
         assertNotNull(response);
-        assertEquals("custom-id-123", response.getId());
+        assertNotNull(response.getId());
+        assertNotEquals("custom-id-123", response.getId());
         assertEquals("custom-req-456", response.getRequestId());
         assertEquals(entityId, response.getEntityId());
         assertTrue(response.getMatches()); // Entity is valid

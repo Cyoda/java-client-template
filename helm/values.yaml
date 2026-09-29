@@ -1,60 +1,68 @@
 name: cyoda-client
 
-imagePullSecret:
-  enabled: true
-
 enabled: true
 useNamespaceForIngress: false
 
-imagePullSecrets:
-  - name: regcred
+# Shared with an umbrella chart, if any.
+global:
+  registry:
+    host: ""  # REQUIRED: registry host of the image, e.g. registry.example.com
+    # Used only by the legacy imagePullSecret.enabled path below.
+    username: ""
+    password: ""
+  imagePullSecret:
+    # Preferred: an existing kubernetes.io/dockerconfigjson Secret to pull the image with. The chart creates
+    # nothing and never sees the credentials.
+    existingSecretName: ""
+    # Legacy, off by default: build a "regcred" Secret from global.registry.username/password. Those values are
+    # plaintext in the release's values; this is kept only for deployments whose umbrella chart still passes
+    # registry credentials that way. Ignored when existingSecretName is set.
+    enabled: false
+  hostAliases: []
+
+# Ingress host; required when ingress.enabled.
+host:
+  name: ""
 
 # Enable Spring Boot Actuator health endpoints
 actuatorEnabled: true
 
 container:
   env:
+    # Plain environment variables. Names bind to app.config.* through Spring Boot's relaxed binding
+    # (APP_CONFIG_GRPC_SERVER_PORT -> app.config.grpc-server-port). Never put the client secret here: it
+    # comes from a Secret (cyodaClientSecret below).
     vars:
       # Timezone
       TZ: /usr/share/zoneinfo/Europe/Berlin
 
       # Cyoda Connection (REQUIRED - must be set via --set or values override)
-      CYODA_HOST: ""  # e.g., client-05e11da2107844fc944ee5b872fcb6b6.kube3.cyoda.org
-      CYODA_CLIENT_ID: ""
-      CYODA_CLIENT_SECRET: ""
-
-      # Cyoda API Configuration
-      CYODA_AI_API: cyoda
-      WORKFLOW_AI_API: workflow
-      CONNECTION_AI_API: connection
-      RANDOM_AI_API: random
-      TRINO_AI_API: trino
+      APP_CONFIG_CYODA_HOST: ""  # e.g., client-05e11da2107844fc944ee5b872fcb6b6.kube3.cyoda.org
+      APP_CONFIG_CYODA_CLIENT_ID: ""
 
       # gRPC Configuration
-      GRPC_PROCESSOR_TAG: cyoda_application
-      GRPC_SERVER_PORT: "443"
+      APP_CONFIG_GRPC_PROCESSOR_TAG: cyoda_application
+      APP_CONFIG_GRPC_SERVER_PORT: "443"
 
       # Optional Configuration
-      ENTITY_VERSION: "1000"
-      EXTERNAL_CALCULATIONS_THREAD_POOL: "10"
-      HANDSHAKE_TIMEOUT_MS: "5000"
-      INITIAL_RECONNECT_DELAY_MS: "200"
-      MAX_RECONNECT_DELAY_MS: "10000"
-      FAILED_RECONNECTS_LIMIT: "10"
-      GRPC_COMMUNICATION_DATA_FORMAT: "JSON"
+      APP_CONFIG_HANDSHAKE_TIMEOUT_MS: "5000"
+      APP_CONFIG_INITIAL_RECONNECT_DELAY_MS: "200"
+      APP_CONFIG_MAX_RECONNECT_DELAY_MS: "10000"
+      APP_CONFIG_FAILED_RECONNECTS_LIMIT: "10"
+      APP_CONFIG_GRPC_COMMUNICATION_DATA_FORMAT: "JSON"
 
       # Monitoring
-      SENT_EVENTS_CACHE_MAX_SIZE: "100"
-      MONITORING_SCHEDULER_INITIAL_DELAY_SECONDS: "1"
-      MONITORING_SCHEDULER_DELAY_SECONDS: "3"
-      KEEP_ALIVE_WARNING_THRESHOLD: "60000"
+      APP_CONFIG_SENT_EVENTS_CACHE_MAX_SIZE: "100"
+      APP_CONFIG_MONITORING_SCHEDULER_INITIAL_DELAY_SECONDS: "1"
+      APP_CONFIG_MONITORING_SCHEDULER_DELAY_SECONDS: "3"
+      APP_CONFIG_KEEP_ALIVE_WARNING_THRESHOLD: "60000"
 
       # SSL Configuration
-      SSL_TRUST_ALL: "false"
-      SSL_TRUSTED_HOSTS: ""
+      APP_CONFIG_SSL_TRUST_ALL: "false"
+      APP_CONFIG_SSL_TRUSTED_HOSTS: ""
 
       # Feature Flags
-      INCLUDE_DEFAULT_OPERATIONS: "false"
+      APP_CONFIG_INCLUDE_DEFAULT_OPERATIONS: "false"
 
     # Additional environment variables can be added here
     additionalVars: {}
@@ -65,17 +73,25 @@ container:
     # Secrets to load as environment variables
     secrets: []
 
+# The M2M client secret (app.config.cyoda-client-secret) is read from an existing Kubernetes Secret and
+# passed as APP_CONFIG_CYODA_CLIENT_SECRET through secretKeyRef; the chart never takes the value itself.
+# Create it first, e.g.:
+#   kubectl create secret generic cyoda-client-credentials --from-literal=client-secret=<secret>
+cyodaClientSecret:
+  secretName: ""  # REQUIRED
+  key: client-secret
+
 podAnnotations: {}
 
 health:
   liveness:
-    path: /actuator/health/liveness
+    path: /api/actuator/health/liveness
     initialDelaySeconds: 120
     timeoutSeconds: 5
     periodSeconds: 30
     failureThreshold: 10
   readiness:
-    path: /actuator/health/readiness
+    path: /api/actuator/health/readiness
     initialDelaySeconds: 120
     timeoutSeconds: 5
     periodSeconds: 30
@@ -90,11 +106,13 @@ service:
     name: http
 
 ingress:
-  enabled: true
+  # Off by default. When enabled, host.name and ingress.tls are required: the app is only exposed over TLS.
+  enabled: false
   className: "nginx"
   annotations: {}
   path: /
   pathType: Prefix
+  # e.g. [{secretName: cyoda-client-tls, hosts: [app.example.com]}]
   tls: []
 
 autoscaling:
@@ -114,7 +132,23 @@ resources:
 
 extraVolumeMounts: {}
 extraVolumes: {}
-securityContext: {}
+# Pod-level security context. uid/gid 10001 is the unprivileged user the Dockerfile creates.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+# Container-level security context. The root filesystem is read-only; the app writes only to /tmp, which the
+# deployment mounts as an emptyDir.
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
 tolerations: []
 priorityClassName: ""
 serviceAccountName: ""
@@ -125,3 +159,6 @@ strategy: {}
 image:
   pullPolicy: Always
   imageName: client-app
+  tag: ""  # REQUIRED
+# Size limit of the /tmp emptyDir (Tomcat work dir, JVM temp files).
+tmpSizeLimit: 512Mi

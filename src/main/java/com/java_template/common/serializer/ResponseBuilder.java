@@ -117,7 +117,7 @@ public final class ResponseBuilder {
             EntityCriteriaCalculationResponse response = new EntityCriteriaCalculationResponse();
 
             // Copy basic fields from request
-            response.setId(request.getId());
+            response.setId(java.util.UUID.randomUUID().toString());
             response.setRequestId(request.getRequestId());
             response.setEntityId(request.getEntityId());
             response.setSuccess(success);
@@ -204,7 +204,7 @@ public final class ResponseBuilder {
             EntityProcessorCalculationResponse response = new EntityProcessorCalculationResponse();
 
             // Copy basic fields from request
-            response.setId(request.getId());
+            response.setId(java.util.UUID.randomUUID().toString());
             response.setRequestId(request.getRequestId());
             response.setEntityId(request.getEntityId());
             response.setSuccess(success);

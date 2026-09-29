@@ -24,7 +24,7 @@ java-client-template/
 │   └── resources/                       # Configuration files (usually empty in template)
 │       └── workflow/                    # Workflow configurations (usually empty in template)
 ├── src/test/java/com/example/           # Compilable examples and templates
-│   ├── application/                     # Example implementations (.java.txt files)
+│   ├── application/                     # Example implementations (compiled .java files)
 │   │   ├── controller/                  # REST controller examples
 │   │   ├── entity/                      # Entity implementation examples
 │   │   ├── processor/                   # Processor implementation examples
@@ -45,7 +45,6 @@ If you'd like to contribute to the examples, please follow the workflow below.
 - `llms-full.txt` - AI-friendly documentation references with line breaks
 - `README.md` - Project documentation
 - `usage-rules.md` - Developer and AI agent guidelines
-- `.augment-guidelines` - Project overview and development workflow
 
 4. Please, submit a pull request with your changes.
 
@@ -59,11 +58,11 @@ We will review your changes and provide feedback.
 
 To add a new example component:
 
-1. **Create the file** in the appropriate `llm_example/code/application/` subdirectory
-2. **Use `.java.txt` extension** (e.g., `MyNewProcessor.java.txt`)
+1. **Create the file** in the appropriate `src/test/java/com/example/application/` subdirectory
+2. **Use a plain `.java` extension** (e.g., `MyNewProcessor.java`) — examples are compiled and
+   tested like any other source, not shipped as text templates
 3. **Follow existing patterns** from other examples
 4. **Include comprehensive documentation** in comments
-5. **Add to patterns guide** if introducing new concepts
 
 ### 3. Updating Framework Code
 
@@ -77,7 +76,7 @@ When making changes to `src/main/java/com/java_template/common/`:
 
 When updating documentation:
 
-1. **Keep README.md concise** - detailed info goes in `llm_example/`
+1. **Keep README.md concise** - detailed info goes in `src/test/java/com/example/` and `usage-rules.md`
 2. **Update all references** to directory structures
 3. **Ensure consistency** across all documentation files
 4. **Validate examples** still match documentation
@@ -115,6 +114,26 @@ Before submitting changes, ensure:
 4. **Ensure documentation** is updated appropriately
 5. **Merge** only after validation passes
 
+### Dependency verification
+
+Gradle verifies the SHA-256 of every dependency, plugin and tool it downloads against
+`gradle/verification-metadata.xml` (and `buildSrc/gradle/verification-metadata.xml` for `buildLogicTest`'s nested
+`buildSrc` build). A dependency that is new, or at a new version, fails the build with "Dependency verification
+failed" until its checksums are recorded. After a dependency or plugin bump, regenerate both files with one command:
+
+```bash
+GRADLE_USER_HOME="$(mktemp -d)" ./gradlew --no-daemon --write-verification-metadata sha256 build integrationTest jacocoTestReport bootJarWorkflowImport printOtelAgentPath resolveProtocNatives
+```
+
+Run it with an empty `GRADLE_USER_HOME`, as above: with a warm cache Gradle can skip downloading parent POMs that
+a fresh CI runner does fetch, and those would then be missing from the file.
+
+It runs the build, the integration tests and every task CI runs, so every configuration they resolve is recorded,
+including `buildSrc`, the protoc and gRPC plugin binaries for every platform (`resolveProtocNatives`), the OTel agent
+and the `integrationTest` classpath. Review the diff before committing it: each new entry is an artifact you now
+trust. Gradle keeps entries it no longer needs; they are harmless. IDE downloads of `-sources`/`-javadoc` jars are
+trusted without checksums.
+
 ## 🔧 Troubleshooting
 
 ### Common Issues
@@ -128,22 +147,35 @@ Before submitting changes, ensure:
 - Run `./gradlew build` to generate required classes
 - Check that all framework dependencies are available
 
+**Integration Tests and the cyoda Binary:**
+- `./gradlew build` and `./gradlew check` run the integration tests against the cyoda-go pinned in
+  `src/main/resources/cyoda/CYODA_VERSION`, and install it automatically first (the `installCyoda` task runs
+  `scripts/install-cyoda.sh` into `.cyoda/bin`, which is git-ignored and survives `./gradlew clean`)
+- Installing a `-dev` pin builds it from source and needs Go 1.26.7 or later, `git` and network access; a released
+  pin is downloaded, needs network access, and must match the checksum committed in `CYODA_SHA256SUMS`. If the
+  install fails, its message says which
+- To use your own binary, pass `-Dcyoda.bin=<path>` or set `CYODA_BIN`; nothing is installed then (also the
+  way to run them on Windows). A `cyoda` on `PATH` that already matches the pin is kept too, as long as
+  `.cyoda/bin` is empty. To keep a binary that deliberately does not match the pin — at `.cyoda/bin` or on
+  `PATH` — instead of it being overwritten, pass `-Dcyoda.allowVersionMismatch=true`. To build without them:
+  `./gradlew build -x integrationTest`
+
 **File Not Found:**
-- Ensure `.java.txt` files are in correct directories
+- Ensure example `.java` files are in correct directories
 - Verify directory structure matches package names
 
 ### Getting Help
 
 1. **Check existing examples** for similar patterns
-2. **Review patterns guide** in `llm_example/code/patterns/`
+2. **Review existing examples** in `src/test/java/com/example/application/`
 4. **Create an issue** if you find bugs or inconsistencies
 
 ## 📋 Example Contribution Checklist
 
 When contributing a new example:
 
-- [ ] File placed in correct `llm_example/` subdirectory
-- [ ] File named with `.java.txt` extension
+- [ ] File placed in correct `src/test/java/com/example/` subdirectory
+- [ ] File named with a plain `.java` extension
 - [ ] Package declaration matches directory structure
 - [ ] All imports included and correct
 - [ ] Comprehensive comments explaining patterns
