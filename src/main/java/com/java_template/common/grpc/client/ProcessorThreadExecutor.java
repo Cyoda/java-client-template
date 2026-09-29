@@ -24,11 +24,10 @@ public class ProcessorThreadExecutor implements CalculationExecutionStrategy {
         this.useVirtualThreads = useVirtualThreads;
         this.threadPoolSize = threadPoolSize;
         if (useVirtualThreads) {
-            this.executorService = Executors.newFixedThreadPool(
-                threadPoolSize,
-                Thread.ofVirtual().name("processor-calculation-", 0).factory()
-            );
-            log.info("Initialized ProcessorThreadExecutor with {} virtual threads", threadPoolSize);
+            // One virtual thread per task: a callout blocked on a nested cascade holds no scarce thread (spec §4.5).
+            this.executorService = Executors.newThreadPerTaskExecutor(
+                    Thread.ofVirtual().name("processor-calculation-", 0).factory());
+            log.info("Initialized ProcessorThreadExecutor with one virtual thread per task (pool size ignored)");
         } else {
             this.executorService = Executors.newFixedThreadPool(
                 threadPoolSize,

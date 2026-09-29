@@ -44,5 +44,17 @@ public class WorkflowExportException extends RuntimeException {
         super(message);
         this.httpStatusCode = httpStatusCode;
     }
+
+    /**
+     * Constructs a new WorkflowExportException with HTTP status code and a cause.
+     *
+     * @param message the detail message explaining the failure
+     * @param httpStatusCode the HTTP status code from the failed API call
+     * @param cause the cause of the failure (typically a {@link CyodaHttpException})
+     */
+    public WorkflowExportException(String message, Integer httpStatusCode, Throwable cause) {
+        super(message, cause);
+        this.httpStatusCode = httpStatusCode;
+    }
 }
 

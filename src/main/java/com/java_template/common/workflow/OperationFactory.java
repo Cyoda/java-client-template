@@ -26,9 +26,9 @@ public class OperationFactory {
     public OperationFactory(
             List<CyodaProcessor> processorBeans,
             List<CyodaCriterion> criteriaBeans,
-            CyodaObjectMapper wireMapper
+            CyodaObjectMapper mappers
     ) {
-        this.objectMapper = wireMapper.mapper();
+        this.objectMapper = mappers.protocol();
         log.debug(
                 "Initializing OperationFactory with {} processor beans",
                 processorBeans.size()

@@ -13,13 +13,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * (cyoda-go changelog, issue #349), any client-side truncation of that timestamp — e.g. round
  * -tripping it through java.util.Date, which only carries milliseconds — makes an exact-instant
  * reload of the entity's own just-committed transaction miss it (ENTITY_NOT_FOUND). This test
- * proves the framework's wire mapper (built exactly as the CyodaObjectMapper bean is) carries a server timestamp through losslessly end to end: the
+ * proves the framework's protocol mapper (built exactly as the CyodaObjectMapper bean's is) carries a server timestamp through losslessly end to end: the
  * value it reads out of one response DTO, once written into another request DTO, serializes back
  * to the exact same text.
  */
 class DateTimePrecisionTest {
 
-    private final ObjectMapper om = CyodaObjectMapper.from(new ObjectMapper()).mapper();
+    private final ObjectMapper om = CyodaObjectMapper.of(new ObjectMapper()).protocol();
 
     @Test
     void survivesANanosecondPreciseTimeOfChangeVerbatim() throws Exception {

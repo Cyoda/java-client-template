@@ -1,7 +1,7 @@
 package com.java_template.common.config;
 
 import com.java_template.common.auth.CyodaTokenSource;
-import com.java_template.common.grpc.client.ClientAuthorizationInterceptor;
+import com.java_template.common.call.CyodaCallInterceptor;
 import com.java_template.common.observability.GrpcObservabilityInterceptor;
 import com.java_template.common.grpc.client.CalculationExecutionStrategy;
 import com.java_template.common.grpc.client.ControlThreadExecutor;
@@ -9,6 +9,7 @@ import com.java_template.common.grpc.client.CriteriaThreadExecutor;
 import com.java_template.common.grpc.client.DefaultEventExecutionRouter;
 import com.java_template.common.grpc.client.EventExecutionRouter;
 import com.java_template.common.grpc.client.ProcessorThreadExecutor;
+import com.java_template.common.grpc.client.connection.ChannelReadiness;
 import com.java_template.common.grpc.client.connection.DefaultReconnectionStrategy;
 import com.java_template.common.grpc.client.monitoring.ConnectionStateTracker;
 import com.java_template.common.grpc.client.connection.ReconnectionStrategy;
@@ -70,13 +71,19 @@ public class GrpcClientAutoConfiguration {
         return channel;
     }
 
+    /** The bounded wait for the channel before an unjoined multi-reply call (spec §4.5). */
+    @Bean
+    public ChannelReadiness channelReadiness(final ManagedChannel managedChannel) {
+        return new ChannelReadiness(managedChannel);
+    }
+
     @Bean
     public CloudEventsServiceGrpc.CloudEventsServiceStub cloudEventsServiceStub(
             final CyodaTokenSource tokenSource,
             final ManagedChannel managedChannel,
             @Nullable final GrpcObservabilityInterceptor observabilityInterceptor
     ) {
-        final var authInterceptor = new ClientAuthorizationInterceptor(tokenSource);
+        final var authInterceptor = new CyodaCallInterceptor(tokenSource);
         var stub = CloudEventsServiceGrpc.newStub(managedChannel)
                 .withWaitForReady()
                 .withInterceptors(authInterceptor);
@@ -92,7 +99,7 @@ public class GrpcClientAutoConfiguration {
             final ManagedChannel managedChannel,
             @Nullable final GrpcObservabilityInterceptor observabilityInterceptor
     ) {
-        final var authInterceptor = new ClientAuthorizationInterceptor(tokenSource);
+        final var authInterceptor = new CyodaCallInterceptor(tokenSource);
         var stub = CloudEventsServiceGrpc.newBlockingStub(managedChannel)
                 .withWaitForReady()
                 .withInterceptors(authInterceptor);
@@ -108,7 +115,7 @@ public class GrpcClientAutoConfiguration {
             final ManagedChannel managedChannel,
             @Nullable final GrpcObservabilityInterceptor observabilityInterceptor
     ) {
-        final var authInterceptor = new ClientAuthorizationInterceptor(tokenSource);
+        final var authInterceptor = new CyodaCallInterceptor(tokenSource);
         var stub = CloudEventsServiceGrpc.newFutureStub(managedChannel)
                 .withWaitForReady()
                 .withInterceptors(authInterceptor);

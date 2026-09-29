@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaJackson;
+import com.java_template.common.exception.CyodaHttpException;
 import com.java_template.common.tool.CyodaInit;
 import com.java_template.common.tool.CyodaInitConfig;
 import com.java_template.testing.cyoda.*;
@@ -91,9 +92,11 @@ class ModelAndWorkflowSetupIT {
         try {
             assertThatThrownBy(() -> cyodaInit.initCyoda(init))
                     .satisfies(thrown -> {
-                        Throwable root = rootCause(thrown);
-                        assertThat(root).isInstanceOf(IllegalStateException.class);
-                        assertThat(root.getMessage()).contains("MODEL_HAS_ENTITIES").contains("--recreate-models");
+                        IllegalStateException recreateFailure = findInChain(thrown, IllegalStateException.class);
+                        assertThat(recreateFailure).as("chain of %s", thrown).isNotNull();
+                        assertThat(recreateFailure.getMessage()).contains("MODEL_HAS_ENTITIES").contains("--recreate-models");
+                        // The typed cause from cyoda's own 409 must still be reachable, not swallowed.
+                        assertThat(findInChain(thrown, CyodaHttpException.class)).as("chain of %s", thrown).isNotNull();
                     });
 
             // The failed recreate must not have left the model unlocked: cyoda-go itself refuses
@@ -110,12 +113,14 @@ class ModelAndWorkflowSetupIT {
         assertExampleEntityV1IsLockedWithTheWorkflow(rest, workflow);
     }
 
-    private static Throwable rootCause(Throwable t) {
-        Throwable cause = t;
-        while (cause.getCause() != null) {
-            cause = cause.getCause();
+    /** The first throwable of {@code type} anywhere in {@code t}'s cause chain (itself included), or null. */
+    private static <T extends Throwable> T findInChain(Throwable t, Class<T> type) {
+        for (Throwable cause = t; cause != null; cause = cause.getCause()) {
+            if (type.isInstance(cause)) {
+                return type.cast(cause);
+            }
         }
-        return cause;
+        return null;
     }
 
     private void assertExampleEntityV1IsLockedWithTheWorkflow(CyodaRest rest, ObjectNode workflow) throws Exception {

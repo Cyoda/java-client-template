@@ -3,28 +3,36 @@ package com.java_template.common.auth;
 import io.cloudevents.v1.proto.CloudEvent;
 import org.springframework.stereotype.Component;
 
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
-/**
- * Extracts CloudEvents Auth Context Extension attributes from incoming gRPC CloudEvents.
- * Returns an empty Optional when no auth context attributes are present.
- */
+/** ABOUTME: Reads authtype/authid/authclaims from a callout CloudEvent (authclaims is comma-separated only). */
 @Component
 public class CloudEventAuthContextExtractor {
 
-    private static final String ATTR_AUTHTYPE   = "authtype";
-    private static final String ATTR_AUTHID     = "authid";
-    private static final String ATTR_AUTHCLAIMS = "authclaims";
-
-    public Optional<CloudEventAuthContext> extract(CloudEvent cloudEvent) {
+    public static CloudEventAuthContext from(CloudEvent cloudEvent) {
         var attrs = cloudEvent.getAttributesMap();
-        if (!attrs.containsKey(ATTR_AUTHTYPE)) {
-            return Optional.empty();
+        String type = attrs.containsKey("authtype") ? attrs.get("authtype").getCeString() : null;
+        if (type == null || !CloudEventAuthContext.AUTH_TYPES.contains(type)) {
+            return CloudEventAuthContext.empty();
         }
-        String authType   = attrs.get(ATTR_AUTHTYPE).getCeString();
-        String authId     = attrs.containsKey(ATTR_AUTHID) ? attrs.get(ATTR_AUTHID).getCeString() : null;
-        String authClaims = attrs.containsKey(ATTR_AUTHCLAIMS) ? attrs.get(ATTR_AUTHCLAIMS).getCeString() : null;
+        String id = attrs.containsKey("authid") ? attrs.get("authid").getCeString() : null;
+        String claims = attrs.containsKey("authclaims") ? attrs.get("authclaims").getCeString() : "";
+        return new CloudEventAuthContext(CloudEventAuthContext.Type.valueOf(type.toUpperCase(Locale.ROOT)), id, parseRoles(claims));
+    }
 
-        return Optional.of(new CloudEventAuthContext(authType, authId, authClaims));
+    static List<String> parseRoles(String claims) {
+        if (claims == null || claims.isBlank() || claims.trim().startsWith("{")) {
+            return List.of();
+        }
+        return Arrays.stream(claims.split(",")).map(String::trim).filter(s -> !s.isEmpty()).toList();
+    }
+
+    /** Kept for existing callers; prefer {@link #from(CloudEvent)} or CyodaEventContext.authContext(). */
+    public Optional<CloudEventAuthContext> extract(CloudEvent cloudEvent) {
+        CloudEventAuthContext ctx = from(cloudEvent);
+        return ctx.isEmpty() ? Optional.empty() : Optional.of(ctx);
     }
 }

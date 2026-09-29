@@ -1,6 +1,7 @@
 package com.java_template.common.auth;
 
 import com.java_template.common.config.Config;
+import com.java_template.common.exception.CyodaCredentialException;
 import com.java_template.common.util.SslUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,10 +19,10 @@ import org.springframework.security.oauth2.core.http.converter.OAuth2AccessToken
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 
 /**
@@ -33,7 +34,6 @@ import java.util.concurrent.ConcurrentMap;
 public class Authentication implements CyodaTokenSource {
 
     private static final Logger logger = LoggerFactory.getLogger(Authentication.class);
-
     private static final String REGISTRATION_ID = "cyoda";
     private static final String PRINCIPAL_NAME = "cyoda-client";
 
@@ -41,10 +41,12 @@ public class Authentication implements CyodaTokenSource {
     // The manager stores the authorized client here and hands it back while its token is unexpired, so
     // invalidation must remove it here too, or the "refetch" would return the token Cyoda just rejected.
     private final OAuth2AuthorizedClientService authorizedClientService;
-    private final ConcurrentMap<String, CachedToken> tokenCache = new ConcurrentHashMap<>();
     private final Config config;
 
-    private static final String CACHE_KEY = "cyoda";
+    // Guards the token HTTP fetch. A ReentrantLock (not a `synchronized` block or ConcurrentHashMap.compute
+    // bin lock) so the blocking OAuth2 token request never pins a virtual thread (spec §4.5, JDK 21).
+    private final ReentrantLock fetchLock = new ReentrantLock();
+    private volatile CachedToken cached;
 
     public Authentication(Config config) {
         this.config = config;
@@ -75,10 +77,12 @@ public class Authentication implements CyodaTokenSource {
         // We also inject a custom RestTemplate which uses our custom HttpClient to handle SSL trust.
         RestClientClientCredentialsTokenResponseClient accessTokenResponseClient = new RestClientClientCredentialsTokenResponseClient();
 
+        // Connect timeout from SslUtils; a read timeout of grpc-call-deadline-ms, so a hung token endpoint cannot
+        // hold fetchLock (and every caller waiting on it) indefinitely.
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(SslUtils.createHttpClient(config));
+        requestFactory.setReadTimeout(Duration.ofMillis(config.getGrpcCallDeadlineMs()));
         RestClient restClient = RestClient.builder()
-                .requestFactory(new JdkClientHttpRequestFactory(
-                        SslUtils.createHttpClient(config)
-                ))
+                .requestFactory(requestFactory)
                 .messageConverters((messageConverters) -> {
                     messageConverters.clear();
                     messageConverters.add(new FormHttpMessageConverter());
@@ -102,9 +106,16 @@ public class Authentication implements CyodaTokenSource {
      * Returns a valid access token, reusing it if still fresh.
      */
     public OAuth2AccessToken getAccessToken() {
-        CachedToken token = tokenCache.compute(CACHE_KEY, (key, existing) -> {
-            if (existing != null && existing.isValid()) {
-                return existing;
+        CachedToken current = cached;
+        if (current != null && current.isValid()) {
+            return current.oAuth2AccessToken;
+        }
+
+        lockInterruptibly();
+        try {
+            current = cached;
+            if (current != null && current.isValid()) {
+                return current.oAuth2AccessToken;
             }
 
             logger.info("Fetching new OAuth2 access token");
@@ -119,40 +130,72 @@ public class Authentication implements CyodaTokenSource {
 
             OAuth2AccessToken accessToken = client.getAccessToken();
             logger.info("New token fetched, expires at: {}", accessToken.getExpiresAt());
-            return new CachedToken(accessToken);
-        });
-
-        return token.oAuth2AccessToken;
+            cached = new CachedToken(accessToken);
+            return accessToken;
+        } finally {
+            fetchLock.unlock();
+        }
     }
 
-
-
     /**
-     * Clears cached token so next call re-authenticates.
+     * Clears the cached token, whatever it is, so the next call re-authenticates. Prefer
+     * {@link #invalidate(String)} with the token Cyoda rejected: it never discards a token another thread
+     * fetched in the meantime.
      */
     public void invalidateTokens() {
-        tokenCache.remove(CACHE_KEY);
-        authorizedClientService.removeAuthorizedClient(REGISTRATION_ID, PRINCIPAL_NAME);
-        logger.info("Manually invalidated cached token");
+        invalidate(null);
+    }
+
+    /**
+     * Waits for {@code fetchLock} (held by another thread's fetch) interruptibly: an interrupted caller gives up
+     * with {@link CyodaCredentialException}, its interrupt flag restored.
+     */
+    private void lockInterruptibly() {
+        try {
+            fetchLock.lockInterruptibly();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new CyodaCredentialException("interrupted while waiting for the M2M access token");
+        }
     }
 
     private static boolean isBlank(String s) {
         return s == null || s.isBlank();
     }
 
-    /**
-     * The M2M token for an outbound Cyoda call. Refused with {@link com.java_template.common.exception.CyodaCredentialException}
-     * while the current thread carries an authenticated user ({@link AuthenticatedCallerGuard}).
-     */
     @Override
     public Optional<String> bearerToken() {
-        AuthenticatedCallerGuard.refuseM2mForAuthenticatedUser();
         return Optional.of(getAccessToken().getTokenValue());
     }
 
     @Override
     public void invalidate() {
-        invalidateTokens();
+        invalidate(null);
+    }
+
+    /**
+     * Drops {@code rejectedToken} from both this cache and the authorized-client service, so the next
+     * {@link #getAccessToken()} really fetches a new token. Compared under {@code fetchLock}: if either
+     * holds a different token (fetched by another thread since the rejected one was sent), that one is
+     * kept. {@code null} drops whatever is held.
+     */
+    @Override
+    public void invalidate(String rejectedToken) {
+        lockInterruptibly();
+        try {
+            CachedToken current = cached;
+            if (current != null && (rejectedToken == null || rejectedToken.equals(current.getTokenValue()))) {
+                cached = null;
+            }
+            OAuth2AuthorizedClient stored = authorizedClientService.loadAuthorizedClient(REGISTRATION_ID, PRINCIPAL_NAME);
+            if (stored != null && (rejectedToken == null
+                    || (stored.getAccessToken() != null && rejectedToken.equals(stored.getAccessToken().getTokenValue())))) {
+                authorizedClientService.removeAuthorizedClient(REGISTRATION_ID, PRINCIPAL_NAME);
+                logger.info("Invalidated the cached M2M access token");
+            }
+        } finally {
+            fetchLock.unlock();
+        }
     }
 
     /**

@@ -1,8 +1,6 @@
-package com.java_template.common.grpc.client;
+package com.java_template.common.call;
 
-import com.java_template.common.auth.AuthenticatedCallerGuard;
 import com.java_template.common.auth.CyodaTokenSource;
-import com.java_template.common.exception.CyodaCredentialException;
 import io.cloudevents.v1.proto.CloudEvent;
 import io.grpc.ManagedChannel;
 import io.grpc.Server;
@@ -15,11 +13,8 @@ import org.cyoda.cloud.api.grpc.CloudEventsServiceGrpc;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.Iterator;
-import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -29,10 +24,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * ABOUTME: Drives ClientAuthorizationInterceptor through real gRPC stubs over an in-process channel,
- * so a failed token fetch is proven to surface as UNAUTHENTICATED rather than a stub-side IllegalStateException.
+ * ABOUTME: Drives CyodaCallInterceptor through real gRPC stubs over an in-process channel, so a failed
+ * token fetch is proven to surface as UNAUTHENTICATED rather than a stub-side IllegalStateException.
+ * Ported from ClientAuthorizationInterceptorInProcessTest (Task 20) before that interceptor was deleted.
  */
-class ClientAuthorizationInterceptorInProcessTest {
+class CyodaCallInterceptorInProcessTest {
 
     private final AtomicInteger serverCalls = new AtomicInteger();
     private Server server;
@@ -75,23 +71,11 @@ class ClientAuthorizationInterceptorInProcessTest {
     void stopServer() throws Exception {
         channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
         server.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
-        SecurityContextHolder.clearContext();
     }
 
     private static CyodaTokenSource failingTokenSource() {
         return new CyodaTokenSource() {
             @Override public Optional<String> bearerToken() { throw new IllegalStateException("token endpoint down"); }
-            @Override public void invalidate() { }
-        };
-    }
-
-    /** Like Authentication: refuses the M2M token while an authenticated user is on the thread. */
-    private static CyodaTokenSource guardedTokenSource() {
-        return new CyodaTokenSource() {
-            @Override public Optional<String> bearerToken() {
-                AuthenticatedCallerGuard.refuseM2mForAuthenticatedUser();
-                return Optional.of("tok");
-            }
             @Override public void invalidate() { }
         };
     }
@@ -106,7 +90,8 @@ class ClientAuthorizationInterceptorInProcessTest {
     @Test
     void blockingUnaryCallFailsUnauthenticatedWhenNoTokenCanBeObtained() {
         var stub = CloudEventsServiceGrpc.newBlockingStub(channel)
-                .withInterceptors(new ClientAuthorizationInterceptor(failingTokenSource()));
+                .withOption(CyodaCallInterceptor.CONTEXT, CyodaCallContext.m2m())
+                .withInterceptors(new CyodaCallInterceptor(failingTokenSource()));
 
         assertThatThrownBy(() -> stub.entityManage(CloudEvent.getDefaultInstance()))
                 .isInstanceOfSatisfying(StatusRuntimeException.class, e -> {
@@ -122,7 +107,8 @@ class ClientAuthorizationInterceptorInProcessTest {
     @Test
     void blockingServerStreamingCallFailsUnauthenticatedWhenNoTokenCanBeObtained() {
         var stub = CloudEventsServiceGrpc.newBlockingStub(channel)
-                .withInterceptors(new ClientAuthorizationInterceptor(failingTokenSource()));
+                .withOption(CyodaCallInterceptor.CONTEXT, CyodaCallContext.m2m())
+                .withInterceptors(new CyodaCallInterceptor(failingTokenSource()));
 
         assertThatThrownBy(() -> {
             Iterator<CloudEvent> it = stub.entitySearchCollection(CloudEvent.getDefaultInstance());
@@ -135,7 +121,8 @@ class ClientAuthorizationInterceptorInProcessTest {
     @Test
     void bidiStreamReportsUnauthenticatedToItsObserverWhenNoTokenCanBeObtained() throws Exception {
         var stub = CloudEventsServiceGrpc.newStub(channel)
-                .withInterceptors(new ClientAuthorizationInterceptor(failingTokenSource()));
+                .withOption(CyodaCallInterceptor.CONTEXT, CyodaCallContext.m2m())
+                .withInterceptors(new CyodaCallInterceptor(failingTokenSource()));
         CompletableFuture<Throwable> error = new CompletableFuture<>();
 
         StreamObserver<CloudEvent> requests = stub.startStreaming(new StreamObserver<>() {
@@ -155,31 +142,8 @@ class ClientAuthorizationInterceptorInProcessTest {
     @Test
     void unaryCallSucceedsWithAToken() {
         var stub = CloudEventsServiceGrpc.newBlockingStub(channel)
-                .withInterceptors(new ClientAuthorizationInterceptor(fixedTokenSource()));
-
-        assertThat(stub.entityManage(CloudEvent.getDefaultInstance())).isNotNull();
-        assertThat(serverCalls).hasValue(1);
-    }
-
-    @Test
-    void aCallFromAnAuthenticatedUsersThreadFailsUnauthenticatedAndNeverReachesTheServer() {
-        SecurityContextHolder.getContext().setAuthentication(
-                UsernamePasswordAuthenticationToken.authenticated("alice", "pw", List.of()));
-        var stub = CloudEventsServiceGrpc.newBlockingStub(channel)
-                .withInterceptors(new ClientAuthorizationInterceptor(guardedTokenSource()));
-
-        assertThatThrownBy(() -> stub.entityManage(CloudEvent.getDefaultInstance()))
-                .isInstanceOfSatisfying(StatusRuntimeException.class, e -> {
-                    assertThat(e.getStatus().getCode()).isEqualTo(Status.Code.UNAUTHENTICATED);
-                    assertThat(e.getStatus().getCause()).isInstanceOf(CyodaCredentialException.class);
-                });
-        assertThat(serverCalls).hasValue(0);
-    }
-
-    @Test
-    void aCallWithoutAnAuthenticatedUserStillCarriesTheM2mToken() {
-        var stub = CloudEventsServiceGrpc.newBlockingStub(channel)
-                .withInterceptors(new ClientAuthorizationInterceptor(guardedTokenSource()));
+                .withOption(CyodaCallInterceptor.CONTEXT, CyodaCallContext.m2m())
+                .withInterceptors(new CyodaCallInterceptor(fixedTokenSource()));
 
         assertThat(stub.entityManage(CloudEvent.getDefaultInstance())).isNotNull();
         assertThat(serverCalls).hasValue(1);

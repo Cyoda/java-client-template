@@ -25,10 +25,10 @@ public class CriteriaEventStrategy extends AbstractEventStrategy<
 
     public CriteriaEventStrategy(
             OperationFactory operationFactory,
-            CyodaObjectMapper wireMapper,
+            CyodaObjectMapper mappers,
             CyodaContextFactory eventContextFactory
     ) {
-        super(operationFactory, wireMapper, eventContextFactory);
+        super(operationFactory, mappers, eventContextFactory);
     }
 
     @Override

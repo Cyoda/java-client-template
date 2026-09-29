@@ -11,7 +11,7 @@ import org.slf4j.LoggerFactory;
  * - ENTITY_CRITERIA_CALCULATION_REQUEST → criteria pool (medium weight)
  * - All other events → control pool (lightweight, must be fast)
  */
-public class DefaultEventExecutionRouter implements EventExecutionRouter {
+public class DefaultEventExecutionRouter implements EventExecutionRouter, AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(DefaultEventExecutionRouter.class);
 
     private final CalculationExecutionStrategy processorExecutor;
@@ -47,6 +47,20 @@ public class DefaultEventExecutionRouter implements EventExecutionRouter {
                 log.debug("Routing {} to control thread pool", eventType);
                 controlExecutor.run(task);
                 break;
+        }
+    }
+
+    /**
+     * Shuts down all three executors so Spring context shutdown cannot leave background
+     * threads running; called automatically by Spring's inferred destroy method on context close.
+     */
+    @Override
+    public void close() {
+        log.info("Closing DefaultEventExecutionRouter, shutting down all executors");
+        for (CalculationExecutionStrategy e : new CalculationExecutionStrategy[]{processorExecutor, criteriaExecutor, controlExecutor}) {
+            if (e instanceof ProcessorThreadExecutor p) p.shutdown();
+            if (e instanceof CriteriaThreadExecutor c) c.shutdown();
+            if (e instanceof ControlThreadExecutor k) k.shutdown();
         }
     }
 }

@@ -24,5 +24,14 @@ public interface CyodaEventContext<T extends BaseEvent>  {
      */
     T getEvent();
 
-    // TODO: add gRPC access object to Cyoda
+    /** The callout's transaction token (CloudEvent attribute cyodatxtoken), or null when the dispatch carries none. */
+    default String txToken() {
+        var attr = getCloudEvent().getAttributesMap().get("cyodatxtoken");
+        return attr == null ? null : attr.getCeString();
+    }
+
+    /** The originating principal as data (never a credential); empty when absent or unknown. */
+    default com.java_template.common.auth.CloudEventAuthContext authContext() {
+        return com.java_template.common.auth.CloudEventAuthContextExtractor.from(getCloudEvent());
+    }
 }

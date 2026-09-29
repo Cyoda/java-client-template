@@ -21,18 +21,18 @@ import org.springframework.stereotype.Component;
 public class JacksonProcessorSerializer extends BaseJacksonSerializer<EntityProcessorCalculationRequest>
         implements ProcessorSerializer {
 
-    /** Spring's constructor: payloads are read and written with the framework's wire mapper. */
+    /** Spring's constructor: entity data with the app's mapper, Cyoda metadata with the protocol mapper. */
     @Autowired
-    public JacksonProcessorSerializer(CyodaObjectMapper wireMapper) {
-        this(wireMapper.mapper());
+    public JacksonProcessorSerializer(CyodaObjectMapper mappers) {
+        super(mappers);
     }
 
     /**
-     * For tests and manual wiring. Pass a mapper that meets the cyoda-go contract, e.g.
-     * {@code CyodaObjectMapper.standalone().mapper()} or {@code CyodaJackson.configure(new ObjectMapper())}.
+     * For tests and manual wiring: {@code entityMapper} converts the entities (as the app's primary mapper does
+     * under Spring), and Cyoda metadata uses the framework's protocol mapper.
      */
-    public JacksonProcessorSerializer(ObjectMapper objectMapper) {
-        super(objectMapper);
+    public JacksonProcessorSerializer(ObjectMapper entityMapper) {
+        this(CyodaObjectMapper.of(entityMapper));
     }
 
     /**
@@ -45,7 +45,7 @@ public class JacksonProcessorSerializer extends BaseJacksonSerializer<EntityProc
      */
     @Override
     public <T extends CyodaEntity> EntityWithMetadata<T> extractEntityWithMetadata(EntityProcessorCalculationRequest request, Class<T> clazz) {
-        return EntityWithMetadata.fromDataPayload(request.getPayload(), clazz, objectMapper);
+        return EntityWithMetadata.fromDataPayload(request.getPayload(), clazz, mappers);
     }
 
     /**

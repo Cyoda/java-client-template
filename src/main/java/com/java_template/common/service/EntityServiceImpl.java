@@ -3,11 +3,15 @@ package com.java_template.common.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.call.CyodaCallContext;
+import com.java_template.common.call.CyodaCallContexts;
 import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.dto.EntityWithMetadata;
 import com.java_template.common.dto.PageResult;
 import com.java_template.common.repository.CrudRepository;
+import com.java_template.common.repository.CyodaRepository;
 import com.java_template.common.repository.SearchAndRetrievalParams;
+import com.java_template.common.util.Futures;
 import com.java_template.common.workflow.CyodaEntity;
 import org.cyoda.cloud.api.common.model.*;
 import org.cyoda.cloud.api.event.common.DataPayload;
@@ -30,6 +34,15 @@ import java.util.stream.StreamSupport;
 /**
  * ABOUTME: Implementation of EntityService providing concrete CRUD operations
  * and search functionality backed by CrudRepository and Cyoda platform integration.
+ *
+ * <p>Each public method builds its {@link CyodaCallContext} exactly once, with
+ * {@link CyodaCallContexts#current()}, and passes it to every repository call the operation makes,
+ * including the later pages of a stream (spec §4.2). Inside a callout scope, the entity written by
+ * create/update/save/updateAll is reloaded as the joined transaction's latest view, without a point in
+ * time (spec §4.4).
+ *
+ * <p>Every repository future is joined with {@link Futures#joinUnwrapped}, so failures leave the public
+ * methods as the typed Cyoda exceptions (spec §4.4), never wrapped in a CompletionException.
  */
 @Service
 public class EntityServiceImpl implements EntityService {
@@ -37,14 +50,20 @@ public class EntityServiceImpl implements EntityService {
     private final Logger logger = LoggerFactory.getLogger(this.getClass());
 
     private final CrudRepository repository;
-    private final ObjectMapper objectMapper;
+    /** The framework's mappers: entities with the app's mapper, the Cyoda metadata with the protocol mapper. */
+    private final CyodaObjectMapper mappers;
+    private final ObjectMapper entityMapper;
+    private final CyodaCallContexts callContexts;
 
     public EntityServiceImpl(
             final CrudRepository repository,
-            final CyodaObjectMapper wireMapper
+            final CyodaObjectMapper mappers,
+            final CyodaCallContexts callContexts
     ) {
         this.repository = repository;
-        this.objectMapper = wireMapper.mapper();
+        this.mappers = mappers;
+        this.entityMapper = mappers.entities();
+        this.callContexts = callContexts;
     }
 
     // ========================================
@@ -57,7 +76,7 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final ModelSpec modelSpec,
             @NotNull final Class<T> entityClass
     ) {
-        return getById(entityId, modelSpec, entityClass, (OffsetDateTime) null);
+        return getById(callContexts.current(), entityId, modelSpec, entityClass, null);
     }
 
     /**
@@ -72,8 +91,18 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final Class<T> entityClass,
             @Nullable final OffsetDateTime pointInTime
     ) {
-        DataPayload payload = repository.findById(entityId, pointInTime).join();
-        return EntityWithMetadata.fromDataPayload(payload, entityClass, objectMapper);
+        return getById(callContexts.current(), entityId, modelSpec, entityClass, pointInTime);
+    }
+
+    private <T extends CyodaEntity> EntityWithMetadata<T> getById(
+            final CyodaCallContext ctx,
+            final UUID entityId,
+            final ModelSpec modelSpec,
+            final Class<T> entityClass,
+            @Nullable final OffsetDateTime pointInTime
+    ) {
+        DataPayload payload = Futures.joinUnwrapped(repository.findById(ctx, entityId, pointInTime));
+        return EntityWithMetadata.fromDataPayload(payload, entityClass, mappers);
     }
 
     @Override
@@ -83,7 +112,7 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final String businessIdField,
             @NotNull final Class<T> entityClass
     ) {
-        return findByBusinessId(modelSpec, businessId, businessIdField, entityClass, (OffsetDateTime) null);
+        return findByBusinessId(callContexts.current(), modelSpec, businessId, businessIdField, entityClass, null);
     }
 
     @Override
@@ -94,16 +123,28 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final Class<T> entityClass,
             @Nullable final OffsetDateTime pointInTime
     ) {
+        return findByBusinessId(callContexts.current(), modelSpec, businessId, businessIdField, entityClass, pointInTime);
+    }
+
+    private <T extends CyodaEntity> EntityWithMetadata<T> findByBusinessId(
+            final CyodaCallContext ctx,
+            final ModelSpec modelSpec,
+            final String businessId,
+            final String businessIdField,
+            final Class<T> entityClass,
+            @Nullable final OffsetDateTime pointInTime
+    ) {
         SimpleConditionDto simpleCondition = new SimpleConditionDto()
                 .jsonPath("$." + businessIdField)
                 .operatorType(SimpleConditionDto.OperatorTypeEnum.EQUALS)
-                .value(objectMapper.valueToTree(businessId));
+                .value(entityMapper.valueToTree(businessId));
 
         GroupConditionDto condition = new GroupConditionDto()
                 .operator(GroupConditionDto.OperatorEnum.AND)
                 .conditions(List.of(simpleCondition));
 
         PageResult<EntityWithMetadata<T>> result = search(
+                ctx,
                 modelSpec,
                 condition,
                 entityClass,
@@ -125,11 +166,9 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final String businessIdField,
             @NotNull final Class<T> entityClass
     ) {
-        try {
-            return findByBusinessId(modelSpec, businessId, businessIdField, entityClass);
-        } catch (Exception e) {
-            return null;
-        }
+        // null means "no match" only: not-found is an empty result, and every failure propagates
+        // (already unwrapped from CompletionException by Futures.joinUnwrapped).
+        return findByBusinessId(callContexts.current(), modelSpec, businessId, businessIdField, entityClass, null);
     }
 
     @Override
@@ -138,6 +177,16 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final T entity,
             @NotNull final Map<String, java.util.function.Function<T, Object>> businessIdExtractors,
             @NotNull final Class<T> entityClass
+    ) {
+        return findByCompositeKey(callContexts.current(), modelSpec, entity, businessIdExtractors, entityClass);
+    }
+
+    private <T extends CyodaEntity> EntityWithMetadata<T> findByCompositeKey(
+            final CyodaCallContext ctx,
+            final ModelSpec modelSpec,
+            final T entity,
+            final Map<String, java.util.function.Function<T, Object>> businessIdExtractors,
+            final Class<T> entityClass
     ) {
         // Build a list of SimpleConditions for each business key field
         List<GroupConditionDtoAllOfConditions> simpleConditions = new ArrayList<>();
@@ -150,7 +199,7 @@ public class EntityServiceImpl implements EntityService {
             SimpleConditionDto condition = new SimpleConditionDto()
                     .jsonPath("$." + fieldName)
                     .operatorType(SimpleConditionDto.OperatorTypeEnum.EQUALS)
-                    .value(objectMapper.valueToTree(value));
+                    .value(entityMapper.valueToTree(value));
 
             simpleConditions.add(condition);
         }
@@ -162,7 +211,7 @@ public class EntityServiceImpl implements EntityService {
 
         // Search with the composite condition
         PageResult<EntityWithMetadata<T>> result = search(
-                modelSpec, groupCondition, entityClass,
+                ctx, modelSpec, groupCondition, entityClass,
                 SearchAndRetrievalParams.builder().pageSize(1).pageNumber(0).inMemory(true).build()
         );
 
@@ -176,11 +225,9 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final Map<String, java.util.function.Function<T, Object>> businessIdExtractors,
             @NotNull final Class<T> entityClass
     ) {
-        try {
-            return findByCompositeKey(modelSpec, entity, businessIdExtractors, entityClass);
-        } catch (Exception e) {
-            return null;
-        }
+        // null means "no match" only: not-found is an empty result, and every failure propagates
+        // (already unwrapped from CompletionException by Futures.joinUnwrapped).
+        return findByCompositeKey(callContexts.current(), modelSpec, entity, businessIdExtractors, entityClass);
     }
 
     @Override
@@ -189,38 +236,37 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final Class<T> entityClass,
             @NotNull final SearchAndRetrievalParams params
     ) {
-        PageResult<DataPayload> pageResult = repository.findAll(
+        return findAll(callContexts.current(), modelSpec, entityClass, params);
+    }
+
+    private <T extends CyodaEntity> PageResult<EntityWithMetadata<T>> findAll(
+            final CyodaCallContext ctx,
+            final ModelSpec modelSpec,
+            final Class<T> entityClass,
+            final SearchAndRetrievalParams params
+    ) {
+        PageResult<DataPayload> pageResult = Futures.joinUnwrapped(repository.findAll(
+                ctx,
                 modelSpec,
                 params
-        ).join();
+        ));
 
-        List<EntityWithMetadata<T>> entities = pageResult.data().stream()
-                .filter(Objects::nonNull)
-                .map(payload -> EntityWithMetadata.fromDataPayload(payload, entityClass, objectMapper))
-                .toList();
-
-        return PageResult.of(
-                pageResult.searchId(),
-                entities,
-                pageResult.pageNumber(),
-                pageResult.pageSize(),
-                pageResult.totalElements()
-        );
+        return toEntities(pageResult, entityClass);
     }
 
     @Override
     public long getEntityCount(@NotNull final ModelSpec modelSpec) {
-        return getEntityCount(modelSpec, (OffsetDateTime) null);
+        return Futures.joinUnwrapped(repository.getEntityCount(callContexts.current(), modelSpec, null));
     }
 
     @Override
     public long getEntityCount(@NotNull final ModelSpec modelSpec, @Nullable final OffsetDateTime pointInTime) {
-        return repository.getEntityCount(modelSpec, pointInTime).join();
+        return Futures.joinUnwrapped(repository.getEntityCount(callContexts.current(), modelSpec, pointInTime));
     }
 
     @Override
     public Map<String, Long> getEntityStatsByState(@NotNull final ModelSpec modelSpec) {
-        return getEntityStatsByState(modelSpec, (OffsetDateTime) null);
+        return Futures.joinUnwrapped(repository.getEntityStatsByState(callContexts.current(), modelSpec, (OffsetDateTime) null));
     }
 
     @Override
@@ -228,7 +274,7 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final ModelSpec modelSpec,
             @Nullable final OffsetDateTime pointInTime
     ) {
-        return repository.getEntityStatsByState(modelSpec, pointInTime).join();
+        return Futures.joinUnwrapped(repository.getEntityStatsByState(callContexts.current(), modelSpec, pointInTime));
     }
 
     @Override
@@ -237,17 +283,26 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final List<String> states,
             @Nullable final OffsetDateTime pointInTime
     ) {
-        return repository.getEntityStatsByState(modelSpec, states, pointInTime).join();
+        return Futures.joinUnwrapped(repository.getEntityStatsByState(callContexts.current(), modelSpec, states, pointInTime));
     }
 
+    /**
+     * Every page, including those fetched lazily as the stream is consumed, uses the context of this call.
+     * Inside a callout scope the stream is one direct search ({@link #joinedStreamParams}).
+     */
     @Override
     public <T extends CyodaEntity> Stream<EntityWithMetadata<T>> streamAll(
             @NotNull final ModelSpec modelSpec,
             @NotNull final Class<T> entityClass,
             @NotNull final SearchAndRetrievalParams params
     ) {
+        final CyodaCallContext ctx = callContexts.current();
+        if (ctx.isJoined()) {
+            return findAll(ctx, modelSpec, entityClass, joinedStreamParams(params)).data().stream();
+        }
         // Fetch first page to get total size upfront
         PageResult<EntityWithMetadata<T>> firstPage = findAll(
+                ctx,
                 modelSpec,
                 entityClass,
                 SearchAndRetrievalParams.builder()
@@ -263,6 +318,7 @@ public class EntityServiceImpl implements EntityService {
                 new PaginatedSpliterator<>(
                         firstPage,
                         (pageNumber, searchId) -> findAll(
+                                ctx,
                                 modelSpec,
                                 entityClass,
                                 SearchAndRetrievalParams.builder()
@@ -286,15 +342,33 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final Class<T> entityClass,
             @NotNull final SearchAndRetrievalParams params
     ) {
-        PageResult<DataPayload> pageResult = repository.findAllByCriteria(
+        return search(callContexts.current(), modelSpec, condition, entityClass, params);
+    }
+
+    private <T extends CyodaEntity> PageResult<EntityWithMetadata<T>> search(
+            final CyodaCallContext ctx,
+            final ModelSpec modelSpec,
+            final GroupConditionDto condition,
+            final Class<T> entityClass,
+            final SearchAndRetrievalParams params
+    ) {
+        PageResult<DataPayload> pageResult = Futures.joinUnwrapped(repository.findAllByCriteria(
+                ctx,
                 modelSpec,
                 condition,
                 params
-        ).join();
+        ));
 
+        return toEntities(pageResult, entityClass);
+    }
+
+    private <T extends CyodaEntity> PageResult<EntityWithMetadata<T>> toEntities(
+            final PageResult<DataPayload> pageResult,
+            final Class<T> entityClass
+    ) {
         List<EntityWithMetadata<T>> entities = pageResult.data().stream()
                 .filter(Objects::nonNull)
-                .map(payload -> EntityWithMetadata.fromDataPayload(payload, entityClass, objectMapper))
+                .map(payload -> EntityWithMetadata.fromDataPayload(payload, entityClass, mappers))
                 .toList();
 
         return PageResult.of(
@@ -306,6 +380,10 @@ public class EntityServiceImpl implements EntityService {
         );
     }
 
+    /**
+     * Every page, including those fetched lazily as the stream is consumed, uses the context of this call.
+     * Inside a callout scope the stream is one direct search ({@link #joinedStreamParams}).
+     */
     @Override
     public <T extends CyodaEntity> Stream<EntityWithMetadata<T>> searchAsStream(
             @NotNull final ModelSpec modelSpec,
@@ -313,14 +391,19 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final Class<T> entityClass,
             @NotNull final SearchAndRetrievalParams params
     ) {
+        final CyodaCallContext ctx = callContexts.current();
+        if (ctx.isJoined()) {
+            return search(ctx, modelSpec, condition, entityClass, joinedStreamParams(params)).data().stream();
+        }
         // Fetch first page to get total size upfront
         PageResult<EntityWithMetadata<T>> firstPage = search(
+                ctx,
                 modelSpec,
                 condition,
                 entityClass,
                 SearchAndRetrievalParams.builder()
                         .pageSize(params.pageSize())
-                        .pageNumber(1)
+                        .pageNumber(0)
                         .pointInTime(params.pointInTime())
                         .inMemory(params.inMemory())
                         .awaitLimitMs(params.awaitLimitMs())
@@ -332,6 +415,7 @@ public class EntityServiceImpl implements EntityService {
                 new PaginatedSpliterator<>(
                         firstPage,
                         (pageNumber, searchId) -> search(
+                                ctx,
                                 modelSpec,
                                 condition,
                                 entityClass,
@@ -358,16 +442,27 @@ public class EntityServiceImpl implements EntityService {
 
     @Override
     public <T extends CyodaEntity> EntityWithMetadata<T> create(@NotNull final T entity) {
+        return create(callContexts.current(), entity);
+    }
+
+    private <T extends CyodaEntity> EntityWithMetadata<T> create(final CyodaCallContext ctx, final T entity) {
         ModelSpec modelSpec = entity.getModelKey().modelKey();
 
-        EntityTransactionResponse response = repository.save(modelSpec, objectMapper.valueToTree(entity)).join();
+        EntityTransactionResponse response = Futures.joinUnwrapped(repository.save(ctx, modelSpec, entityMapper.valueToTree(entity)));
 
         // Extract entity ID and transaction ID from response
         UUID entityId = response.getTransactionInfo().getEntityIds().getFirst();
         UUID transactionId = response.getTransactionInfo().getTransactionId();
 
+        @SuppressWarnings("unchecked")
+        Class<T> entityClass = (Class<T>) entity.getClass();
+        if (ctx.isJoined()) {
+            // Inside the joined transaction its latest view is the right one (spec §4.4).
+            return getById(ctx, entityId, modelSpec, entityClass, null);
+        }
+
         // Get entity changes metadata to find the exact timeOfChange for this transaction
-        List<EntityChangeMeta> changes = getEntityChangesMetadata(entityId);
+        List<EntityChangeMeta> changes = getEntityChangesMetadata(ctx, entityId, null);
 
         // Find the change metadata for this specific transaction
         EntityChangeMeta changeMeta = changes.stream()
@@ -376,15 +471,23 @@ public class EntityServiceImpl implements EntityService {
                 .orElseThrow(() -> new RuntimeException("Transaction metadata not found for transaction: " + transactionId));
 
         // Reload entity at the exact point in time when it was saved
-        @SuppressWarnings("unchecked")
-        Class<T> entityClass = (Class<T>) entity.getClass();
-        return getById(entityId, modelSpec, entityClass, changeMeta.getTimeOfChange());
+        return getById(ctx, entityId, modelSpec, entityClass, changeMeta.getTimeOfChange());
     }
 
     @Override
     public <T extends CyodaEntity> EntityWithMetadata<T> updateByBusinessId(
             @NotNull final T entity,
             @NotNull final String businessIdField,
+            @Nullable final String transition
+    ) {
+        return updateByBusinessId(callContexts.current(), entity, businessIdField, transition);
+    }
+
+    /** The reload after the write, including the joined-scope rule, is {@link #update(CyodaCallContext, UUID, CyodaEntity, String)}'s. */
+    private <T extends CyodaEntity> EntityWithMetadata<T> updateByBusinessId(
+            final CyodaCallContext ctx,
+            final T entity,
+            final String businessIdField,
             @Nullable final String transition
     ) {
         // First find the entity by business ID to get its technical UUID
@@ -396,7 +499,8 @@ public class EntityServiceImpl implements EntityService {
         // Extract model info from entity
         ModelSpec modelSpec = entity.getModelKey().modelKey();
 
-        EntityWithMetadata<? extends CyodaEntity> existingEntity = findByBusinessId(modelSpec, businessIdValue, businessIdField, entityClass);
+        EntityWithMetadata<? extends CyodaEntity> existingEntity =
+                findByBusinessId(ctx, modelSpec, businessIdValue, businessIdField, entityClass, null);
         if (existingEntity == null) {
             throw new RuntimeException("Entity not found with business ID: " + businessIdValue);
         }
@@ -404,17 +508,17 @@ public class EntityServiceImpl implements EntityService {
         UUID technicalId = existingEntity.metadata().getId();
 
         // Now update using technical ID
-        return update(technicalId, entity, transition);
+        return update(ctx, technicalId, entity, transition);
     }
 
     private <T extends CyodaEntity> @NotNull String getBusinessIdValue(T entity, String businessIdField) {
         // Use Jackson to convert entity to JsonNode and extract the field
-        var entityNode = objectMapper.valueToTree(entity);
+        var entityNode = entityMapper.valueToTree(entity);
         var fieldValue = entityNode.get(businessIdField);
         if (fieldValue == null) {
             String entityString;
             try {
-                entityString = objectMapper.writeValueAsString(entityNode);
+                entityString = entityMapper.writeValueAsString(entityNode);
             } catch (JsonProcessingException e) {
                 entityString = "cannot convert entity to JSON: " + e.getMessage();
             }
@@ -426,7 +530,11 @@ public class EntityServiceImpl implements EntityService {
 
     @Override
     public UUID deleteById(@NotNull final UUID entityId) {
-        EntityDeleteResponse response = repository.deleteById(entityId).join();
+        return deleteById(callContexts.current(), entityId);
+    }
+
+    private UUID deleteById(final CyodaCallContext ctx, final UUID entityId) {
+        EntityDeleteResponse response = Futures.joinUnwrapped(repository.deleteById(ctx, entityId));
         return response.getEntityId();
     }
 
@@ -437,20 +545,21 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final String businessIdField,
             @NotNull final Class<T> entityClass
     ) {
+        CyodaCallContext ctx = callContexts.current();
         // First find the entity to get its technical ID
-        EntityWithMetadata<T> entityResponse = findByBusinessId(modelSpec, businessId, businessIdField, entityClass);
+        EntityWithMetadata<T> entityResponse = findByBusinessId(ctx, modelSpec, businessId, businessIdField, entityClass, null);
         if (entityResponse == null) {
             return false;
         }
 
         UUID entityId = entityResponse.metadata().getId();
-        deleteById(entityId);
+        deleteById(ctx, entityId);
         return true;
     }
 
     @Override
     public Integer deleteAll(@NotNull final ModelSpec modelSpec) {
-        List<EntityDeleteAllResponse> results = repository.deleteAll(modelSpec).join();
+        List<EntityDeleteAllResponse> results = Futures.joinUnwrapped(repository.deleteAll(callContexts.current(), modelSpec));
         return results.stream()
                 .map(EntityDeleteAllResponse::getNumDeleted)
                 .reduce(0, Integer::sum);
@@ -458,12 +567,21 @@ public class EntityServiceImpl implements EntityService {
 
     @Override
     public <T extends CyodaEntity> List<EntityWithMetadata<T>> save(@NotNull final Collection<T> entities) {
-        return save(entities, null, null);
+        return save(callContexts.current(), entities, null, null);
     }
 
     @Override
     public <T extends CyodaEntity> List<EntityWithMetadata<T>> save(
             @NotNull final Collection<T> entities,
+            @Nullable final Integer transactionWindow,
+            @Nullable final Long transactionTimeoutMs
+    ) {
+        return save(callContexts.current(), entities, transactionWindow, transactionTimeoutMs);
+    }
+
+    private <T extends CyodaEntity> List<EntityWithMetadata<T>> save(
+            final CyodaCallContext ctx,
+            final Collection<T> entities,
             @Nullable final Integer transactionWindow,
             @Nullable final Long transactionTimeoutMs
     ) {
@@ -474,8 +592,8 @@ public class EntityServiceImpl implements EntityService {
         T firstEntity = entities.iterator().next();
         ModelSpec modelSpec = firstEntity.getModelKey().modelKey();
 
-        List<EntityTransactionResponse> responses = repository.saveAll(
-                modelSpec, entities, transactionWindow, transactionTimeoutMs).join();
+        List<EntityTransactionResponse> responses = Futures.joinUnwrapped(repository.saveAll(
+                ctx, modelSpec, entities, transactionWindow, transactionTimeoutMs));
 
         return responses.stream().flatMap(response -> {
             // Extract entity IDs and transaction ID from response
@@ -490,8 +608,13 @@ public class EntityServiceImpl implements EntityService {
             // For each entity, get its change metadata and reload at the exact point in time
             return entityIds.stream()
                     .map(entityId -> {
+                        if (ctx.isJoined()) {
+                            // Inside the joined transaction its latest view is the right one (spec §4.4).
+                            return getById(ctx, entityId, modelSpec, entityClass, null);
+                        }
+
                         // Get entity changes metadata to find the exact timeOfChange for this transaction
-                        List<EntityChangeMeta> changes = getEntityChangesMetadata(entityId);
+                        List<EntityChangeMeta> changes = getEntityChangesMetadata(ctx, entityId, null);
 
                         // Find the change metadata for this specific transaction
                         EntityChangeMeta changeMeta = changes.stream()
@@ -500,7 +623,7 @@ public class EntityServiceImpl implements EntityService {
                                 .orElseThrow(() -> new RuntimeException("Transaction metadata not found for transaction: " + transactionId));
 
                         // Reload entity at the exact point in time when it was saved
-                        return getById(entityId, modelSpec, entityClass, changeMeta.getTimeOfChange());
+                        return getById(ctx, entityId, modelSpec, entityClass, changeMeta.getTimeOfChange());
                     });
         }).toList();
 
@@ -513,15 +636,31 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final T entity,
             @Nullable final String transition
     ) {
+        return update(callContexts.current(), entityId, entity, transition);
+    }
+
+    private <T extends CyodaEntity> EntityWithMetadata<T> update(
+            final CyodaCallContext ctx,
+            final UUID entityId,
+            final T entity,
+            @Nullable final String transition
+    ) {
         ModelSpec modelSpec = entity.getModelKey().modelKey();
 
-        EntityTransactionResponse response = repository.update(entityId, objectMapper.valueToTree(entity), transition).join();
+        EntityTransactionResponse response = Futures.joinUnwrapped(repository.update(ctx, entityId, entityMapper.valueToTree(entity), transition));
+
+        @SuppressWarnings("unchecked")
+        Class<T> entityClass = (Class<T>) entity.getClass();
+        if (ctx.isJoined()) {
+            // Inside the joined transaction its latest view is the right one (spec §4.4).
+            return getById(ctx, entityId, modelSpec, entityClass, null);
+        }
 
         // Extract transaction ID from response
         UUID transactionId = response.getTransactionInfo().getTransactionId();
 
         // Get entity changes metadata to find the exact timeOfChange for this transaction
-        List<EntityChangeMeta> changes = getEntityChangesMetadata(entityId);
+        List<EntityChangeMeta> changes = getEntityChangesMetadata(ctx, entityId, null);
 
         // Find the change metadata for this specific transaction
         EntityChangeMeta changeMeta = changes.stream()
@@ -536,9 +675,7 @@ public class EntityServiceImpl implements EntityService {
                 });
 
         // Reload entity at the exact point in time when it was updated
-        @SuppressWarnings("unchecked")
-        Class<T> entityClass = (Class<T>) entity.getClass();
-        return getById(entityId, modelSpec, entityClass, changeMeta.getTimeOfChange());
+        return getById(ctx, entityId, modelSpec, entityClass, changeMeta.getTimeOfChange());
     }
 
     @NotNull
@@ -560,12 +697,22 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final Collection<T> entities,
             @Nullable final String transition
     ) {
-        return updateAll(entities, transition, null, null);
+        return updateAll(callContexts.current(), entities, transition, null, null);
     }
 
     @Override
     public <T extends CyodaEntity> List<EntityWithMetadata<T>> updateAll(
             @NotNull final Collection<T> entities,
+            @Nullable final String transition,
+            @Nullable final Integer transactionWindow,
+            @Nullable final Long transactionTimeoutMs
+    ) {
+        return updateAll(callContexts.current(), entities, transition, transactionWindow, transactionTimeoutMs);
+    }
+
+    private <T extends CyodaEntity> List<EntityWithMetadata<T>> updateAll(
+            final CyodaCallContext ctx,
+            final Collection<T> entities,
             @Nullable final String transition,
             @Nullable final Integer transactionWindow,
             @Nullable final Long transactionTimeoutMs
@@ -577,12 +724,13 @@ public class EntityServiceImpl implements EntityService {
         T firstEntity = entities.iterator().next();
         ModelSpec modelSpec = firstEntity.getModelKey().modelKey();
 
-        List<EntityTransactionResponse> responses = repository.updateAll(
-                objectMapper.convertValue(entities, new TypeReference<>() {}),
+        List<EntityTransactionResponse> responses = Futures.joinUnwrapped(repository.updateAll(
+                ctx,
+                entityMapper.convertValue(entities, new TypeReference<>() {}),
                 transition,
                 transactionWindow,
                 transactionTimeoutMs
-        ).join();
+        ));
 
         @SuppressWarnings("unchecked")
         Class<T> entityClass = (Class<T>) firstEntity.getClass();
@@ -596,8 +744,13 @@ public class EntityServiceImpl implements EntityService {
 
                     return entityIds.stream()
                             .map(entityId -> {
+                                if (ctx.isJoined()) {
+                                    // Inside the joined transaction its latest view is the right one (spec §4.4).
+                                    return getById(ctx, entityId, modelSpec, entityClass, null);
+                                }
+
                                 // Get entity changes metadata to find the exact timeOfChange for this transaction
-                                List<EntityChangeMeta> changes = getEntityChangesMetadata(entityId);
+                                List<EntityChangeMeta> changes = getEntityChangesMetadata(ctx, entityId, null);
 
                                 // Find the change metadata for this specific transaction
                                 EntityChangeMeta changeMeta = changes.stream()
@@ -612,7 +765,7 @@ public class EntityServiceImpl implements EntityService {
                                         });
 
                                 // Reload entity at the exact point in time when it was updated
-                                return getById(entityId, modelSpec, entityClass, changeMeta.getTimeOfChange());
+                                return getById(ctx, entityId, modelSpec, entityClass, changeMeta.getTimeOfChange());
                             });
                 })
                 .toList();
@@ -624,7 +777,7 @@ public class EntityServiceImpl implements EntityService {
 
     @Override
     public List<EntityChangeMeta> getEntityChangesMetadata(@NotNull final UUID entityId) {
-        return getEntityChangesMetadata(entityId, (OffsetDateTime) null);
+        return getEntityChangesMetadata(callContexts.current(), entityId, null);
     }
 
     @Override
@@ -632,7 +785,35 @@ public class EntityServiceImpl implements EntityService {
             @NotNull final UUID entityId,
             @Nullable final OffsetDateTime pointInTime
     ) {
-        return repository.getEntityChangesMetadata(entityId, pointInTime).join();
+        return getEntityChangesMetadata(callContexts.current(), entityId, pointInTime);
+    }
+
+    private List<EntityChangeMeta> getEntityChangesMetadata(
+            final CyodaCallContext ctx,
+            final UUID entityId,
+            @Nullable final OffsetDateTime pointInTime
+    ) {
+        return Futures.joinUnwrapped(repository.getEntityChangesMetadata(ctx, entityId, pointInTime));
+    }
+
+    /**
+     * A stream inside a callout scope reads its whole result in ONE direct search of
+     * {@link CyodaRepository#DIRECT_SEARCH_LIMIT} entities, whatever the caller's pageSize: a direct search has
+     * no further pages (an async snapshot would not see the transaction's writes, spec §4.4), so paging at
+     * pageSize would end every stream after its first page. A search that fills the limit fails loudly with
+     * {@link IllegalStateException} in the repository, before anything is streamed, since whether more
+     * entities exist cannot be told. The caller's pointInTime is passed on unchanged: cyoda-go reads it as a
+     * historical view of committed state and does not see this callout's own writes either way.
+     */
+    private static SearchAndRetrievalParams joinedStreamParams(final SearchAndRetrievalParams params) {
+        return SearchAndRetrievalParams.builder()
+                .pageSize(CyodaRepository.DIRECT_SEARCH_LIMIT)
+                .pageNumber(0)
+                .pointInTime(params.pointInTime())
+                .inMemory(params.inMemory())
+                .awaitLimitMs(params.awaitLimitMs())
+                .pollIntervalMs(params.pollIntervalMs())
+                .build();
     }
 
     // ========================================

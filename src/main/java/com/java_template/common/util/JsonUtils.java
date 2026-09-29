@@ -9,14 +9,14 @@ import java.util.Map;
 
 /**
  * ABOUTME: Utility component providing JSON manipulation and conversion operations
- * using Jackson ObjectMapper for entity and payload processing.
+ * with the framework's protocol mapper, for the JSON bodies sent to and read from Cyoda.
  */
 @Component
 public class JsonUtils {
     private final ObjectMapper objectMapper;
 
-    public JsonUtils(CyodaObjectMapper wireMapper) {
-        this.objectMapper = wireMapper.mapper();
+    public JsonUtils(CyodaObjectMapper mappers) {
+        this.objectMapper = mappers.protocol();
     }
 
     public String mapToJson(Map<String, Object> map) {

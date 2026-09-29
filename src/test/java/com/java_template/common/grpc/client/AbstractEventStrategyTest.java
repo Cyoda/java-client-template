@@ -243,11 +243,11 @@ class AbstractEventStrategyTest {
 
     @Test
     void anErrorResponseCarriesAFreshIdTheRequestIdAndTheEntityId() throws Exception {
-        CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
-        ObjectMapper om = wireMapper.mapper();
+        CyodaObjectMapper mappers = CyodaObjectMapper.standalone();
+        ObjectMapper om = mappers.protocol();
         OperationFactory factory = mock(OperationFactory.class);
         lenient().when(factory.getProcessorForModel(any())).thenThrow(new IllegalStateException("boom"));
-        ProcessorEventStrategy strategy = new ProcessorEventStrategy(factory, wireMapper, new CyodaContextFactory(wireMapper));
+        ProcessorEventStrategy strategy = new ProcessorEventStrategy(factory, mappers, new CyodaContextFactory(mappers));
 
         String entityId = UUID.randomUUID().toString();
         ObjectNode request = om.createObjectNode();
@@ -285,11 +285,11 @@ class AbstractEventStrategyTest {
 
     @Test
     void aFailedCalloutIsLoggedWithoutItsTxTokenOrTheCallersIdentity() throws Exception {
-        CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
-        ObjectMapper om = wireMapper.mapper();
+        CyodaObjectMapper mappers = CyodaObjectMapper.standalone();
+        ObjectMapper om = mappers.protocol();
         OperationFactory factory = mock(OperationFactory.class);
         lenient().when(factory.getProcessorForModel(any())).thenThrow(new IllegalStateException("boom"));
-        ProcessorEventStrategy strategy = new ProcessorEventStrategy(factory, wireMapper, new CyodaContextFactory(wireMapper));
+        ProcessorEventStrategy strategy = new ProcessorEventStrategy(factory, mappers, new CyodaContextFactory(mappers));
 
         ObjectNode request = om.createObjectNode();
         request.put("id", "evt-1");

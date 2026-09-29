@@ -24,11 +24,23 @@
           "name": "approve", "next": "approved", "manual": true,
           "criterion": {"type": "function", "function": {"name": "ItFlagCriterion",
             "config": {"attachEntity": true, "calculationNodesTags": "${tag}", "responseTimeoutMs": 10000, "retryPolicy": "NONE"}}}
+        },
+        {
+          "name": "cascade", "next": "cascaded", "manual": true,
+          "processors": [{"type": "externalized", "name": "ItCascadeProcessor", "executionMode": "SYNC",
+            "config": {"attachEntity": true, "calculationNodesTags": "${tag}", "responseTimeoutMs": 60000, "retryPolicy": "NONE"}}]
+        },
+        {
+          "name": "probe", "next": "probed", "manual": true,
+          "processors": [{"type": "externalized", "name": "ItAuthProbeProcessor", "executionMode": "SYNC",
+            "config": {"attachEntity": true, "calculationNodesTags": "${tag}", "responseTimeoutMs": 10000, "retryPolicy": "NONE"}}]
         }
       ]
     },
     "processed": {"transitions": []},
     "failed": {"transitions": []},
-    "approved": {"transitions": []}
+    "approved": {"transitions": []},
+    "cascaded": {"transitions": []},
+    "probed": {"transitions": []}
   }
 }

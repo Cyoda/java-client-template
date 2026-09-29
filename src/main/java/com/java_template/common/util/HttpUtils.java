@@ -1,17 +1,20 @@
 package com.java_template.common.util;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.java_template.common.auth.CyodaTokenSource;
+import com.java_template.common.call.CyodaCallContext;
 import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaObjectMapper;
+import com.java_template.common.exception.CyodaCredentialException;
+import com.java_template.common.exception.CyodaErrors;
+import com.java_template.common.exception.CyodaRetryableException;
+import com.java_template.common.call.CyodaGrpcCalls;
 import com.java_template.common.util.http.ContentTypeAwareParser;
 import com.java_template.common.util.http.ResponseBodyParser;
 import org.slf4j.LoggerFactory;
 import org.slf4j.Logger;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -19,14 +22,28 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 
 /**
  * ABOUTME: Utility component providing HTTP client operations for REST API communication
  * with configurable response parsing strategies for different content types.
+ * <p>
+ * Every request carries the caller's {@link CyodaCallContext} (spec §4.2): the Authorization header
+ * comes from the context's credential, and X-Tx-Token is attached only when the context is joined
+ * and the path is tx-routed ({@link #isTxRouted(String)}). A 401 against an M2M credential invalidates
+ * the cached token and retries once, but only outside a joined call; inside a joined call the failure
+ * is mapped by {@link CyodaErrors#fromHttp} to {@code CyodaCalloutEndedException} instead.
+ * <p>
+ * A request carrying a credential (M2M or forwarded) goes only to the origin of {@code app.config.cyoda-api-url};
+ * any other origin is refused with {@link IllegalArgumentException} before any network I/O.
  */
 @Component
 public class HttpUtils {
@@ -34,136 +51,248 @@ public class HttpUtils {
     private final Logger logger = LoggerFactory.getLogger(HttpUtils.class);
     private final ObjectMapper om;
     private final JsonUtils jsonUtils;
+    private final CyodaTokenSource tokenSource;
     private final ResponseBodyParser defaultParser;
+    /** Origin of app.config.cyoda-api-url: the only one a Cyoda credential is ever sent to. */
+    private final URI cyodaOrigin;
+    /** Bound on each request, response included: app.config.grpc-call-deadline-ms, as for a unary gRPC call. */
+    private final Duration requestTimeout;
 
-    public HttpUtils(JsonUtils jsonUtils, CyodaObjectMapper wireMapper, Config config) {
+    public HttpUtils(JsonUtils jsonUtils, CyodaObjectMapper mappers, Config config, CyodaTokenSource tokenSource) {
         this.jsonUtils = jsonUtils;
-        this.om = wireMapper.mapper();
+        this.om = mappers.protocol();
+        this.tokenSource = tokenSource;
         this.defaultParser = ContentTypeAwareParser.createDefault(om);
         this.client = SslUtils.createHttpClient(config);
+        this.cyodaOrigin = config.getCyodaApiUrl() == null ? null : URI.create(config.getCyodaApiUrl());
+        this.requestTimeout = Duration.ofMillis(config.getGrpcCallDeadlineMs());
     }
 
-    private String ensureBearerToken(String token) {
-        return token.startsWith("Bearer") ? token : "Bearer " + token;
+    /** True for a path routed to the transaction owner: entity, search or message (spec §4.4). */
+    public static boolean isTxRouted(String path) {
+        String p = path == null ? "" : (path.startsWith("/") ? path.substring(1) : path);
+        return p.startsWith("entity") || p.startsWith("search") || p.startsWith("message");
     }
 
-    private HttpRequest.Builder createRequestBuilder(String url, String token, String method) {
+    /** A request ready to send, with the M2M token it carries (null for another credential). */
+    private record Prepared(HttpRequest request, String m2mToken) {
+    }
+
+    private Prepared createRequest(CyodaCallContext ctx, String url, String path, String method, Object data) {
+        URI target = URI.create(url);
+        requireCyodaOriginForCredential(ctx, target);
         HttpRequest.Builder builder = HttpRequest.newBuilder()
-                .uri(URI.create(url))
+                .uri(target)
+                .timeout(requestTimeout)
                 .header("Content-Type", "application/json");
-        if (token != null && !token.isBlank()) {
-            builder.header("Authorization", ensureBearerToken(token));
+        String m2mToken = null;
+        switch (ctx.credential()) {
+            case CyodaCallContext.None ignored -> { }
+            case CyodaCallContext.M2m ignored -> {
+                m2mToken = tokenSource.bearerToken()
+                        .orElseThrow(() -> new CyodaCredentialException("no M2M token source is configured"));
+                builder.header("Authorization", "Bearer " + m2mToken);
+            }
+            case CyodaCallContext.Forward forward -> {
+                if (forward.token() == null || forward.token().isBlank()) {
+                    // as CyodaCallInterceptor does: never send a request that would go out unauthenticated
+                    throw new CyodaCredentialException("forwarded token is blank");
+                }
+                builder.header("Authorization", "Bearer " + forward.token());
+            }
         }
-        return builder.method(method, HttpRequest.BodyPublishers.noBody());
-    }
-
-
-    private HttpRequest createRequest(String url, String token, String method, Object data) {
-        HttpRequest.Builder builder = createRequestBuilder(url, token, method);
-        if (data != null) {
-            builder.method(method, HttpRequest.BodyPublishers.ofString(jsonUtils.toJson(data), StandardCharsets.UTF_8));
+        if (ctx.isJoined() && isTxRouted(path)) {
+            builder.header("X-Tx-Token", ctx.txToken());
         }
-        return builder.build();
+        HttpRequest.BodyPublisher body = data == null
+                ? HttpRequest.BodyPublishers.noBody()
+                : HttpRequest.BodyPublishers.ofString(jsonUtils.toJson(data), StandardCharsets.UTF_8);
+        return new Prepared(builder.method(method, body).build(), m2mToken);
     }
 
-    private CompletableFuture<ObjectNode> sendRequest(String url, String token, String method, Object data,
-                                                       ResponseBodyParser parser) {
-        HttpRequest request = createRequest(url, token, method, data);
-        return client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                .thenApply(response -> {
-                    int statusCode = response.statusCode();
-                    String responseBody = response.body();
-
-                    if (statusCode >= 200 && statusCode < 300) {
-                        logger.debug("[{}] {} {} succeeded", statusCode, method, url);
-                    } else if (statusCode >= 300 && statusCode < 400) {
-                        logger.info("[{}] {} {} redirect: {}", statusCode, method, url, responseBody);
-                    } else if (statusCode >= 400 && statusCode < 500) {
-                        throw new ResponseStatusException(HttpStatus.valueOf(statusCode), extractErrorMessage(responseBody));
-                    } else if (statusCode >= 500) {
-                        throw new ResponseStatusException(HttpStatus.valueOf(statusCode), extractErrorMessage(responseBody));
-                    }
-
-                    String contentType = response.headers()
-                            .firstValue("Content-Type")
-                            .orElse(null);
-
-                    return parser.parse(responseBody, contentType, statusCode);
-                });
+    private CompletableFuture<HttpResponse<String>> send(HttpRequest request) {
+        return client.sendAsync(request, HttpResponse.BodyHandlers.ofString());
     }
 
-    private CompletableFuture<ObjectNode> sendRequest(String url, String token, String method, Object data) {
-        return sendRequest(url, token, method, data, defaultParser);
+    /**
+     * Sends the request, retrying a {@code TOO_MANY_JOINED_REQUESTS} refusal up to
+     * {@link CyodaGrpcCalls#JOINED_RETRIES} times with the gRPC backoff. That refusal is safe to resend: cyoda-go's
+     * txjoin middleware answers it from {@code Joiner.CheckRoom}, before it reads the request body, or from the
+     * lock gate in {@code Joiner.RunVerified}, before the handler runs, so nothing was applied
+     * ({@code internal/httpmw/txjoin_mw.go}; {@code cyoda help errors TOO_MANY_JOINED_REQUESTS}: "The refused
+     * callback changes nothing"). {@code TRANSACTION_NODE_UNAVAILABLE} is never retried here: on REST the
+     * reverse proxy may answer it after the owning node applied the write.
+     */
+    private CompletableFuture<ObjectNode> sendRequest(CyodaCallContext ctx, String url, String path, String method,
+                                                       Object data, ResponseBodyParser parser) {
+        return sendRequest(ctx, url, path, method, data, parser, 0);
+    }
+
+    private CompletableFuture<ObjectNode> sendRequest(CyodaCallContext ctx, String url, String path, String method,
+                                                       Object data, ResponseBodyParser parser, int attempt) {
+        return sendOnce(ctx, url, path, method, data, parser).exceptionallyCompose(failure -> {
+            Throwable cause = failure instanceof CompletionException && failure.getCause() != null ? failure.getCause() : failure;
+            if (cause instanceof CyodaRetryableException retryable
+                    && "TOO_MANY_JOINED_REQUESTS".equals(retryable.getErrorCode())
+                    && attempt < CyodaGrpcCalls.JOINED_RETRIES) {
+                // A plain delayedExecutor() runs its callback on ForkJoinPool.commonPool, and the
+                // retried sendOnce -> createRequest can block that thread on an M2M token fetch,
+                // stalling the app's parallel streams and default async tasks. Run it on a fresh
+                // virtual thread instead (spec §4.5).
+                Executor delayed = CompletableFuture.delayedExecutor(
+                        CyodaGrpcCalls.joinedRetryBackoffMs(attempt), TimeUnit.MILLISECONDS,
+                        r -> Thread.ofVirtual().name("cyoda-rest-retry").start(r));
+                return CompletableFuture.supplyAsync(() -> null, delayed)
+                        .thenCompose(ignored -> sendRequest(ctx, url, path, method, data, parser, attempt + 1));
+            }
+            return CompletableFuture.failedFuture(cause);
+        });
+    }
+
+    private CompletableFuture<ObjectNode> sendOnce(CyodaCallContext ctx, String url, String path, String method,
+                                                    Object data, ResponseBodyParser parser) {
+        Prepared first = createRequest(ctx, url, path, method, data);
+        return send(first.request()).thenCompose(response -> {
+            if (response.statusCode() == 401 && first.m2mToken() != null) {
+                // only the token cyoda refused: a token another thread fetched since is kept
+                tokenSource.invalidate(first.m2mToken());
+                if (!ctx.isJoined()) {
+                    return send(createRequest(ctx, url, path, method, data).request());
+                }
+            }
+            return CompletableFuture.completedFuture(response);
+        }).thenApply(response -> {
+            int statusCode = response.statusCode();
+            String responseBody = response.body();
+
+            if (statusCode >= 200 && statusCode < 300) {
+                logger.debug("[{}] {} {} succeeded", statusCode, method, url);
+            } else if (statusCode >= 300 && statusCode < 400) {
+                logger.info("[{}] {} {} redirect: {}", statusCode, method, url, responseBody);
+            } else if (statusCode >= 400) {
+                throw CyodaErrors.fromHttp(statusCode, responseBody, ctx.isJoined());
+            }
+
+            String contentType = response.headers()
+                    .firstValue("Content-Type")
+                    .orElse(null);
+
+            return parser.parse(responseBody, contentType, statusCode);
+        });
+    }
+
+    private CompletableFuture<ObjectNode> sendRequest(CyodaCallContext ctx, String url, String path, String method, Object data) {
+        return sendRequest(ctx, url, path, method, data, defaultParser);
     }
 
     // Public API methods with default parser
 
-    public CompletableFuture<ObjectNode> sendGetRequest(String token, String apiUrl, String path, Map<String, String> params) {
+    public CompletableFuture<ObjectNode> sendGetRequest(CyodaCallContext ctx, String apiUrl, String path, Map<String, String> params) {
         String fullUrl = buildUrlWithParams(apiUrl, path, params);
-        return sendRequest(fullUrl, token, "GET", null);
+        return sendRequest(ctx, fullUrl, path, "GET", null);
     }
 
-    public CompletableFuture<ObjectNode> sendGetRequest(String token, String apiUrl, String path) {
+    public CompletableFuture<ObjectNode> sendGetRequest(CyodaCallContext ctx, String apiUrl, String path) {
         String fullUrl = buildUrlWithParams(apiUrl, path, null);
-        return sendRequest(fullUrl, token, "GET", null);
+        return sendRequest(ctx, fullUrl, path, "GET", null);
     }
 
-    public CompletableFuture<ObjectNode> sendPostRequest(String token, String apiUrl, String path, Object data) {
+    public CompletableFuture<ObjectNode> sendPostRequest(CyodaCallContext ctx, String apiUrl, String path, Object data) {
         String fullUrl = buildUrlWithParams(apiUrl, path, null);
-        return sendRequest(fullUrl, token, "POST", data);
+        return sendRequest(ctx, fullUrl, path, "POST", data);
     }
 
-    public CompletableFuture<ObjectNode> sendPostRequest(String token, String apiUrl, String path, Object data, Map<String, String> params) {
+    public CompletableFuture<ObjectNode> sendPostRequest(CyodaCallContext ctx, String apiUrl, String path, Object data, Map<String, String> params) {
         String fullUrl = buildUrlWithParams(apiUrl, path, params);
-        return sendRequest(fullUrl, token, "POST", data);
+        return sendRequest(ctx, fullUrl, path, "POST", data);
     }
 
-    public CompletableFuture<ObjectNode> sendPutRequest(String token, String apiUrl, String path, Object data) {
+    public CompletableFuture<ObjectNode> sendPutRequest(CyodaCallContext ctx, String apiUrl, String path, Object data) {
         String fullUrl = buildUrlWithParams(apiUrl, path, null);
-        return sendRequest(fullUrl, token, "PUT", data);
+        return sendRequest(ctx, fullUrl, path, "PUT", data);
     }
 
-    public CompletableFuture<ObjectNode> sendDeleteRequest(String token, String apiUrl, String path) {
+    public CompletableFuture<ObjectNode> sendDeleteRequest(CyodaCallContext ctx, String apiUrl, String path) {
         String fullUrl = buildUrlWithParams(apiUrl, path, null);
-        return sendRequest(fullUrl, token, "DELETE", null);
+        return sendRequest(ctx, fullUrl, path, "DELETE", null);
     }
 
     // Public API methods with custom parser
 
-    public CompletableFuture<ObjectNode> sendGetRequest(String token, String apiUrl, String path,
+    public CompletableFuture<ObjectNode> sendGetRequest(CyodaCallContext ctx, String apiUrl, String path,
                                                          Map<String, String> params, ResponseBodyParser parser) {
         String fullUrl = buildUrlWithParams(apiUrl, path, params);
-        return sendRequest(fullUrl, token, "GET", null, parser);
+        return sendRequest(ctx, fullUrl, path, "GET", null, parser);
     }
 
-    public CompletableFuture<ObjectNode> sendGetRequest(String token, String apiUrl, String path,
+    public CompletableFuture<ObjectNode> sendGetRequest(CyodaCallContext ctx, String apiUrl, String path,
                                                          ResponseBodyParser parser) {
         String fullUrl = buildUrlWithParams(apiUrl, path, null);
-        return sendRequest(fullUrl, token, "GET", null, parser);
+        return sendRequest(ctx, fullUrl, path, "GET", null, parser);
     }
 
-    public CompletableFuture<ObjectNode> sendPostRequest(String token, String apiUrl, String path,
+    public CompletableFuture<ObjectNode> sendPostRequest(CyodaCallContext ctx, String apiUrl, String path,
                                                           Object data, ResponseBodyParser parser) {
         String fullUrl = buildUrlWithParams(apiUrl, path, null);
-        return sendRequest(fullUrl, token, "POST", data, parser);
+        return sendRequest(ctx, fullUrl, path, "POST", data, parser);
     }
 
-    public CompletableFuture<ObjectNode> sendPostRequest(String token, String apiUrl, String path, Object data,
+    public CompletableFuture<ObjectNode> sendPostRequest(CyodaCallContext ctx, String apiUrl, String path, Object data,
                                                           Map<String, String> params, ResponseBodyParser parser) {
         String fullUrl = buildUrlWithParams(apiUrl, path, params);
-        return sendRequest(fullUrl, token, "POST", data, parser);
+        return sendRequest(ctx, fullUrl, path, "POST", data, parser);
     }
 
-    public CompletableFuture<ObjectNode> sendPutRequest(String token, String apiUrl, String path,
+    public CompletableFuture<ObjectNode> sendPutRequest(CyodaCallContext ctx, String apiUrl, String path,
                                                          Object data, ResponseBodyParser parser) {
         String fullUrl = buildUrlWithParams(apiUrl, path, null);
-        return sendRequest(fullUrl, token, "PUT", data, parser);
+        return sendRequest(ctx, fullUrl, path, "PUT", data, parser);
     }
 
-    public CompletableFuture<ObjectNode> sendDeleteRequest(String token, String apiUrl, String path,
+    public CompletableFuture<ObjectNode> sendDeleteRequest(CyodaCallContext ctx, String apiUrl, String path,
                                                             ResponseBodyParser parser) {
         String fullUrl = buildUrlWithParams(apiUrl, path, null);
-        return sendRequest(fullUrl, token, "DELETE", null, parser);
+        return sendRequest(ctx, fullUrl, path, "DELETE", null, parser);
+    }
+
+    /**
+     * Refuses a request that would carry a Cyoda credential (M2M or a forwarded user token) to any origin but
+     * the configured {@code cyoda-api-url}: those tokens are Cyoda's, and must never reach another host. Checked
+     * before the token is resolved and before any network I/O. A joined call is held to the same rule even with
+     * no credential, because its tx-token is a bearer for the transaction. A request with neither may go anywhere.
+     */
+    private void requireCyodaOriginForCredential(CyodaCallContext ctx, URI target) {
+        if (ctx.credential() instanceof CyodaCallContext.None && !ctx.isJoined()) {
+            return;
+        }
+        if (cyodaOrigin == null || !sameOrigin(cyodaOrigin, target)) {
+            throw new IllegalArgumentException("refusing to send a Cyoda credential or tx-token to " + describeOrigin(target)
+                    + ": credentials go only to the configured app.config.cyoda-api-url origin ("
+                    + (cyodaOrigin == null ? "not set" : describeOrigin(cyodaOrigin)) + ")");
+        }
+    }
+
+    /** Same scheme, host and port (default ports made explicit; scheme and host compared case-insensitively). */
+    static boolean sameOrigin(URI a, URI b) {
+        return a.getScheme() != null && a.getScheme().equalsIgnoreCase(b.getScheme())
+                && a.getHost() != null && a.getHost().equalsIgnoreCase(b.getHost())
+                && effectivePort(a) == effectivePort(b);
+    }
+
+    private static int effectivePort(URI uri) {
+        if (uri.getPort() != -1) {
+            return uri.getPort();
+        }
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        return switch (scheme) {
+            case "http" -> 80;
+            case "https" -> 443;
+            default -> -1;
+        };
+    }
+
+    private static String describeOrigin(URI uri) {
+        return uri.getScheme() + "://" + uri.getHost() + (uri.getPort() == -1 ? "" : ":" + uri.getPort());
     }
 
     private String buildUrlWithParams(String apiUrl, String path, Map<String, String> params) {
@@ -179,30 +308,4 @@ public class HttpUtils {
         return fullUrl + "?" + queryString;
     }
 
-    /**
-     * The error message of a failed response. cyoda-go's problem+json carries its error code in
-     * {@code properties.errorCode}; when present it prefixes the message ({@code "MODEL_HAS_ENTITIES: cannot
-     * unlock: 1 entities exist"}), so callers can tell refusals apart by code, not by wording.
-     */
-    private String extractErrorMessage(String responseBody) {
-        try {
-            JsonNode errorNode = om.readTree(responseBody);
-            String message = null;
-            if (errorNode.has("errorMessage")) {
-                message = errorNode.get("errorMessage").asText();
-            } else if (errorNode.has("message")) {
-                message = errorNode.get("message").asText();
-            } else if (errorNode.has("detail")) {
-                message = errorNode.get("detail").asText();
-            }
-            JsonNode errorCode = errorNode.path("properties").path("errorCode");
-            if (errorCode.isTextual() && !errorCode.asText().isBlank()) {
-                return message == null ? errorCode.asText() : errorCode.asText() + ": " + message;
-            }
-            if (message != null) {
-                return message;
-            }
-        } catch (Exception ignored) {}
-        return responseBody;
-    }
 }

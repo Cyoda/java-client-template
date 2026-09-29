@@ -80,7 +80,10 @@ app:
     grpc-address: grpc-${app.config.cyoda-host}
     grpc-server-port: 443
     grpc-tls: true
-    # Deadline for each unary gRPC call to Cyoda (must be > 0); the server-streaming collection calls have none
+    # Deadline for each unary gRPC call to Cyoda (must be > 0). The multi-reply (server-streaming) collection calls have no
+    # deadline, since they grow with the result; this instead bounds how long one waits for the connection to
+    # Cyoda before it starts (then it fails as unreachable). Inside a processor/criterion callout they carry it as
+    # a deadline too. Also bounds each REST request to Cyoda and the read of the M2M token request.
     grpc-call-deadline-ms: 120000
     grpc-processor-tag: cyoda_application
     grpc-communication-data-format: JSON
@@ -91,7 +94,10 @@ app:
     grpc-keep-alive-timeout-seconds: 10
     grpc-idle-timeout-seconds: 300
 
-    # Processor/criteria/control threads: virtual or platform. Either way each is a fixed pool of the size below.
+    # Processor/criteria threads: virtual (one virtual thread per task) or platform (fixed pools below).
+    # platform sizing rule: a nested cascade holds one processor thread per level while it waits for the level
+    # below, so processor-thread-pool must leave at least one free thread per cascade level (per concurrent
+    # cascade), or the cascades deadlock until their callouts time out. virtual mode has no such limit.
     execution-mode: virtual
     processor-thread-pool: 20
     criteria-thread-pool: 20

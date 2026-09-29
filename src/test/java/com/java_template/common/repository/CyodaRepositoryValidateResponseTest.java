@@ -5,11 +5,13 @@ import org.cyoda.cloud.api.event.common.Error;
 import org.cyoda.cloud.api.event.entity.EntityTransactionResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import com.java_template.common.grpc.client.connection.ChannelReadiness;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.java_template.common.auth.CyodaTokenSource;
 import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.config.Config;
 import com.java_template.common.grpc.client.event_handling.CloudEventBuilder;
@@ -27,11 +29,13 @@ import static org.junit.jupiter.api.Assertions.*;
 @ExtendWith(MockitoExtension.class)
 class CyodaRepositoryValidateResponseTest {
 
-    @Spy CyodaObjectMapper wireMapper = CyodaObjectMapper.standalone();
+    @Spy CyodaObjectMapper mappers = CyodaObjectMapper.standalone();
     @Mock CloudEventsServiceGrpc.CloudEventsServiceBlockingStub stub;
     @Mock CloudEventBuilder cloudEventBuilder;
     @Mock CloudEventParser cloudEventParser;
     @Mock Config config;
+    @Mock CyodaTokenSource tokenSource;
+    @Mock ChannelReadiness channelReadiness;
 
     @InjectMocks CyodaRepository repository;
 
@@ -40,7 +44,7 @@ class CyodaRepositoryValidateResponseTest {
         var response = new EntityTransactionResponse();
         response.setSuccess(true);
 
-        EntityTransactionResponse result = repository.validateResponse(response);
+        EntityTransactionResponse result = repository.validateResponse(response, false);
 
         assertSame(response, result);
     }
@@ -50,7 +54,7 @@ class CyodaRepositoryValidateResponseTest {
         var response = new EntityTransactionResponse();
         response.setSuccess(null);
 
-        EntityTransactionResponse result = repository.validateResponse(response);
+        EntityTransactionResponse result = repository.validateResponse(response, false);
 
         assertSame(response, result);
     }
@@ -68,7 +72,7 @@ class CyodaRepositoryValidateResponseTest {
 
         CyodaOperationException ex = assertThrows(
                 CyodaOperationException.class,
-                () -> repository.validateResponse(response)
+                () -> repository.validateResponse(response, false)
         );
 
         assertEquals("SERVER_ERROR", ex.getErrorCode());
@@ -84,7 +88,7 @@ class CyodaRepositoryValidateResponseTest {
 
         CyodaOperationException ex = assertThrows(
                 CyodaOperationException.class,
-                () -> repository.validateResponse(response)
+                () -> repository.validateResponse(response, false)
         );
 
         assertEquals("UNKNOWN", ex.getErrorCode());
@@ -97,7 +101,7 @@ class CyodaRepositoryValidateResponseTest {
         response.setSuccess(true);
         response.setWarnings(List.of("deprecation notice", "slow query"));
 
-        EntityTransactionResponse result = repository.validateResponse(response);
+        EntityTransactionResponse result = repository.validateResponse(response, false);
 
         assertSame(response, result);
     }
@@ -116,7 +120,7 @@ class CyodaRepositoryValidateResponseTest {
 
         CyodaOperationException ex = assertThrows(
                 CyodaOperationException.class,
-                () -> repository.validateResponse(response)
+                () -> repository.validateResponse(response, false)
         );
 
         assertEquals("FAIL", ex.getErrorCode());

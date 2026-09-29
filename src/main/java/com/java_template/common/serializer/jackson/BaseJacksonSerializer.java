@@ -3,6 +3,7 @@ package com.java_template.common.serializer.jackson;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.java_template.common.config.CyodaObjectMapper;
 import com.java_template.common.workflow.CyodaEntity;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
@@ -17,10 +18,14 @@ import java.util.function.Function;
 public abstract class BaseJacksonSerializer<TRequest> {
 
     protected final Logger logger = LoggerFactory.getLogger(this.getClass());
+    /** The framework's mappers: the app's for entity data, the protocol mapper for Cyoda metadata. */
+    protected final CyodaObjectMapper mappers;
+    /** The app's mapper ({@link CyodaObjectMapper#entities()}), for converting entities to and from JSON trees. */
     protected final ObjectMapper objectMapper;
 
-    protected BaseJacksonSerializer(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
+    protected BaseJacksonSerializer(CyodaObjectMapper mappers) {
+        this.mappers = mappers;
+        this.objectMapper = mappers.entities();
     }
 
     protected <T extends CyodaEntity> T extractEntity(

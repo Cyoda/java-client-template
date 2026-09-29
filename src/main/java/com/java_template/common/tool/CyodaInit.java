@@ -5,9 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
-import com.java_template.common.auth.CyodaTokenSource;
+import com.java_template.common.call.CyodaCallContext;
+import com.java_template.common.call.CyodaCallContexts;
 import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaObjectMapper;
+import com.java_template.common.exception.CyodaHttpException;
 import com.java_template.common.util.HttpUtils;
 import com.java_template.common.workflow.CyodaEntity;
 import org.cyoda.cloud.api.event.common.ModelSpec;
@@ -19,7 +21,6 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.core.type.filter.AssignableTypeFilter;
 import org.springframework.stereotype.Component;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.io.File;
 import java.io.IOException;
@@ -29,6 +30,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -55,14 +57,14 @@ public class CyodaInit {
     public static final int THREAD_POOL_SIZE = 20;
 
     private final HttpUtils httpUtils;
-    private final CyodaTokenSource tokenSource;
+    private final CyodaCallContexts callContexts;
     private final ObjectMapper objectMapper;
     private final Config config;
 
-    public CyodaInit(HttpUtils httpUtils, CyodaTokenSource tokenSource, CyodaObjectMapper wireMapper, Config config) {
+    public CyodaInit(HttpUtils httpUtils, CyodaCallContexts callContexts, CyodaObjectMapper mappers, Config config) {
         this.httpUtils = httpUtils;
-        this.tokenSource = tokenSource;
-        this.objectMapper = wireMapper.mapper();
+        this.callContexts = callContexts;
+        this.objectMapper = mappers.protocol();
         this.config = config;
     }
 
@@ -72,8 +74,8 @@ public class CyodaInit {
             logger.info("⚠️  Recreate models flag is enabled - existing models will be deleted and recreated");
         }
 
-        String token = tokenSource.bearerToken().orElse(null);
-        initEntitiesSchemaFromEntities(token, config);
+        CyodaCallContext ctx = callContexts.current();
+        initEntitiesSchemaFromEntities(ctx, config);
         logger.info("✅ Workflow import process completed.");
     }
 
@@ -81,7 +83,7 @@ public class CyodaInit {
     /**
      * Initialize entities schema from discovered entities using their getModelKey() method.
      */
-    private void initEntitiesSchemaFromEntities(String token, CyodaInitConfig config) {
+    private void initEntitiesSchemaFromEntities(CyodaCallContext ctx, CyodaInitConfig config) {
         logger.info("🔍 Discovering entities dynamically...");
 
         List<ModelSpec> modelSpecs = config.entitySourceDir() != null
@@ -101,7 +103,7 @@ public class CyodaInit {
                     logger.info("✅ Found workflow for entity: {} (version: {})", modelSpec.getName(), modelSpec.getVersion());
                     final String json = workflowJson.get();
                     CompletableFuture<Void> future = CompletableFuture.runAsync(() ->
-                                    importWorkflowForEntity(json, modelSpec.getName(), modelSpec.getVersion(), token, config),
+                                    importWorkflowForEntity(json, modelSpec.getName(), modelSpec.getVersion(), ctx, config),
                             executor
                     );
                     futures.add(future);
@@ -209,18 +211,18 @@ public class CyodaInit {
         try {
             PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
             Resource[] resources = resolver.getResources(CLASSPATH_WORKFLOW_PATTERN);
-            String entityNameLower = entityName.toLowerCase();
+            String entityNameLower = entityName.toLowerCase(Locale.ROOT);
 
             for (Resource resource : resources) {
                 String fileName = resource.getFilename();
                 if (fileName == null) continue;
 
-                String fileNameLower = fileName.toLowerCase();
+                String fileNameLower = fileName.toLowerCase(Locale.ROOT);
                 String fileNameWithoutExtension = fileNameLower.endsWith(".json")
                         ? fileNameLower.substring(0, fileNameLower.length() - 5)
                         : fileNameLower;
 
-                String pathStr = resource.getURL().toString().toLowerCase();
+                String pathStr = resource.getURL().toString().toLowerCase(Locale.ROOT);
                 if (fileNameWithoutExtension.equals(entityNameLower) &&
                         (pathStr.contains("/version_" + version + "/") ||
                          pathStr.contains("/v" + version + "/"))) {
@@ -261,11 +263,11 @@ public class CyodaInit {
 
         try (Stream<Path> workflowFilesStream = Files.walk(workflowDir)) {
             return workflowFilesStream
-                    .filter(path -> path.toString().toLowerCase().endsWith(".json"))
+                    .filter(path -> path.toString().toLowerCase(Locale.ROOT).endsWith(".json"))
                     .filter(path -> {
-                        String pathStr = path.toString().toLowerCase();
-                        String fileName = path.getFileName().toString().toLowerCase();
-                        String entityNameLower = entityName.toLowerCase();
+                        String pathStr = path.toString().toLowerCase(Locale.ROOT);
+                        String fileName = path.getFileName().toString().toLowerCase(Locale.ROOT);
+                        String entityNameLower = entityName.toLowerCase(Locale.ROOT);
 
                         String fileNameWithoutExtension = fileName.endsWith(".json")
                                 ? fileName.substring(0, fileName.length() - 5)
@@ -286,12 +288,12 @@ public class CyodaInit {
      * Import workflow for a specific entity.
      * Supports workflow files containing either a single workflow object or an array of workflows.
      */
-    private void importWorkflowForEntity(String dtoContent, String entityName, Integer version, String token, CyodaInitConfig initConfig) {
+    private void importWorkflowForEntity(String dtoContent, String entityName, Integer version, CyodaCallContext ctx, CyodaInitConfig initConfig) {
         logger.info("📄 Processing workflow for entity: {}, version: {}", entityName, version);
 
         // The entity model must exist before a workflow can be imported for it; cyoda-go's
         // workflow/import endpoint verifies model existence and returns 404 MODEL_NOT_FOUND otherwise.
-        checkAndCreateEntityModel(token, entityName, version, initConfig);
+        checkAndCreateEntityModel(ctx, entityName, version, initConfig);
 
         JsonNode dtoJson;
         try {
@@ -325,7 +327,7 @@ public class CyodaInit {
         String importPath = String.format("model/%s/%s/workflow/import", entityName, version);
         logger.debug("🔗 Using import endpoint: {}", importPath);
 
-        JsonNode response = httpUtils.sendPostRequest(token, config.getCyodaApiUrl(), importPath, wrappedContentJson).join();
+        JsonNode response = httpUtils.sendPostRequest(ctx, config.getCyodaApiUrl(), importPath, wrappedContentJson).join();
 
         int statusCode = response.get("status").asInt();
         if (statusCode >= 200 && statusCode < 300) {
@@ -342,35 +344,35 @@ public class CyodaInit {
     /**
      * Checks if entity model exists and creates it if needed
      */
-    private void checkAndCreateEntityModel(String token, String entityName, Integer version, CyodaInitConfig config) {
+    private void checkAndCreateEntityModel(CyodaCallContext ctx, String entityName, Integer version, CyodaInitConfig config) {
         String exportPath = String.format("model/export/SIMPLE_VIEW/%s/%s", entityName, version);
         logger.debug("🔍 Checking if entity model exists: {}", exportPath);
 
         // Only the existence check itself is wrapped: a failure from deleteEntityModel or
         // createEntityModel below must propagate as-is, not be relabelled "Failed to check
         // entity model" (that used to hide, for example, a 409 MODEL_HAS_ENTITIES from delete).
-        boolean exists = entityModelExists(token, entityName, version, exportPath);
+        boolean exists = entityModelExists(ctx, entityName, version, exportPath);
 
         if (exists) {
             if (config.recreateModels()) {
                 logger.info("🗑️  Entity model exists for: {} (version: {}), deleting due to --recreate-models flag", entityName, version);
-                deleteEntityModel(token, entityName, version);
+                deleteEntityModel(ctx, entityName, version);
                 logger.info("📝 Creating entity model for: {} (version: {})", entityName, version);
-                createEntityModel(token, entityName, version);
+                createEntityModel(ctx, entityName, version);
             } else {
                 logger.info("✅ Entity model already exists for: {} (version: {})", entityName, version);
             }
         } else {
             logger.info("📝 Entity model not found, creating for: {} (version: {})", entityName, version);
-            createEntityModel(token, entityName, version);
+            createEntityModel(ctx, entityName, version);
         }
     }
 
     /** True when the entity model export succeeds; false on a 404. Any other failure is thrown, not relabelled. */
-    private boolean entityModelExists(String token, String entityName, Integer version, String exportPath) {
+    private boolean entityModelExists(CyodaCallContext ctx, String entityName, Integer version, String exportPath) {
         JsonNode response;
         try {
-            response = httpUtils.sendGetRequest(token, this.config.getCyodaApiUrl(), exportPath).join();
+            response = httpUtils.sendGetRequest(ctx, this.config.getCyodaApiUrl(), exportPath).join();
         } catch (Exception ex) {
             if (isNotFound(ex)) {
                 return false;
@@ -392,10 +394,20 @@ public class CyodaInit {
         }
     }
 
+    /** True when the cause chain carries a 404 CyodaHttpException (the model/resource does not exist). */
+    private static boolean isNotFound(Throwable ex) {
+        for (Throwable t = ex; t != null; t = t.getCause()) {
+            if (t instanceof CyodaHttpException che && che.status() == 404) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Creates entity model using sample data, then sets change level to STRUCTURAL and locks the model
      */
-    private void createEntityModel(String token, String entityName, Integer version) {
+    private void createEntityModel(CyodaCallContext ctx, String entityName, Integer version) {
         String importPath = String.format("model/import/JSON/SAMPLE_DATA/%s/%s", entityName, version);
         logger.debug("🔗 Creating entity model at: {}", importPath);
 
@@ -404,18 +416,18 @@ public class CyodaInit {
 
         if (exampleJsonFiles.isEmpty()) {
             logger.debug("No example JSON files found for entity: {}, using empty object", entityName);
-            sendEntityModelRequest(token, importPath, "{}", entityName, version);
+            sendEntityModelRequest(ctx, importPath, "{}", entityName, version);
         } else {
             logger.info("Found {} example JSON file(s) for entity: {}", exampleJsonFiles.size(), entityName);
             for (int i = 0; i < exampleJsonFiles.size(); i++) {
                 String jsonContent = exampleJsonFiles.get(i);
                 logger.debug("Sending example {} of {} for entity: {}", i + 1, exampleJsonFiles.size(), entityName);
-                sendEntityModelRequest(token, importPath, jsonContent, entityName, version);
+                sendEntityModelRequest(ctx, importPath, jsonContent, entityName, version);
             }
         }
 
-        setChangeLevel(token, entityName, version);
-        lockModel(token, entityName, version);
+        setChangeLevel(ctx, entityName, version);
+        lockModel(ctx, entityName, version);
     }
 
     /**
@@ -485,8 +497,8 @@ public class CyodaInit {
     /**
      * Send a single entity model creation request
      */
-    private void sendEntityModelRequest(String token, String importPath, String requestBody, String entityName, Integer version) {
-        JsonNode response = httpUtils.sendPostRequest(token, config.getCyodaApiUrl(), importPath, requestBody).join();
+    private void sendEntityModelRequest(CyodaCallContext ctx, String importPath, String requestBody, String entityName, Integer version) {
+        JsonNode response = httpUtils.sendPostRequest(ctx, config.getCyodaApiUrl(), importPath, requestBody).join();
         int statusCode = response.get("status").asInt();
 
         if (statusCode >= 200 && statusCode < 300) {
@@ -503,12 +515,12 @@ public class CyodaInit {
     /**
      * Sets the change level to STRUCTURAL for the entity model
      */
-    private void setChangeLevel(String token, String entityName, Integer version) {
+    private void setChangeLevel(CyodaCallContext ctx, String entityName, Integer version) {
         String changeLevel = "STRUCTURAL";
         String changeLevelPath = String.format("model/%s/%s/changeLevel/%s", entityName, version, changeLevel);
         logger.debug("🔗 Setting change level to {} for entity: {} (version: {})", changeLevel, entityName, version);
 
-        JsonNode response = httpUtils.sendPostRequest(token, config.getCyodaApiUrl(), changeLevelPath, null).join();
+        JsonNode response = httpUtils.sendPostRequest(ctx, config.getCyodaApiUrl(), changeLevelPath, null).join();
         int statusCode = response.get("status").asInt();
 
         if (statusCode >= 200 && statusCode < 300) {
@@ -525,11 +537,11 @@ public class CyodaInit {
     /**
      * Locks the entity model
      */
-    private void lockModel(String token, String entityName, Integer version) {
+    private void lockModel(CyodaCallContext ctx, String entityName, Integer version) {
         String lockPath = String.format("model/%s/%s/lock", entityName, version);
         logger.debug("🔗 Locking entity model for: {} (version: {})", entityName, version);
 
-        JsonNode response = httpUtils.sendPutRequest(token, config.getCyodaApiUrl(), lockPath, null).join();
+        JsonNode response = httpUtils.sendPutRequest(ctx, config.getCyodaApiUrl(), lockPath, null).join();
         int statusCode = response.get("status").asInt();
 
         if (statusCode >= 200 && statusCode < 300) {
@@ -546,12 +558,12 @@ public class CyodaInit {
     /**
      * Unlocks the entity model. A model that is already unlocked (409 MODEL_ALREADY_UNLOCKED) is fine.
      */
-    private void unlockModel(String token, String entityName, Integer version) {
+    private void unlockModel(CyodaCallContext ctx, String entityName, Integer version) {
         String unlockPath = String.format("model/%s/%s/unlock", entityName, version);
         logger.debug("🔗 Unlocking entity model for: {} (version: {})", entityName, version);
 
         try {
-            JsonNode response = httpUtils.sendPutRequest(token, config.getCyodaApiUrl(), unlockPath, null).join();
+            JsonNode response = httpUtils.sendPutRequest(ctx, config.getCyodaApiUrl(), unlockPath, null).join();
             int statusCode = response.get("status").asInt();
             if (statusCode < 200 || statusCode >= 300) {
                 String errorMsg = String.format("Failed to unlock entity model for %s (version %s). Status code: %d, body: %s",
@@ -571,10 +583,9 @@ public class CyodaInit {
 
     private static boolean isAlreadyUnlocked(Throwable ex) {
         for (Throwable t = ex; t != null; t = t.getCause()) {
-            if (t instanceof ResponseStatusException rse
-                    && rse.getStatusCode().value() == 409
-                    && rse.getReason() != null
-                    && rse.getReason().contains("MODEL_ALREADY_UNLOCKED")) {
+            if (t instanceof CyodaHttpException che
+                    && che.status() == 409
+                    && "MODEL_ALREADY_UNLOCKED".equals(che.getErrorCode())) {
                 return true;
             }
         }
@@ -584,13 +595,13 @@ public class CyodaInit {
     /**
      * Deletes the entity model if it exists, unlocking it first
      */
-    private void deleteEntityModel(String token, String entityName, Integer version) {
+    private void deleteEntityModel(CyodaCallContext ctx, String entityName, Integer version) {
         // First check if the model exists
         String exportPath = String.format("model/export/SIMPLE_VIEW/%s/%s", entityName, version);
         logger.debug("🔍 Checking if entity model exists before deletion: {}", exportPath);
 
         try {
-            JsonNode checkResponse = httpUtils.sendGetRequest(token, config.getCyodaApiUrl(), exportPath).join();
+            JsonNode checkResponse = httpUtils.sendGetRequest(ctx, config.getCyodaApiUrl(), exportPath).join();
             int checkStatusCode = checkResponse.get("status").asInt();
 
             if (checkStatusCode == 404) {
@@ -603,7 +614,7 @@ public class CyodaInit {
                 // Continue with deletion attempt anyway
             }
         } catch (Exception ex) {
-            if (ex.getMessage() != null && ex.getMessage().contains("404")) {
+            if (isNotFound(ex)) {
                 logger.info("ℹ️  Entity model does not exist for: {} (version: {}), skipping deletion", entityName, version);
                 return;
             }
@@ -617,13 +628,13 @@ public class CyodaInit {
         // that still has entities (409 MODEL_HAS_ENTITIES): the model is never unlocked in that
         // case, so there is nothing to re-lock, but the failure must not be relabelled.
         try {
-            unlockModel(token, entityName, version);
+            unlockModel(ctx, entityName, version);
         } catch (Exception ex) {
             if (isModelHasEntities(ex)) {
                 throw new IllegalStateException(String.format(
                         "Cannot recreate %s v%s: it still has entities (MODEL_HAS_ENTITIES). "
                                 + "Delete its entities first, or run without --recreate-models",
-                        entityName, version));
+                        entityName, version), ex);
             }
             throw ex instanceof RuntimeException re ? re
                     : new RuntimeException("Failed to unlock entity model for " + entityName, ex);
@@ -635,7 +646,7 @@ public class CyodaInit {
 
         JsonNode response;
         try {
-            response = httpUtils.sendDeleteRequest(token, config.getCyodaApiUrl(), deletePath).join();
+            response = httpUtils.sendDeleteRequest(ctx, config.getCyodaApiUrl(), deletePath).join();
         } catch (Exception ex) {
             if (isModelHasEntities(ex)) {
                 // Defensive: cyoda-go's own check for this actually runs on unlock (caught above),
@@ -643,7 +654,7 @@ public class CyodaInit {
                 // refused here anyway (e.g. an entity created concurrently), the model is now
                 // unlocked, so re-lock it best-effort rather than leave it open to schema changes.
                 try {
-                    lockModel(token, entityName, version);
+                    lockModel(ctx, entityName, version);
                 } catch (Exception relockEx) {
                     logger.warn("⚠️  Could not re-lock entity model for {} (version {}) after MODEL_HAS_ENTITIES: {}",
                             entityName, version, relockEx.getMessage());
@@ -651,7 +662,7 @@ public class CyodaInit {
                 throw new IllegalStateException(String.format(
                         "Cannot recreate %s v%s: it still has entities (MODEL_HAS_ENTITIES). "
                                 + "Delete its entities first, or run without --recreate-models",
-                        entityName, version));
+                        entityName, version), ex);
             }
             throw ex instanceof RuntimeException re ? re
                     : new RuntimeException("Failed to delete entity model for " + entityName, ex);
@@ -671,23 +682,12 @@ public class CyodaInit {
         }
     }
 
-    /** True when the cause chain carries a 404 {@link ResponseStatusException}. */
-    private static boolean isNotFound(Throwable ex) {
-        for (Throwable t = ex; t != null; t = t.getCause()) {
-            if (t instanceof ResponseStatusException rse && rse.getStatusCode().value() == 404) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** True when the cause chain carries a 409 {@link ResponseStatusException} with code MODEL_HAS_ENTITIES. */
+    /** True when the cause chain carries a 409 CyodaHttpException with code MODEL_HAS_ENTITIES. */
     private static boolean isModelHasEntities(Throwable ex) {
         for (Throwable t = ex; t != null; t = t.getCause()) {
-            if (t instanceof ResponseStatusException rse
-                    && rse.getStatusCode().value() == 409
-                    && rse.getReason() != null
-                    && rse.getReason().contains("MODEL_HAS_ENTITIES")) {
+            if (t instanceof CyodaHttpException che
+                    && che.status() == 409
+                    && "MODEL_HAS_ENTITIES".equals(che.getErrorCode())) {
                 return true;
             }
         }

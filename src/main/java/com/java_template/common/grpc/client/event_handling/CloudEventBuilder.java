@@ -26,11 +26,11 @@ public class CloudEventBuilder {
     private final Config config;
 
     public CloudEventBuilder(
-            final CyodaObjectMapper wireMapper,
+            final CyodaObjectMapper mappers,
             final EventFormat eventFormat,
             final Config config
     ) {
-        this.objectMapper = wireMapper.mapper();
+        this.objectMapper = mappers.protocol();
         this.eventFormat = eventFormat;
         this.config = config;
     }

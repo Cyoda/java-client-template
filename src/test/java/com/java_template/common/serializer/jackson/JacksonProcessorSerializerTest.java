@@ -31,8 +31,8 @@ class JacksonProcessorSerializerTest {
 
     @BeforeEach
     void setUp() {
-        // The framework's wire mapper settings (JavaTimeModule for the OffsetDateTime event fields,
-        // RFC 3339 text dates, blank processor type handler), as CyodaObjectMapper applies them.
+        // The protocol mapper's settings (JavaTimeModule for the OffsetDateTime event fields, RFC 3339 text
+        // dates, blank processor type handler), used here for the test's own DTOs and as the entity mapper.
         objectMapper = CyodaJackson.configure(new ObjectMapper());
         serializer = new JacksonProcessorSerializer(objectMapper);
     }

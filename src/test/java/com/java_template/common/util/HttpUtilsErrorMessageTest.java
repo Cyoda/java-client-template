@@ -1,12 +1,14 @@
 package com.java_template.common.util;
 
+import com.java_template.common.auth.CyodaTokenSource;
+import com.java_template.common.call.CyodaCallContext;
 import com.java_template.common.config.Config;
 import com.java_template.common.config.CyodaObjectMapper;
+import com.java_template.common.exception.CyodaHttpException;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -15,8 +17,9 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
-/** The reason of the ResponseStatusException HttpUtils throws for a failed response. */
+/** The status, error code and message of the CyodaHttpException HttpUtils throws for a failed response. */
 class HttpUtilsErrorMessageTest {
 
     private HttpServer server;
@@ -38,7 +41,7 @@ class HttpUtilsErrorMessageTest {
         server.start();
         baseUrl = "http://127.0.0.1:" + server.getAddress().getPort() + "/api";
         CyodaObjectMapper mapper = CyodaObjectMapper.standalone();
-        httpUtils = new HttpUtils(new JsonUtils(mapper), mapper, new Config());
+        httpUtils = new HttpUtils(new JsonUtils(mapper), mapper, new Config(), mock(CyodaTokenSource.class));
     }
 
     @AfterEach
@@ -47,26 +50,35 @@ class HttpUtilsErrorMessageTest {
     }
 
     @Test
-    void cyodaErrorCodePrefixesTheDetail() {
+    void cyodaErrorCodeIsReadFromTheProblemDetail() {
         body.set("{\"type\":\"about:blank\",\"title\":\"Conflict\",\"status\":409,"
                 + "\"detail\":\"cannot unlock: 1 entities exist\","
                 + "\"properties\":{\"errorCode\":\"MODEL_HAS_ENTITIES\",\"entityCount\":1}}");
 
-        assertThatThrownBy(() -> httpUtils.sendPutRequest(null, baseUrl, "model/X/1/unlock", null).join())
+        assertThatThrownBy(() -> httpUtils.sendPutRequest(CyodaCallContext.none(), baseUrl, "model/X/1/unlock", null).join())
                 .isInstanceOf(CompletionException.class)
                 .cause()
-                .isInstanceOf(ResponseStatusException.class)
-                .satisfies(e -> assertThat(((ResponseStatusException) e).getReason())
-                        .isEqualTo("MODEL_HAS_ENTITIES: cannot unlock: 1 entities exist"));
+                .isInstanceOf(CyodaHttpException.class)
+                .satisfies(e -> {
+                    CyodaHttpException che = (CyodaHttpException) e;
+                    assertThat(che.status()).isEqualTo(409);
+                    assertThat(che.getErrorCode()).isEqualTo("MODEL_HAS_ENTITIES");
+                    assertThat(che.getMessage()).contains("cannot unlock: 1 entities exist");
+                });
     }
 
     @Test
-    void withoutAnErrorCodeTheDetailIsTheReason() {
+    void withoutAnErrorCodeTheDetailIsTheMessage() {
         body.set("{\"status\":409,\"detail\":\"some conflict\"}");
 
-        assertThatThrownBy(() -> httpUtils.sendGetRequest(null, baseUrl, "x").join())
+        assertThatThrownBy(() -> httpUtils.sendGetRequest(CyodaCallContext.none(), baseUrl, "x").join())
                 .cause()
-                .isInstanceOf(ResponseStatusException.class)
-                .satisfies(e -> assertThat(((ResponseStatusException) e).getReason()).isEqualTo("some conflict"));
+                .isInstanceOf(CyodaHttpException.class)
+                .satisfies(e -> {
+                    CyodaHttpException che = (CyodaHttpException) e;
+                    assertThat(che.status()).isEqualTo(409);
+                    assertThat(che.getErrorCode()).isEqualTo("HTTP_409");
+                    assertThat(che.getMessage()).contains("some conflict");
+                });
     }
 }

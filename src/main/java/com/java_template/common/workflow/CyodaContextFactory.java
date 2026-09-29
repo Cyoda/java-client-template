@@ -28,8 +28,8 @@ public class CyodaContextFactory {
     private final ObjectMapper objectMapper;
     private final Set<String> warnedUnknownAuthTypes = ConcurrentHashMap.newKeySet();
 
-    public CyodaContextFactory(CyodaObjectMapper wireMapper) {
-        this.objectMapper = wireMapper.mapper();
+    public CyodaContextFactory(CyodaObjectMapper mappers) {
+        this.objectMapper = mappers.protocol();
     }
 
     public <T extends BaseEvent> CyodaEventContext<T> createCyodaEventContext(
