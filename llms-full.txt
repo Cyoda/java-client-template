@@ -175,7 +175,7 @@ the install script: use `-Dcyoda.bin` / `CYODA_BIN` there, or `-x integrationTes
 After adding or bumping a dependency, regenerate the checksums with one command (details in `CONTRIBUTING.md`):
 
 ```bash
-./gradlew --no-daemon --write-verification-metadata sha256 build integrationTest jacocoTestReport bootJarWorkflowImport printOtelAgentPath resolveProtocNatives
+GRADLE_USER_HOME="$(mktemp -d)" ./gradlew --no-daemon --write-verification-metadata sha256 build integrationTest jacocoTestReport bootJarWorkflowImport printOtelAgentPath resolveProtocNatives
 ```
 
 ---

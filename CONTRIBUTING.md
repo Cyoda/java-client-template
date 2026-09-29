@@ -122,8 +122,11 @@ Gradle verifies the SHA-256 of every dependency, plugin and tool it downloads ag
 failed" until its checksums are recorded. After a dependency or plugin bump, regenerate both files with one command:
 
 ```bash
-./gradlew --no-daemon --write-verification-metadata sha256 build integrationTest jacocoTestReport bootJarWorkflowImport printOtelAgentPath resolveProtocNatives
+GRADLE_USER_HOME="$(mktemp -d)" ./gradlew --no-daemon --write-verification-metadata sha256 build integrationTest jacocoTestReport bootJarWorkflowImport printOtelAgentPath resolveProtocNatives
 ```
+
+Run it with an empty `GRADLE_USER_HOME`, as above: with a warm cache Gradle can skip downloading parent POMs that
+a fresh CI runner does fetch, and those would then be missing from the file.
 
 It runs the build, the integration tests and every task CI runs, so every configuration they resolve is recorded,
 including `buildSrc`, the protoc and gRPC plugin binaries for every platform (`resolveProtocNatives`), the OTel agent
